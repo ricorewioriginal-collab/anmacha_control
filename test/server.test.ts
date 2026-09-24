@@ -208,8 +208,10 @@ test('Studio wird ausgeliefert, Pfad-Traversal blockiert', async () => {
 });
 
 test('Persistenz: Neustart stellt Konfiguration ohne aktive Quellen wieder her', async () => {
+  await api('PUT', '/api/v1/stations/main/lautfm', { stationName: 'meinradio' });
   app.shutdown();
   const again = new AirDeckApp(dir, { stableMs: 0 });
+  assert.equal(again.lautfmConfig('main').stationName, 'meinradio', 'laut.fm-Einstellungen überleben den Neustart');
   const list = again.engine.list('main');
   assert.equal(list.length, 4);
   assert.ok(list.every((s) => s.state === 'disconnected'));

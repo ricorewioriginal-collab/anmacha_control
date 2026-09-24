@@ -406,6 +406,8 @@ export class AirDeckApp {
 
   private mountStation(station: Station, data?: StationData): StationRuntime {
     const d: StationData = {
+      // unbekannte/optionale Felder (laut.fm, Integrationen, KI …) bleiben beim Neustart erhalten
+      ...data,
       library: data?.library ?? [],
       queue: data?.queue ?? [],
       cardwall: data?.cardwall ?? defaultCardwall(),
