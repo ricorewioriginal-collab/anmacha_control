@@ -5,7 +5,7 @@ AirDeck läuft ohne AnMaCha. AnMaCha und laut.fm sind höchstens optionale Adapt
 
 **Stand 0.3:** Core, Server, Studio, 24/7-Server-Playout, Planung (Zeitplan, Stunden-Uhr, Sendeplan, Playlists), Recorder, laut.fm Radioadmin, Windows-Installer und Android-App.
 Der Abgleich mit dem AnMaCha-Dashboard steht in [`docs/FEATURE_PARITY.md`](docs/FEATURE_PARITY.md).
-Die Roadmap steht in [`docs/CLAUDE_PROGRESS.md`](docs/CLAUDE_PROGRESS.md).
+Die Roadmap steht in [`AIRDECK_PROGRESS.md`](AIRDECK_PROGRESS.md).
 
 **Installieren und testen:** siehe [`docs/INSTALLATION.md`](docs/INSTALLATION.md). Dort steht auch die Variante ohne Installation.
 
