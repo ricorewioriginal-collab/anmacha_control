@@ -60,7 +60,7 @@ export async function run(fn) {
 
 /**
  * @param {string} title
- * @param {Array<{name:string,label:string,type?:string,value?:any,options?:Array<[string,string]>,hint?:string,required?:boolean}>} fields
+ * @param {Array<{name:string,label:string,type?:string,value?:any,options?:Array<[string,string]>,hint?:string,required?:boolean,suggest?:string[]}>} fields
  * @param {string} [submitLabel]
  * @returns {Promise<Record<string, any>|null>}
  */
@@ -86,7 +86,8 @@ export function formDialog(title, fields, submitLabel = 'Speichern') {
     } else if (f.type === 'checkbox') {
       input = h('input', { id, name: f.name, type: 'checkbox', checked: !!f.value });
     } else {
-      input = h('input', { id, name: f.name, type: f.type ?? 'text', value: f.value ?? '', required: !!f.required, autocomplete: 'off' });
+      input = h('input', { id, name: f.name, type: f.type ?? 'text', value: f.value ?? '', required: !!f.required, autocomplete: 'off', ...(f.suggest?.length ? { list: `${id}-list` } : {}) });
+      if (f.suggest?.length) input = h('div', { class: 'with-list' }, input, h('datalist', { id: `${id}-list` }, ...f.suggest.map((x) => h('option', { value: x }))));
     }
     form.append(h('div', { class: 'field' }, h('label', { for: id }, f.label), input, f.hint ? h('small', {}, f.hint) : null));
   }

@@ -7,6 +7,7 @@ import { AudioEngine, DECKS, SilenceDetector, openMic, recordStream } from './au
 import { $, CATEGORY_STYLE, clockTime, download, fmt, formDialog, h, hydrateIcons, icon, mediaTitle, run, status } from './ui.js';
 import { mountPlanning, mountRecorder } from './planning.js';
 import { mountLautfm } from './lautfm.js';
+import { mountAi } from './ai.js';
 import { mountUpdates } from './updates.js';
 import { JUMP_TO_WIN, mountLayout } from './layout.js';
 
@@ -136,11 +137,12 @@ async function loadStation() {
   renderAll();
   es?.close();
   es = api.events(S.station.id, onEvent, (ok) => $('conn').classList.toggle('ok', ok));
-  const ctx = { api, url, library: () => S.library, folders: () => api.get(url('/folders')) };
+  const ctx = { api, url, library: () => S.library, folders: () => api.get(url('/folders')), mediaUrl: (/** @type {string} */ id) => api.mediaUrl(S.station.id, id) };
   views = {
     planning: mountPlanning($('view-planning'), ctx),
     recorder: mountRecorder($('view-recorder'), ctx),
     lautfm: mountLautfm($('view-lautfm'), ctx),
+    ai: mountAi($('view-ai'), ctx),
   };
   if (currentView !== 'studio') views[currentView]?.show();
 }
@@ -214,6 +216,10 @@ function onEvent(type, data) {
       if (o) { o.state = data; renderOutputs(); }
       break;
     }
+    case 'ai.decision':
+    case 'ai.pending':
+      if (type === 'ai.decision' && !data.ok) status(`KI: ${data.detail}`, true);
+      break;
     case 'station.changed': S.station = data; S.stations = S.stations.map((/** @type {any} */ s) => (s.id === data.id ? data : s)); applyBranding(); renderStationSelect(); break;
     case 'source.takeover_completed': status(`Übernahme: ${sourceName(data.sourceId)} ist auf Sendung (Priority ${data.data?.priority ?? '?'})`); break;
     case 'source.takeover_rejected': status(`Übernahme abgelehnt: ${data.data?.reason ?? ''}`, true); break;
@@ -1121,7 +1127,7 @@ function bindStatic() {
   // Tastatur: Alt+1…4 wechselt die Bereiche
   addEventListener('keydown', (e) => {
     if (!e.altKey || e.ctrlKey || e.metaKey) return;
-    const v = ({ 1: 'studio', 2: 'planning', 3: 'recorder', 4: 'lautfm' })[/** @type {1|2|3|4} */ (Number(e.key))];
+    const v = ({ 1: 'studio', 2: 'planning', 3: 'recorder', 4: 'lautfm', 5: 'ai' })[/** @type {1|2|3|4|5} */ (Number(e.key))];
     if (v) {
       e.preventDefault();
       showView(v);
@@ -1306,7 +1312,7 @@ function showView(name) {
   currentView = name;
   for (const b of document.querySelectorAll('#view-tabs button, #bottom-nav button')) b.setAttribute('aria-pressed', String(/** @type {HTMLElement} */ (b).dataset.view === name));
   $('sidebar').classList.remove('open');
-  for (const id of ['studio', 'planning', 'recorder', 'lautfm']) $(`view-${id}`).hidden = id !== name;
+  for (const id of ['studio', 'planning', 'recorder', 'lautfm', 'ai']) $(`view-${id}`).hidden = id !== name;
   if (name !== 'studio') views[name]?.show();
 }
 

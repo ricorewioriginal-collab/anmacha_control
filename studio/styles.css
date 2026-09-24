@@ -404,3 +404,8 @@ tr.active-row td { background: rgba(34,197,94,.08); }
 
 .station-logo.has-img { background: #0b1628; padding: 0; overflow: hidden; }
 .station-logo img { width: 100%; height: 100%; object-fit: cover; }
+
+.ai-pending { border: 1px solid var(--line); border-radius: 9px; padding: 8px 10px; margin-bottom: 8px; background: rgba(139, 92, 246, .06); }
+.ai-pending p { margin: 6px 0; }
+.list td.err { color: #ff8a9b; }
+.with-list { display: contents; }
