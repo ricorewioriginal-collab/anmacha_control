@@ -256,8 +256,11 @@ jobs:
           prerelease: true
           make_latest: false
           body: |
-            Automatisch gebaut aus ${{ github.sha }}.
-            • AirDeck-Setup.exe – Windows-Installer (ohne Adminrechte)
+            Automatisch gebaut und getestet aus ${{ github.sha }}.
+            • AirDeck-Setup.exe – Windows-Installer (ohne Adminrechte, Deutsch/English, mit Audio-Engine und Android-APK)
             • AirDeck-Windows-Portable.zip – ohne Installation: entpacken, AirDeck.exe starten
-            • AirDeck-Android.apk – Android-App (verbindet sich mit AirDeck auf dem PC/Server)
+            • AirDeck-Android.apk – Android-App (Touch-Studio, MIC LIVE; verbindet sich mit AirDeck auf PC/Server)
+            • Server: docker compose up -d (siehe docs/DOCKER.md)
+
+            Powered by AnMaCha Radioproduktion & RicoReWi – für Broadcast, Automation, Live und laut.fm. Hobbyprojekt, ohne Gewähr.
           files: out/*
