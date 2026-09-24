@@ -124,3 +124,34 @@ jobs:
           name: AirDeck-Android
           path: apps/android/android/app/build/outputs/apk/debug/app-debug.apk
           retention-days: 30
+
+  # Download-Bereich: Nach jedem Push auf den Hauptbranch liegen Installer, portable Version und APK
+  # unter „Releases → AirDeck (aktueller Stand)“, ohne GitHub-Login-Umweg über Artefakte.
+  release:
+    if: github.event_name == 'push' && github.ref_name == github.event.repository.default_branch
+    needs: [windows, android]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { path: artifacts }
+      - name: Dateien vorbereiten
+        run: |
+          mkdir -p out
+          cp artifacts/AirDeck-Windows-Installer/*.exe out/AirDeck-Setup.exe
+          mv artifacts/AirDeck-Windows artifacts/AirDeck && (cd artifacts && zip -qr ../out/AirDeck-Windows-Portable.zip AirDeck)
+          cp artifacts/AirDeck-Android/app-debug.apk out/AirDeck-Android.apk
+          ls -la out
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: nightly
+          name: AirDeck – aktueller Stand
+          prerelease: true
+          make_latest: false
+          body: |
+            Automatisch gebaut aus ${{ github.sha }}.
+            • AirDeck-Setup.exe – Windows-Installer (ohne Adminrechte)
+            • AirDeck-Windows-Portable.zip – ohne Installation: entpacken, AirDeck.exe starten
+            • AirDeck-Android.apk – Android-App (verbindet sich mit AirDeck auf dem PC/Server)
+          files: out/*

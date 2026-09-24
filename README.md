@@ -7,6 +7,8 @@ AirDeck läuft ohne AnMaCha. AnMaCha und laut.fm sind höchstens optionale Adapt
 Der Abgleich mit dem AnMaCha-Dashboard steht in [`docs/FEATURE_PARITY.md`](docs/FEATURE_PARITY.md).
 Die Roadmap steht in [`docs/CLAUDE_PROGRESS.md`](docs/CLAUDE_PROGRESS.md).
 
+**Installieren und testen:** siehe [`docs/INSTALLATION.md`](docs/INSTALLATION.md). Dort steht auch die Variante ohne Installation.
+
 ## Plattformen
 
 | Plattform | Was | Wie |
