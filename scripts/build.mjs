@@ -70,7 +70,7 @@ if (sea) {
     await (typeof rc === 'function' ? rc : rc.rcedit)(exe, {
       icon: join(root, 'assets', 'icons', 'airdeck-windows.ico'),
       'file-version': version, 'product-version': version,
-      'version-string': { ProductName: 'AirDeck', FileDescription: 'AirDeck Radio Automation', CompanyName: 'AirDeck', LegalCopyright: 'AirDeck – powered by AnMaCha', OriginalFilename: 'AirDeck.exe' },
+      'version-string': { ProductName: 'AirDeck', FileDescription: 'AirDeck Radio Automation', CompanyName: 'AnMaCha Radioproduktion & RicoReWi', LegalCopyright: 'AirDeck – Powered by AnMaCha Radioproduktion & RicoReWi – für Broadcast, Automation, Live und laut.fm', OriginalFilename: 'AirDeck.exe' },
     });
     console.log('✓ Icon & Versionsinfo gesetzt');
   }

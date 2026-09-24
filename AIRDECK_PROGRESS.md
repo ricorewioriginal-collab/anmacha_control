@@ -1,7 +1,6 @@
 # Fortschritt
 
 - **Aktuelle Phase:** Phase 3, AirDeck Standalone. Auf Wunsch des Nutzers wird sie vorgezogen: Die AnMaCha-Control-Center-Erweiterung ist PHP und noch nicht in Git, sie wird später angebunden.
-- **Branch:** `claude/bestehendes-projekt-fortsetzen-daf00s`
 - **Tests:** `npm run check` → Typprüfung (Server und Studio) plus 40 Tests, alle grün (inkl. Playout-Integrationstest mit echtem ffmpeg). Zusätzlich lief ein manueller Browsertest mit Chromium (Automation, Crossfade, Stream-Übernahme, Drag & Drop, Handy-Layout) ohne Konsolenfehler.
 
 ## Erledigt (0.1)

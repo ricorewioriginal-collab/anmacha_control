@@ -6,7 +6,7 @@ AirDeck kann einen Sender auf Wunsch vollständig von KI moderieren und musikali
 
 | Aufgabe | Anbieter | Hinweise |
 |---|---|---|
-| Text | OpenAI, Anthropic (Claude), Google Gemini | eigener API-Key |
+| Text | OpenAI, Anthropic, Google Gemini | eigener API-Key |
 | Text | OpenAI-kompatibel | Ollama `http://localhost:11434/v1`, LM Studio `http://localhost:1234/v1`, eigene Proxys; lokal ohne Key |
 | Sprache | OpenAI TTS, ElevenLabs | eigener API-Key |
 | Sprache | OpenAI-kompatibel | z. B. Kokoro-FastAPI `http://localhost:8880/v1` |

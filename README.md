@@ -19,7 +19,7 @@ Die Roadmap steht in [`AIRDECK_PROGRESS.md`](AIRDECK_PROGRESS.md).
 
 > **Hobbyprojekt:** Nutzung auf eigene Verantwortung, siehe [Haftungsausschluss](HAFTUNGSAUSSCHLUSS.md).
 > **Mitmachen:** Webentwickler dürfen eigene Features einbauen, siehe [CONTRIBUTING.md](CONTRIBUTING.md).
-> Powered by AnMaCha · Unter Entwicklung von RicoReWi
+> Powered by AnMaCha Radioproduktion & RicoReWi – für Broadcast, Automation, Live und laut.fm
 
 ## Plattformen
 

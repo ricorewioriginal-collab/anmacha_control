@@ -6,7 +6,7 @@ import { clockTime, formDialog, h, run, status } from './ui.js';
 
 const TABS = /** @type {const} */ ([['director', 'Director'], ['providers', 'Anbieter & Keys'], ['costs', 'Kosten & Budget'], ['tools', 'Werkzeuge']]);
 const KIND_LABEL = /** @type {Record<string,string>} */ ({
-  openai: 'OpenAI', anthropic: 'Anthropic (Claude)', google: 'Google Gemini', openai_compat: 'OpenAI-kompatibel (Ollama, LM Studio, Kokoro …)',
+  openai: 'OpenAI', anthropic: 'Anthropic', google: 'Google Gemini', openai_compat: 'OpenAI-kompatibel (Ollama, LM Studio, Kokoro …)',
   elevenlabs: 'ElevenLabs', piper: 'Piper (lokal, offline)',
 });
 const DECISION = /** @type {Record<string,string>} */ ({ break: 'Moderation', news: 'Nachrichten', music: 'Musikplanung', approved: 'Freigegeben', rejected: 'Verworfen', source: 'Quelle' });

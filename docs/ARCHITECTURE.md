@@ -23,7 +23,7 @@ Die UI sendet nur Commands an Domain-Services. Der Relay-Kern hängt nie direkt 
 1. **TypeScript ohne Build, ohne Laufzeit-Abhängigkeiten.** Node ≥ 22.18 führt `.ts` direkt aus (Type Stripping). Der Code nutzt deshalb nur „erasable syntax“, also keine Enums und keine Parameter-Properties. Das spart Ressourcen und Angriffsfläche.
 2. **Core ist rein.** `src/core` enthält kein I/O. Dieselbe Logik soll später in Windows- und Android-Shells laufen.
 3. **Priorität ≠ Berechtigung.** Jede Übernahme prüft Rolle, Sender, Sperre, Health und Policy. Bei gleicher Priorität bleibt die sendende Quelle, damit das Verhalten deterministisch ist.
-4. **Abweichung zu laut.fm, bewusst gewählt.** Bei laut.fm wird die verdrängte Quelle getrennt. AirDeck hält sie verbunden im *Standby*, damit der Fallback ohne Neuverbindung sofort greift. Nach außen, etwa zu laut.fm, wird nur `?prio=` gesetzt. Mehr ist dort nicht belegt (siehe `handover/10_REFERENCE/SOURCE_PRIORITY_NOTES.md`).
+4. **Abweichung zu laut.fm, bewusst gewählt.** Bei laut.fm wird die verdrängte Quelle getrennt. AirDeck hält sie verbunden im *Standby*, damit der Fallback ohne Neuverbindung sofort greift. Nach außen, etwa zu laut.fm, wird nur `?prio=` gesetzt. Mehr ist dort nicht belegt.
 5. **Nach einem Neustart sind alle Quellen getrennt.** Sie müssen sich neu verbinden. So entstehen nie zwei konkurrierende aktive Quellen.
 6. **Anti-Flapping.** Eine Quelle muss 2 s stabil verbunden sein, bevor sie automatisch übernimmt (`stableMs`). Ist gar keine Quelle aktiv, geht sie sofort auf Sendung.
 7. **Formatwechsel beim Takeover.** Ausgänge verbinden sich mit dem Content-Type der neuen Quelle neu. Bei WebM/Ogg wird der Container-Header (erster Chunk) zuerst gesendet. Mithörer werden bei einem Formatwechsel getrennt.

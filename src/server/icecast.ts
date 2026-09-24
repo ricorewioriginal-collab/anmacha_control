@@ -1,6 +1,6 @@
 // Broadcast Adapter: Icecast-kompatibler Source-Client (HTTP PUT, Icecast >= 2.4).
 // Optionaler "?prio=<n>"-Parameter für Server, die Source Priority per Query unterstützen
-// (z. B. laut.fm laut Forum-Ankündigung – siehe docs/handover/10_REFERENCE/SOURCE_PRIORITY_NOTES.md).
+// (z. B. laut.fm laut Forum-Ankündigung).
 
 import { request as httpRequest, type ClientRequest } from 'node:http';
 import { request as httpsRequest } from 'node:https';
