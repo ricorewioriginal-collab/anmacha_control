@@ -207,7 +207,7 @@ dialog h3 { margin: 0 0 12px; font-size: 15px; }
 .po-actions { display: flex; gap: 6px; flex-wrap: wrap; }
 .pill.running { background: var(--green); color: #03140a; }
 .pill.restarting { background: rgba(245,158,11,.2); color: #fcd34d; }
-#btn-mic[aria-pressed="true"] { background: var(--red); border-color: var(--red); color: #fff; }
+#btn-mic[aria-pressed="true"], #po-mic[aria-pressed="true"] { background: var(--red); border-color: var(--red); color: #fff; }
 button:disabled { opacity: .45; cursor: not-allowed; }
 
 /* Bereiche */

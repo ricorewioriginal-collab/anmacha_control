@@ -42,7 +42,7 @@ jobs:
             $bin = Get-ChildItem "$env:RUNNER_TEMP/ff-$variant" -Recurse -Filter ffmpeg.exe | Select-Object -First 1
             $enc = & $bin.FullName -hide_banner -encoders
             if (($enc | Select-String 'libmp3lame') -and ($enc | Select-String 'libopus')) {
-              Copy-Item $bin.FullName, (Join-Path $bin.DirectoryName 'ffprobe.exe') $dest
+              Copy-Item $bin.FullName, (Join-Path $bin.DirectoryName 'ffprobe.exe'), (Join-Path $bin.DirectoryName 'ffplay.exe') $dest
               Get-ChildItem (Split-Path $bin.DirectoryName) -Filter 'LICENSE*' | Copy-Item -Destination $dest
               "ffmpeg-Build: BtbN/FFmpeg-Builds ($variant), https://github.com/BtbN/FFmpeg-Builds" | Out-File "$dest/QUELLE.txt"
               Write-Host "ffmpeg ($variant) beigelegt"

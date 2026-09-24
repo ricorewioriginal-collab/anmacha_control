@@ -379,23 +379,38 @@ function renderPlayout() {
   /** @type {HTMLButtonElement} */ ($('po-start')).disabled = !p?.supported || !!st?.running;
   /** @type {HTMLButtonElement} */ ($('po-stop')).disabled = !st?.running;
   /** @type {HTMLButtonElement} */ ($('po-skip')).disabled = !st?.running;
+  const mic = /** @type {HTMLButtonElement} */ ($('po-mic'));
+  mic.hidden = !st?.running || st.input === 'off';
+  mic.disabled = st?.input !== 'running';
+  mic.setAttribute('aria-pressed', String(!!st?.micOn));
+  mic.textContent = st?.input === 'error' ? 'Mikro-Fehler' : st?.micOn ? '🎙 ON AIR' : '🎙 Mikro';
   $('btn-auto').toggleAttribute('disabled', !!st?.running && !S.auto);
 }
 
 async function editPlayout() {
   const c = S.playout?.config ?? {};
   const enc = S.playout?.ffmpeg?.encoders ?? { mp3: true, opus: true };
+  const dev = /** @type {any} */ (await run(() => api.get('/audio-devices'))) ?? { devices: [], eqBands: [] };
+  const eq = c.dsp?.eq ?? [];
   const v = await formDialog('Server-Automation 24/7', [
-    { name: 'format', label: 'Format', value: c.format ?? 'mp3', options: [['mp3', `MP3${enc.mp3 ? '' : ' (nicht verfügbar)'}`], ['opus', `Ogg/Opus${enc.opus ? '' : ' (nicht verfügbar)'}`]] },
+    { name: 'format', label: 'Format', value: c.format ?? 'mp3', options: [['mp3', `MP3${enc.mp3 ? '' : ' (nicht verfügbar)'}`], ['aac', 'AAC (ADTS)'], ['opus', `Ogg/Opus${enc.opus ? '' : ' (nicht verfügbar)'}`]] },
     { name: 'bitrateKbps', label: 'Bitrate (kbit/s)', type: 'number', value: c.bitrateKbps ?? 128 },
     { name: 'crossfadeMs', label: 'Überblendung Musik (ms)', type: 'number', value: c.crossfadeMs ?? 3000 },
+    { name: 'fadeInMs', label: 'Einblenden neuer Titel (ms)', type: 'number', value: c.fadeInMs ?? 0 },
+    { name: 'monitor', label: `Programm über die Lautsprecher dieses PCs mithören${dev.monitor ? '' : ' (ffplay fehlt)'}`, type: 'checkbox', value: !!c.monitor },
+    { name: 'inputDevice', label: 'Mikrofon / Line-In (am PC)', value: c.inputDevice ?? '', options: [['', '– kein Eingang –'], ...(dev.devices ?? []).map((/** @type {any} */ d) => /** @type {[string,string]} */ ([d.id, d.name]))] },
+    { name: 'micGainDb', label: 'Mikrofon-Pegel (dB)', type: 'number', value: c.micGainDb ?? 0 },
+    ...(dev.eqBands ?? []).map((/** @type {number} */ f, /** @type {number} */ i) => ({ name: `eq${i}`, label: `EQ ${f >= 1000 ? f / 1000 + ' kHz' : f + ' Hz'} (dB, −12…+12)`, type: 'number', value: eq[i] ?? 0 })),
+    { name: 'compressor', label: 'Kompressor', type: 'checkbox', value: !!c.dsp?.compressor },
+    { name: 'limiter', label: 'Limiter', type: 'checkbox', value: c.dsp?.limiter ?? true },
     { name: 'duckDb', label: 'Ducking bei Carts (dB)', type: 'number', value: c.duckDb ?? -10 },
     { name: 'silenceMs', label: 'Stille-Alarm nach (ms)', type: 'number', value: c.silenceMs ?? 10000 },
     { name: 'sourceId', label: 'Sendet als Quelle', value: c.sourceId ?? '', options: [['', 'Automation (Standard)'], ...S.sources.map((s) => /** @type {[string,string]} */ ([s.id, `P${s.priority} · ${s.name}`]))] },
     { name: 'autostart', label: 'Nach Neustart automatisch senden', type: 'checkbox', value: c.autostart ?? true },
   ]);
   if (!v) return;
-  const saved = await run(() => api.patch(url('/playout'), v));
+  const body = { ...v, dsp: { eq: (dev.eqBands ?? []).map((/** @type {number} */ _, /** @type {number} */ i) => v[`eq${i}`] ?? 0), compressor: v.compressor, limiter: v.limiter } };
+  const saved = await run(() => api.patch(url('/playout'), body));
   if (!saved) return;
   S.playout = saved;
   // Laufendes Playout mit neuen Einstellungen neu starten (kurzer Fallback auf nächste Quelle)
@@ -744,7 +759,8 @@ function renderOutputs() {
     h('button', { class: 'btn small', onclick: () => editOutput(o) }, '⋯'),
     h('span', { class: 'out-meta' },
       `${o.type} · ${o.host}:${o.port}${o.mount}${o.priority ? `?prio=${o.priority}` : ''}` +
-      (o.state?.error ? ` · ${o.state.error}` : o.state?.bytesSent ? ` · ${(o.state.bytesSent / 1048576).toFixed(1)} MB` : '')),
+      (o.state?.error ? ` · ${o.state.error}` : o.state?.bytesSent ? ` · ${(o.state.bytesSent / 1048576).toFixed(1)} MB` : '') +
+      (typeof o.state?.listeners === 'number' ? ` · 👂 ${o.state.listeners}` : '')),
   )) : [h('li', { class: 'muted' }, 'Kein Ausgang – ＋ für Icecast/laut.fm')]));
 }
 
@@ -753,12 +769,14 @@ async function editOutput(o) {
   const isNew = !o;
   const v = await formDialog(isNew ? 'Ausgang anlegen' : `Ausgang: ${o.name}`, [
     { name: 'name', label: 'Name', value: o?.name ?? 'Hauptstream', required: true },
-    { name: 'type', label: 'Typ', value: o?.type ?? 'icecast', options: [['icecast', 'Icecast (HTTP PUT)'], ['shoutcast', 'SHOUTcast (noch nicht unterstützt)']] },
+    { name: 'type', label: 'Typ', value: o?.type ?? 'icecast', options: [['icecast', 'Icecast (HTTP PUT)'], ['shoutcast', 'SHOUTcast v1/v2 (nur MP3/AAC)']] },
     { name: 'host', label: 'Host', value: o?.host ?? '', required: true },
     { name: 'port', label: 'Port', type: 'number', value: o?.port ?? 8000 },
     { name: 'mount', label: 'Mountpoint', value: o?.mount ?? '/stream' },
     { name: 'username', label: 'Benutzer', value: o?.username ?? 'source' },
     { name: 'password', label: isNew ? 'Passwort' : 'Passwort (leer = unverändert)', type: 'password', value: '' },
+    { name: 'streamId', label: 'SHOUTcast v2: Stream-ID (leer = v1)', type: 'number', value: o?.streamId ?? '' },
+    { name: 'bitrateKbps', label: 'Angezeigte Bitrate (kbit/s)', type: 'number', value: o?.bitrateKbps ?? '' },
     { name: 'priority', label: 'Priority-Parameter (optional)', type: 'number', value: o?.priority ?? '', hint: 'Hängt ?prio=<n> an den Mountpoint an (z. B. laut.fm). Leer = aus.' },
     { name: 'tls', label: 'TLS (https)', type: 'checkbox', value: !!o?.tls },
     { name: 'enabled', label: 'Aktiv', type: 'checkbox', value: o?.enabled ?? true },
@@ -895,6 +913,8 @@ function bindStatic() {
   });
   $('po-stop').addEventListener('click', () => confirm('Server-Playout stoppen? Der Sender fällt auf die nächste Quelle zurück.') && run(async () => { S.playout = await api.post(url('/playout/stop')); renderPlayout(); }));
   $('po-skip').addEventListener('click', () => run(() => api.post(url('/playout/skip'))));
+  $('po-mic').addEventListener('click', () => run(() => api.post(url('/playout/mic'), { on: !S.playout?.status?.micOn })));
+  $('btn-shuffle').addEventListener('click', () => run(() => api.post(url('/queue/shuffle'))));
   $('po-settings').addEventListener('click', editPlayout);
   $('btn-add-source').addEventListener('click', () => editSource());
   $('btn-add-output').addEventListener('click', () => editOutput());
