@@ -49,7 +49,7 @@ import type { RelayTap } from './relay.ts';
 import { DEFAULT_ORIGIN, ORIGIN_RE, RADIOADMIN, loginUrl, type LautfmConfig } from './lautfm.ts';
 import { SyncManager } from './sync.ts';
 import { DEFAULT_SOURCE, Updater, type UpdateSource } from './update.ts';
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { NOTIFY_EVENTS, Notifier, validateExportPath, validateWebhookUrl, type IntegrationsConfig, type NotifyEvent } from './notify.ts';
 
 export interface Station {
@@ -58,6 +58,8 @@ export interface Station {
   slogan: string;
   primaryColor: string;
   accentColor: string;
+  /** Eigenes Logo: Dateiendung + Version (z. B. "png:lq3x"), Datei liegt in data/logos */
+  logo?: string;
 }
 
 interface StationData {
@@ -475,6 +477,71 @@ export class AirDeckApp {
     this.publish('station.changed', id, s);
     this.changed();
     return s;
+  }
+
+  private static readonly LOGO_TYPES: Record<string, string> = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp', 'image/gif': 'gif' };
+
+  /** Eigenes Senderlogo speichern (PNG/JPG/WebP/GIF, max. 2 MB; SVG bewusst nicht wegen Skripten). */
+  setStationLogo(id: string, contentType: string, data: Buffer): Station {
+    const s = this.rt(id).station;
+    const ext = AirDeckApp.LOGO_TYPES[contentType.split(';')[0]!.trim().toLowerCase()];
+    if (!ext) throw new AppError(415, 'unsupported_media', 'Logo als PNG, JPG, WebP oder GIF hochladen');
+    if (data.length > 2 * 1024 * 1024) throw new AppError(413, 'too_large', 'Logo höchstens 2 MB');
+    // Signatur prüfen statt dem angegebenen Typ blind zu vertrauen
+    const sig = data.subarray(0, 12);
+    const ok = { png: sig[0] === 0x89 && sig[1] === 0x50, jpg: sig[0] === 0xff && sig[1] === 0xd8, gif: sig.toString('latin1', 0, 3) === 'GIF', webp: sig.toString('latin1', 8, 12) === 'WEBP' }[ext];
+    if (!ok) throw new AppError(415, 'unsupported_media', 'Datei ist kein gültiges Bild');
+    const dir = join(this.dataDir, 'logos');
+    mkdirSync(dir, { recursive: true });
+    this.removeLogoFile(id);
+    writeFileSync(join(dir, `${id}.${ext}`), data);
+    s.logo = `${ext}:${Date.now().toString(36)}`;
+    this.publish('station.changed', id, s);
+    this.changed();
+    return s;
+  }
+
+  removeStationLogo(id: string): Station {
+    const s = this.rt(id).station;
+    this.removeLogoFile(id);
+    delete s.logo;
+    this.publish('station.changed', id, s);
+    this.changed();
+    return s;
+  }
+
+  private removeLogoFile(id: string): void {
+    for (const ext of Object.values(AirDeckApp.LOGO_TYPES)) rmSync(join(this.dataDir, 'logos', `${id}.${ext}`), { force: true });
+  }
+
+  stationLogo(id: string): { path: string; type: string } | null {
+    const s = this.stations.get(id)?.station;
+    if (!s?.logo) return null;
+    const ext = s.logo.split(':')[0]!;
+    const type = Object.entries(AirDeckApp.LOGO_TYPES).find(([, e]) => e === ext)?.[0];
+    const path = join(this.dataDir, 'logos', `${id}.${ext}`);
+    return type && existsSync(path) ? { path, type } : null;
+  }
+
+  /** Sender vollständig entfernen (Playout, Aufnahmen, Quellen, Ausgänge, Medien). Der letzte Sender bleibt. */
+  deleteStation(p: Principal, id: string): void {
+    this.rt(id);
+    if (this.stations.size <= 1) throw new AppError(409, 'last_station', 'Der letzte Sender kann nicht gelöscht werden');
+    const pl = this.playouts.get(id);
+    if (pl) {
+      pl.playout.stop();
+      this.playouts.delete(id);
+    }
+    if (this.recorders.has(id)) this.stopRecording(id);
+    for (const s of this.engine.list(id)) this.removeSource(p, id, s.id);
+    for (const o of [...this.outputs.values()]) if (o.cfg.stationId === id) this.removeOutput(p, id, o.cfg.id);
+    for (const key of [...this.relays.keys()]) if (key.startsWith(`${id}/`)) this.relays.delete(key);
+    this.secrets.delete(`lautfm:${id}`);
+    this.removeLogoFile(id);
+    rmSync(join(this.mediaDir, id), { recursive: true, force: true });
+    this.stations.delete(id);
+    this.audit.write({ kind: 'station', event: 'deleted', actor: p.id, stationId: id });
+    this.changed();
   }
 
   listStations(p: Principal): Station[] {

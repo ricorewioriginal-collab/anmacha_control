@@ -207,6 +207,27 @@ test('Studio wird ausgeliefert, Pfad-Traversal blockiert', async () => {
   assert.notEqual(t.status, 200);
 });
 
+test('Mehrere Sender: anlegen, Logo setzen (öffentlich), löschen', async () => {
+  const st = await api('POST', '/api/v1/stations', { id: 'zweit', name: 'Zweitsender' });
+  assert.equal(st.status, 200);
+  assert.equal((await api('GET', '/api/v1/stations')).body.length, 2);
+  const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(40)]);
+  const put = (type: string, body: Buffer) => fetch(`${base}/api/v1/stations/zweit/logo`, { method: 'PUT', headers: { Authorization: `Bearer ${token}`, 'Content-Type': type }, body });
+  assert.equal((await put('image/svg+xml', Buffer.from('<svg/>'))).status, 415, 'SVG abgelehnt');
+  assert.equal((await put('image/png', Buffer.from('keinbild-keinbild'))).status, 415, 'Signatur geprüft');
+  const ok = await put('image/png', png);
+  assert.equal(ok.status, 200);
+  assert.match((await ok.json()).logo, /^png:/);
+  const img = await fetch(`${base}/api/v1/stations/zweit/logo`);
+  assert.equal(img.status, 200);
+  assert.equal(img.headers.get('content-type'), 'image/png');
+  assert.deepEqual(Buffer.from(await img.arrayBuffer()), png);
+  assert.equal((await api('DELETE', '/api/v1/stations/zweit')).status, 204);
+  assert.equal((await fetch(`${base}/api/v1/stations/zweit/logo`)).status, 404);
+  assert.equal((await api('GET', '/api/v1/stations')).body.length, 1);
+  assert.equal((await api('DELETE', '/api/v1/stations/main')).status, 409, 'letzter Sender bleibt');
+});
+
 test('Persistenz: Neustart stellt Konfiguration ohne aktive Quellen wieder her', async () => {
   await api('PUT', '/api/v1/stations/main/lautfm', { stationName: 'meinradio' });
   app.shutdown();

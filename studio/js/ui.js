@@ -75,6 +75,8 @@ export function formDialog(title, fields, submitLabel = 'Speichern') {
     if (f.type === 'days') {
       const set = new Set(Array.isArray(f.value) ? f.value : []);
       input = h('div', { class: 'days', id }, ...DAYS.map((d, i) => h('label', { class: 'chk' }, h('input', { type: 'checkbox', name: `${f.name}_${i}`, checked: set.has(i) }), d)));
+    } else if (f.type === 'file') {
+      input = h('input', { id, name: f.name, type: 'file', accept: f.value ?? '' });
     } else if (f.type === 'info') {
       input = h('output', { id, class: 'info' }, String(f.value ?? ''));
     } else if (f.type === 'textarea') {
@@ -100,6 +102,10 @@ export function formDialog(title, fields, submitLabel = 'Speichern') {
       const out = {};
       for (const f of fields) {
         if (f.type === 'info') continue;
+        if (f.type === 'file') {
+          out[f.name] = /** @type {HTMLInputElement} */ (form.elements.namedItem(f.name)).files?.[0] ?? null;
+          continue;
+        }
         if (f.type === 'days') {
           out[f.name] = DAYS.map((_, i) => i).filter((i) => /** @type {HTMLInputElement} */ (form.elements.namedItem(`${f.name}_${i}`)).checked);
           continue;

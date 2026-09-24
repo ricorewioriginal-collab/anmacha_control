@@ -401,3 +401,6 @@ tr.active-row td { background: rgba(34,197,94,.08); }
 .flash { animation: win-flash 1.2s ease-out; }
 @keyframes win-flash { 0%, 30% { box-shadow: 0 0 0 3px rgba(47, 140, 255, .8), 0 0 30px rgba(47, 140, 255, .5); } 100% { box-shadow: none; } }
 @media (prefers-reduced-motion: reduce) { .flash { animation: none; } }
+
+.station-logo.has-img { background: #0b1628; padding: 0; overflow: hidden; }
+.station-logo img { width: 100%; height: 100%; object-fit: cover; }

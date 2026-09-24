@@ -214,7 +214,7 @@ function onEvent(type, data) {
       if (o) { o.state = data; renderOutputs(); }
       break;
     }
-    case 'station.changed': S.station = data; applyBranding(); renderStationSelect(); break;
+    case 'station.changed': S.station = data; S.stations = S.stations.map((/** @type {any} */ s) => (s.id === data.id ? data : s)); applyBranding(); renderStationSelect(); break;
     case 'source.takeover_completed': status(`Übernahme: ${sourceName(data.sourceId)} ist auf Sendung (Priority ${data.data?.priority ?? '?'})`); break;
     case 'source.takeover_rejected': status(`Übernahme abgelehnt: ${data.data?.reason ?? ''}`, true); break;
     case 'source.off_air': status('OFF AIR – keine Fallback-Quelle verfügbar', true); break;
@@ -230,13 +230,23 @@ function applyBranding() {
   r.setProperty('--primary', S.station.primaryColor);
   r.setProperty('--accent', S.station.accentColor);
   $('station-slogan').textContent = S.station.slogan || S.station.name;
-  $('station-logo').textContent = S.station.name.split(/\s+/).map((/** @type {string} */ w) => w[0]).join('').slice(0, 3).toUpperCase();
+  const logo = $('station-logo');
+  if (S.station.logo) {
+    logo.replaceChildren(h('img', { src: `${api.base}/api/v1/stations/${sid()}/logo?v=${encodeURIComponent(S.station.logo)}`, alt: '' }));
+    logo.classList.add('has-img');
+  } else {
+    logo.textContent = S.station.name.split(/\s+/).map((/** @type {string} */ w) => w[0]).join('').slice(0, 3).toUpperCase();
+    logo.classList.remove('has-img');
+  }
   document.title = `${S.station.name} · AirDeck Studio`;
 }
 
 function renderStationSelect() {
   const sel = /** @type {HTMLSelectElement} */ ($('station-select'));
-  sel.replaceChildren(...S.stations.map((s) => h('option', { value: s.id, selected: s.id === S.station.id }, s.id === S.station.id ? S.station.name : s.name)));
+  sel.replaceChildren(
+    ...S.stations.map((s) => h('option', { value: s.id, selected: s.id === S.station.id }, s.id === S.station.id ? S.station.name : s.name)),
+    h('option', { value: '__new' }, '＋ Neuen Sender anlegen …'),
+  );
 }
 
 function renderAll() {
@@ -1185,8 +1195,11 @@ function bindStatic() {
   $('btn-station').addEventListener('click', editStation);
   $('station-select').addEventListener('change', async (e) => {
     const id = /** @type {HTMLSelectElement} */ (e.target).value;
-    S.station = S.stations.find((s) => s.id === id);
-    await run(loadStation);
+    if (id === '__new') {
+      renderStationSelect();
+      return createStation();
+    }
+    await switchStation(id);
     if (S.listen) toggleListen(true);
   });
 
@@ -1375,6 +1388,32 @@ async function editNotify() {
   }
 }
 
+/** @param {string} id */
+async function switchStation(id) {
+  const st = S.stations.find((s) => s.id === id);
+  if (!st) return;
+  S.station = st;
+  await run(loadStation);
+  renderStationSelect();
+}
+
+async function createStation() {
+  const v = await formDialog('Neuen Sender anlegen', [
+    { name: 'name', label: 'Sendername', value: '', required: true },
+    { name: 'id', label: 'Kennung (a–z, 0–9, Bindestrich; leer = aus dem Namen)', value: '' },
+    { name: 'slogan', label: 'Slogan', value: '' },
+    { name: 'primaryColor', label: 'Primärfarbe', type: 'color', value: '#19c3e6' },
+    { name: 'accentColor', label: 'Akzentfarbe', type: 'color', value: '#8b5cf6' },
+  ], 'Anlegen');
+  if (!v) return;
+  const id = (v.id || v.name).toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '').replace(/ß/g, 'ss').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40);
+  const st = await run(() => api.post('/stations', { ...v, id }));
+  if (!st) return;
+  S.stations = (await run(() => api.get('/stations'))) ?? [...S.stations, st];
+  await switchStation(st.id);
+  status(`Sender „${st.name}“ angelegt – mit Standard-Quellen (Live, Remote, Android, Automation)`);
+}
+
 async function editStation() {
   const s = S.station;
   const v = await formDialog('Sender / Branding', [
@@ -1382,8 +1421,23 @@ async function editStation() {
     { name: 'slogan', label: 'Slogan', value: s.slogan },
     { name: 'primaryColor', label: 'Primärfarbe', type: 'color', value: s.primaryColor },
     { name: 'accentColor', label: 'Akzentfarbe', type: 'color', value: s.accentColor },
+    { name: 'logo', label: `Senderlogo${s.logo ? ' (neu hochladen ersetzt)' : ''}`, type: 'file', value: 'image/png,image/jpeg,image/webp,image/gif', hint: 'PNG, JPG, WebP oder GIF, max. 2 MB – am besten quadratisch' },
+    ...(s.logo ? [{ name: 'removeLogo', label: 'Logo entfernen', type: 'checkbox', value: false }] : []),
+    ...(S.stations.length > 1 ? [{ name: 'remove', label: 'Diesen Sender löschen (mit Medien, Quellen, Ausgängen)', type: 'checkbox', value: false }] : []),
   ]);
-  if (v) await run(() => api.patch(`/stations/${sid()}`, v));
+  if (!v) return;
+  if (v.remove) {
+    if (prompt(`Zum Löschen den Sendernamen „${s.name}“ eingeben:`) !== s.name) return status('Löschen abgebrochen');
+    // erst umschalten, dann löschen – sonst laufen Anfragen ins Leere
+    await switchStation(S.stations.find((x) => x.id !== s.id).id);
+    if (await run(() => api.del(`/stations/${encodeURIComponent(s.id)}`)) === undefined) return;
+    S.stations = S.stations.filter((x) => x.id !== s.id);
+    renderStationSelect();
+    return status(`Sender „${s.name}“ gelöscht`);
+  }
+  await run(() => api.patch(`/stations/${sid()}`, { name: v.name, slogan: v.slogan, primaryColor: v.primaryColor, accentColor: v.accentColor }));
+  if (v.logo) await run(() => api.req('PUT', `/stations/${sid()}/logo`, v.logo, { 'Content-Type': v.logo.type }));
+  else if (v.removeLogo) await run(() => api.del(`/stations/${sid()}/logo`));
 }
 
 // ---------- Laufzeit-Schleife ----------

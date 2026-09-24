@@ -94,6 +94,21 @@ export function createHttpServer(app: AirDeckApp, studioDir: string): Server {
   });
   add('GET', '/api/v1/stations/:sid', 'branding:read', (c) => app.station(sid(c)));
   add('PATCH', '/api/v1/stations/:sid', 'stations:write', async (c) => app.updateStation(sid(c), await c.body()));
+  add('DELETE', '/api/v1/stations/:sid', 'stations:write', (c) => {
+    if (!c.p.stationIds.includes('*')) throw new AppError(403, 'forbidden', 'Nur globale Admins löschen Sender');
+    app.deleteStation(c.p, sid(c));
+  });
+  add('PUT', '/api/v1/stations/:sid/logo', 'stations:write', async (c) => {
+    const chunks: Buffer[] = [];
+    let size = 0;
+    for await (const d of c.req) {
+      size += (d as Buffer).length;
+      if (size > 2 * 1024 * 1024) throw new AppError(413, 'too_large', 'Logo höchstens 2 MB');
+      chunks.push(d as Buffer);
+    }
+    return app.setStationLogo(sid(c), String(c.req.headers['content-type'] ?? ''), Buffer.concat(chunks));
+  });
+  add('DELETE', '/api/v1/stations/:sid/logo', 'stations:write', (c) => app.removeStationLogo(sid(c)));
 
   // --- Quellen / Source Priority ---
   add('GET', '/api/v1/stations/:sid/sources', 'sources:read', (c) => app.listSources(sid(c)));
@@ -371,6 +386,14 @@ export function createHttpServer(app: AirDeckApp, studioDir: string): Server {
 
     if (path.startsWith('/ingest/')) return handleIngest(app, req, res, path);
     if (path === '/api/v1/health') return json(res, 200, { ok: true, name: 'AirDeck', version: '0.4.0' });
+    // Senderlogo ist Branding und öffentlich (Studio, Widgets, Android-App)
+    const logo = /^\/api\/v1\/stations\/([a-z0-9-]{1,40})\/logo$/.exec(path);
+    if (logo && req.method === 'GET') {
+      const l = app.stationLogo(logo[1]!);
+      if (!l) return json(res, 404, { error: 'not_found' });
+      res.writeHead(200, { 'Content-Type': l.type, 'Cache-Control': 'public, max-age=300', 'X-Content-Type-Options': 'nosniff' });
+      return void createReadStream(l.path).pipe(res);
+    }
 
     if (path.startsWith('/listen/')) {
       const p = auth(app, req, url);
