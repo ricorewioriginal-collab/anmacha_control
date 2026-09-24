@@ -3,7 +3,16 @@
 Unabhängige Radio-Automation für **Windows, Android und Self-Hosted-Server**.
 AirDeck läuft ohne AnMaCha. AnMaCha und laut.fm sind höchstens optionale Adapter.
 
-**Stand 0.1:** Core, Server und Studio-Oberfläche laufen. Die Roadmap steht in [`docs/CLAUDE_PROGRESS.md`](docs/CLAUDE_PROGRESS.md).
+**Stand 0.2:** Core, Server, Studio, 24/7-Server-Playout, Windows-Programm und Android-App.
+Die Roadmap steht in [`docs/CLAUDE_PROGRESS.md`](docs/CLAUDE_PROGRESS.md).
+
+## Plattformen
+
+| Plattform | Was | Wie |
+|---|---|---|
+| **Windows** | `AirDeck.exe`: Server, Studio-Fenster und 24/7-Automation, ffmpeg liegt bei | GitHub Actions → Artefakt `AirDeck-Windows`, lokal mit `npm run build:win` auf Windows |
+| **Android** | App: Studio-Fernbedienung, MIC LIVE (Priority 3), Mithören | GitHub Actions → Artefakt `AirDeck-Android` (APK), siehe [`apps/android`](apps/android/README.md) |
+| **Self-Hosted** | Server unter Linux/macOS, headless 24/7 | `npm start` bzw. `node dist/airdeck.cjs --headless` mit ffmpeg im PATH |
 
 ## Schnellstart
 
@@ -23,9 +32,13 @@ Das Token wird nur gehasht gespeichert. Ein neues Token erzeugst du mit `npm run
 | `AIRDECK_HOST` | `127.0.0.1` | Bind-Adresse. `0.0.0.0` für Server-/Netzbetrieb, dann TLS-Reverse-Proxy davorsetzen |
 | `AIRDECK_DATA` | `./data` | Daten, Medien, Audit-Log, verschlüsselte Secrets |
 | `AIRDECK_SECRET_KEY` | *(auto)* | 64 Hex-Zeichen. Ohne diese Variable wird `data/.secret.key` (0600) erzeugt |
+| `AIRDECK_FFMPEG` | *(auto)* | Pfad zu ffmpeg. Sonst wird `./ffmpeg/` bzw. der PATH durchsucht |
+| `AIRDECK_CORS_ORIGINS` | – | zusätzliche erlaubte Origins (kommagetrennt). Die Android-App ist immer erlaubt |
 
 ## Was schon funktioniert
 
+- **Server-Automation 24/7 (headless)**: ffmpeg dekodiert und kodiert, AirDeck mischt selbst (Crossfade, Carts, Ducking, Limiter). Läuft ohne Browser und startet nach einem Neustart automatisch wieder. Bei Stille wird die Quelle als ungesund markiert und der Sender fällt auf die nächste Quelle nach Priorität zurück. Stürzt der Encoder ab, startet er neu. Laufzeiten ermittelt ffprobe beim Upload.
+- **MIC LIVE**: Handy oder PC sendet das Mikrofon als Live-Quelle und übernimmt nach Priorität. 🎧 hört das Sendesignal mit.
 - **Source Priority Engine**: positive Ganzzahl, kleinere Zahl = höhere Priorität. Übernahmen sind autorisiert und atomar. Anti-Flapping, Cooldown, Fallback-Kette, Operator- und Emergency-Override, Audit-Log, Wiederherstellung nach Neustart ohne konkurrierende aktive Quellen.
 - **Live-/Relay-Kern**: Encoder verbinden sich Icecast-kompatibel per `PUT` oder `SOURCE` auf `/ingest/<sender>/<mount>` (Benutzer = Quellen-ID, Passwort pro Quelle). Nur die aktive Quelle wird weitergeleitet. Standby-Quellen bleiben verbunden, damit der Fallback sofort greift.
 - **Broadcast-Adapter Icecast** (HTTP PUT, Icecast 2.4+) mit optionalem `?prio=<n>` für laut.fm-artige Server. Titel-Metadaten laufen über `/admin/metadata`, Reconnect mit Backoff, Auth-Fehler werden nicht endlos wiederholt. SHOUTcast ist ehrlich als *unsupported* markiert.

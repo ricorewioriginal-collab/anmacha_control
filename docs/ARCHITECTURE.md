@@ -49,3 +49,10 @@ Alle Pfade liegen unter `/api/v1`. Auth läuft über `Authorization: Bearer <tok
 | System | `GET /health` (öffentlich), `GET /me`, `GET /capabilities`, `GET /audit`, `GET/POST/DELETE /tokens` | `audit:read`, `tokens:write` |
 
 Außerhalb der API: `PUT|SOURCE /ingest/{sender}/{mount}` für Encoder (Basic Auth) und `GET /listen/{sender}/{mount}?token=` zum Mithören (`stream:read`).
+
+## Ergänzungen 0.2
+
+12. **Server-Playout.** Für jeden Titel dekodiert ein eigener ffmpeg-Prozess nach PCM (s16le, 44,1 kHz, Stereo). AirDeck mischt in 20-ms-Blöcken nach Wanduhr, mit Crossfade, Carts, Ducking und einem weichen Limiter. Ein dauerhafter ffmpeg-Encoder erzeugt MP3 oder Ogg/Opus und speist es als interne Sitzung in die Automation-Quelle des Relays. Decoder-Puffer sind auf 10 s begrenzt (Backpressure), ein hängender Event-Loop wird neu getaktet statt nachgeholt.
+13. **ffmpeg ist optional.** Die Erkennung prüft `AIRDECK_FFMPEG`, dann `./ffmpeg/`, dann den PATH. Fehlt ffmpeg, meldet die API `unsupported`, alles andere läuft weiter.
+14. **Windows als Node Single Executable.** esbuild bündelt alles zu einem CJS-Skript, das in `node.exe` injiziert wird. Es gibt keine Installation und keine Runtime-Abhängigkeiten. Nutzerdaten liegen unter `%LOCALAPPDATA%\AirDeck`. Das Studio-Fenster ist Edge im App-Modus. Das spart Ressourcen gegenüber Electron (keine zweite Chromium-Kopie).
+15. **Android als Capacitor-Hülle um dasselbe Studio.** Es gibt einen Code-Stand für alle Plattformen. Die App verbindet sich per URL und Token mit einem AirDeck-Server. Der Server erlaubt dafür die Capacitor-Origins per CORS.
