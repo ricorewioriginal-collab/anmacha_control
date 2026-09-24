@@ -4,6 +4,9 @@
 
 import { Api, ApiError, isNativeApp, readToken, saveServer, saveToken, serverBase } from './api.js';
 import { AudioEngine, DECKS, SilenceDetector, openMic, recordStream } from './audio.js';
+import { $, clockTime, download, fmt, formDialog, h, mediaTitle, run, status } from './ui.js';
+import { mountPlanning, mountRecorder } from './planning.js';
+import { mountLautfm } from './lautfm.js';
 
 const CATEGORY_LABEL = /** @type {Record<string,string>} */ ({
   music: 'Musik', jingle: 'Jingle', sweeper: 'Sweeper', station_id: 'Station ID', drop: 'Drop', news: 'News',
@@ -52,111 +55,14 @@ const S = {
   /** @type {HTMLAudioElement|null} */ listen: null,
 };
 const serverMode = () => !!S.playout?.status?.running;
+const AUDIO_FILE = /\.(mp3|ogg|opus|wav|flac|m4a|aac|webm)$/i;
+/** @type {Record<string, { show: () => any, onEvent?: (t: string, d: any) => void }>} */
+let views = {};
+let currentView = 'studio';
 const silence = new SilenceDetector(-50, 10_000);
-
-// ---------- DOM-Helfer ----------
-
-/** @param {string} id */
-const $ = (id) => /** @type {HTMLElement} */ (document.getElementById(id));
-
-/**
- * @param {string} tag
- * @param {Record<string, any>} [attrs]
- * @param {...(Node|string|null|undefined|false)} children
- */
-function h(tag, attrs = {}, ...children) {
-  const el = document.createElement(tag);
-  for (const [k, v] of Object.entries(attrs)) {
-    if (v === undefined || v === null || v === false) continue;
-    if (k.startsWith('on')) el.addEventListener(k.slice(2), v);
-    else if (k === 'class') el.className = v;
-    else if (k === 'style') el.style.cssText = v;
-    else if (k in el && typeof v !== 'string') /** @type {any} */ (el)[k] = v;
-    else el.setAttribute(k, v === true ? '' : String(v));
-  }
-  for (const c of children) if (c !== null && c !== undefined && c !== false) el.append(c);
-  return el;
-}
-
-/** @param {number|null|undefined} ms */
-function fmt(ms) {
-  if (ms == null || !Number.isFinite(ms)) return '--:--';
-  const s = Math.max(0, Math.round(ms / 1000));
-  const m = Math.floor(s / 60);
-  return `${m}:${String(s % 60).padStart(2, '0')}`;
-}
-
-/** @param {number} at */
-function clockTime(at) {
-  return new Date(at).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-}
-
-/** @param {string} msg @param {boolean} [err] */
-function status(msg, err = false) {
-  const el = $('status-text');
-  el.textContent = `${new Date().toLocaleTimeString('de-DE')} · ${msg}`;
-  el.classList.toggle('err', err);
-}
-
-/** @param {() => Promise<any>} fn */
-async function run(fn) {
-  try {
-    return await fn();
-  } catch (e) {
-    status(e instanceof Error ? e.message : String(e), true);
-    return undefined;
-  }
-}
 
 const sid = () => encodeURIComponent(S.station.id);
 const url = (/** @type {string} */ p) => `/stations/${sid()}${p}`;
-const mediaTitle = (/** @type {any} */ m) => (m ? (m.artist ? `${m.artist} – ${m.title}` : m.title) : '–');
-
-// ---------- Dialoge ----------
-
-/**
- * @param {string} title
- * @param {Array<{name:string,label:string,type?:string,value?:any,options?:Array<[string,string]>,hint?:string,required?:boolean}>} fields
- * @param {string} [submitLabel]
- * @returns {Promise<Record<string, any>|null>}
- */
-function formDialog(title, fields, submitLabel = 'Speichern') {
-  const dlg = /** @type {HTMLDialogElement} */ ($('dialog'));
-  const form = /** @type {HTMLFormElement} */ ($('dialog-form'));
-  form.replaceChildren(h('h3', {}, title));
-  for (const f of fields) {
-    const id = `f-${f.name}`;
-    /** @type {HTMLElement} */
-    let input;
-    if (f.options) {
-      input = h('select', { id, name: f.name }, ...f.options.map(([v, l]) => h('option', { value: v, selected: String(f.value) === v }, l)));
-    } else if (f.type === 'checkbox') {
-      input = h('input', { id, name: f.name, type: 'checkbox', checked: !!f.value });
-    } else {
-      input = h('input', { id, name: f.name, type: f.type ?? 'text', value: f.value ?? '', required: !!f.required, autocomplete: 'off' });
-    }
-    form.append(h('div', { class: 'field' }, h('label', { for: id }, f.label), input, f.hint ? h('small', {}, f.hint) : null));
-  }
-  form.append(
-    h('div', { class: 'dialog-actions' },
-      h('button', { class: 'btn', value: 'cancel', formnovalidate: true }, 'Abbrechen'),
-      h('button', { class: 'btn primary', value: 'ok' }, submitLabel)),
-  );
-  return new Promise((resolve) => {
-    dlg.onclose = () => {
-      if (dlg.returnValue !== 'ok') return resolve(null);
-      /** @type {Record<string, any>} */
-      const out = {};
-      for (const f of fields) {
-        const el = /** @type {HTMLInputElement} */ (form.elements.namedItem(f.name));
-        out[f.name] = f.type === 'checkbox' ? el.checked : f.type === 'number' ? (el.value === '' ? null : Number(el.value)) : el.value;
-      }
-      resolve(out);
-    };
-    dlg.returnValue = '';
-    dlg.showModal();
-  });
-}
 
 // ---------- Start ----------
 
@@ -221,6 +127,13 @@ async function loadStation() {
   renderAll();
   es?.close();
   es = api.events(S.station.id, onEvent, (ok) => $('conn').classList.toggle('ok', ok));
+  const ctx = { api, url, library: () => S.library, folders: () => api.get(url('/folders')) };
+  views = {
+    planning: mountPlanning($('view-planning'), ctx),
+    recorder: mountRecorder($('view-recorder'), ctx),
+    lautfm: mountLautfm($('view-lautfm'), ctx),
+  };
+  if (currentView !== 'studio') views[currentView]?.show();
 }
 
 /** @param {any[]} list */
@@ -258,7 +171,20 @@ async function probeDurations() {
 
 /** @param {string} type @param {any} data */
 function onEvent(type, data) {
+  for (const v of Object.values(views)) v.onEvent?.(type, data);
   switch (type) {
+    case 'automation.command':
+      // Zeitplan/Uhr im Browser-Modus (ohne Server-Playout) ausführen
+      if (serverMode()) break;
+      if (data.action === 'next') {
+        if (S.auto) autoNext();
+        else status('Zeitplan: nächster Titel liegt oben in der Queue (Automation ist aus)');
+      } else if (data.action === 'fx' && S.libById.get(data.mediaId)) {
+        playCart({ id: '_fx', mediaId: data.mediaId });
+      }
+      break;
+    case 'schedule.fired': status(`Zeitplan: ${data.label ?? data.kind} (${data.origin})`); break;
+    case 'metadata.sent': status(`Titelanzeige gesendet: ${data.artist ? data.artist + ' – ' : ''}${data.title}`); break;
     case 'sources.changed':
       // Server liefert Engine-Sicht; Relay-/Passwortinfos einmal nachladen
       run(async () => { S.sources = await api.get(url('/sources')); renderSources(); });
@@ -679,8 +605,13 @@ async function editCart(c) {
 function renderLibrary() {
   const q = /** @type {HTMLInputElement} */ ($('lib-search')).value.trim().toLowerCase();
   const cat = /** @type {HTMLSelectElement} */ ($('lib-cat')).value;
+  const folderSel = /** @type {HTMLSelectElement} */ ($('lib-folder'));
+  const folders = [...new Set(S.library.map((m) => m.folder ?? '').filter(Boolean))].sort((a, b) => a.localeCompare(b, 'de'));
+  const cur = folderSel.value;
+  folderSel.replaceChildren(h('option', { value: '' }, 'Alle Ordner'), ...folders.map((f) => h('option', { value: f, selected: f === cur }, f)));
+  const folder = folderSel.value;
   const list = S.library
-    .filter((m) => (!cat || m.category === cat) && (!q || `${m.title} ${m.artist}`.toLowerCase().includes(q)))
+    .filter((m) => (!cat || m.category === cat) && (!folder || (m.folder ?? '') === folder) && (!q || `${m.title} ${m.artist} ${m.folder ?? ''}`.toLowerCase().includes(q)))
     .slice(0, 500);
   $('lib-empty').hidden = S.library.length > 0;
   $('lib-body').replaceChildren(...list.map((m) => h('tr', {
@@ -704,6 +635,7 @@ async function editMedia(m) {
     { name: 'title', label: 'Titel', value: m.title },
     { name: 'artist', label: 'Interpret', value: m.artist },
     { name: 'category', label: 'Kategorie', value: m.category, options: Object.entries(CATEGORY_LABEL) },
+    { name: 'folder', label: 'Ordner', value: m.folder ?? '' },
     { name: 'cueInMs', label: 'Cue-In (ms)', type: 'number', value: m.cueInMs ?? '' },
     { name: 'segueMs', label: 'Überblendung vor Ende (ms)', type: 'number', value: m.segueMs ?? '', hint: `Standard: ${DEFAULT_MIX_MS} ms` },
     { name: 'gainDb', label: 'Gain (dB)', type: 'number', value: m.gainDb ?? '' },
@@ -714,10 +646,16 @@ async function editMedia(m) {
 /** @param {FileList|File[]} files */
 async function upload(files) {
   const cat = /** @type {HTMLSelectElement} */ ($('lib-cat')).value || 'music';
+  const selFolder = /** @type {HTMLSelectElement} */ ($('lib-folder')).value;
+  files = [...files].filter((f) => AUDIO_FILE.test(f.name));
+  if (!files.length) return status('Keine Audiodateien gefunden', true);
   let ok = 0;
   for (const f of files) {
     status(`Upload: ${f.name} …`);
-    const r = await run(() => api.req('PUT', url(`/media?name=${encodeURIComponent(f.name)}&category=${cat}`), f, { 'Content-Type': 'application/octet-stream' }));
+    // Ordner-Upload: erster Pfadteil wird zum Ordner in der Bibliothek
+    const rel = /** @type {any} */ (f).webkitRelativePath || '';
+    const folder = rel.includes('/') ? rel.split('/').slice(0, -1).join(' / ') : selFolder;
+    const r = await run(() => api.req('PUT', url(`/media?name=${encodeURIComponent(f.name)}&category=${cat}&folder=${encodeURIComponent(folder)}`), f, { 'Content-Type': 'application/octet-stream' }));
     if (r) ok++;
   }
   status(`${ok} von ${files.length} Datei(en) hochgeladen`, ok < files.length);
@@ -878,6 +816,47 @@ function bindStatic() {
   cat.replaceChildren(h('option', { value: '' }, 'Alle'), ...Object.entries(CATEGORY_LABEL).map(([v, l]) => h('option', { value: v }, l)));
   $('lib-search').addEventListener('input', renderLibrary);
   cat.addEventListener('change', renderLibrary);
+  $('lib-folder').addEventListener('change', renderLibrary);
+  $('lib-upload-dir').addEventListener('change', (e) => {
+    const input = /** @type {HTMLInputElement} */ (e.target);
+    if (input.files?.length) upload([...input.files]).finally(() => (input.value = ''));
+  });
+  $('btn-add-url').addEventListener('click', async () => {
+    const v = await formDialog('URL / Stream hinzufügen', [
+      { name: 'url', label: 'URL (http/https)', required: true },
+      { name: 'title', label: 'Titel' },
+      { name: 'durationMin', label: 'Dauer in Minuten (leer = bis weitergeschaltet wird)', type: 'number', value: '' },
+      { name: 'folder', label: 'Ordner', value: /** @type {HTMLSelectElement} */ ($('lib-folder')).value },
+    ], 'Hinzufügen');
+    if (v) run(() => api.post(url('/media/url'), { url: v.url, title: v.title, folder: v.folder, durationMs: v.durationMin ? v.durationMin * 60000 : undefined }));
+  });
+  $('btn-fill-from').addEventListener('click', async () => {
+    const folders = /** @type {string[]} */ (await run(() => api.get(url('/folders')))) ?? [];
+    const v = await formDialog('Warteschlange füllen', [
+      { name: 'src', label: 'Aus', value: folders[0] ? `f:${folders[0]}` : 'c:music', options: [...folders.map((f) => /** @type {[string,string]} */ ([`f:${f}`, `Ordner: ${f}`])), ...Object.entries(CATEGORY_LABEL).map(([k, l]) => /** @type {[string,string]} */ ([`c:${k}`, `Kategorie: ${l}`]))] },
+      { name: 'count', label: 'Anzahl Titel', type: 'number', value: 10 },
+    ], 'Füllen');
+    if (!v) return;
+    const body = v.src.startsWith('f:') ? { folder: v.src.slice(2), count: v.count } : { category: v.src.slice(2), count: v.count };
+    const r = await run(() => api.post(url('/queue/fill-from'), body));
+    if (r) status(`${r.added} Titel zur Warteschlange hinzugefügt`);
+  });
+  $('btn-m3u').addEventListener('click', async () => {
+    const blob = await run(() => api.blob(url('/queue.m3u')));
+    if (blob) download(blob, 'airdeck-queue.m3u');
+  });
+  $('btn-meta').addEventListener('click', async () => {
+    const m = S.nowPlaying?.media;
+    const v = await formDialog('Titelanzeige senden', [
+      { name: 'artist', label: 'Interpret', value: m?.artist ?? '' },
+      { name: 'title', label: 'Titel', value: m?.title ?? '', required: true },
+    ], 'Senden');
+    if (v) run(() => api.post(url('/metadata'), v));
+  });
+  $('view-tabs').addEventListener('click', (e) => {
+    const b = /** @type {HTMLElement} */ (e.target).closest('button');
+    if (b?.dataset.view) showView(b.dataset.view);
+  });
   $('lib-upload').addEventListener('change', (e) => {
     const input = /** @type {HTMLInputElement} */ (e.target);
     if (input.files?.length) upload([...input.files]).finally(() => (input.value = ''));
@@ -933,6 +912,14 @@ function bindStatic() {
     const f = /^F([1-4])$/.exec(e.key);
     if (f) { e.preventDefault(); togglePlay(DECKS[Number(f[1]) - 1]); }
   });
+}
+
+/** @param {string} name */
+function showView(name) {
+  currentView = name;
+  for (const b of document.querySelectorAll('#view-tabs button')) b.setAttribute('aria-pressed', String(/** @type {HTMLElement} */ (b).dataset.view === name));
+  for (const id of ['studio', 'planning', 'recorder', 'lautfm']) $(`view-${id}`).hidden = id !== name;
+  if (name !== 'studio') views[name]?.show();
 }
 
 async function editStation() {

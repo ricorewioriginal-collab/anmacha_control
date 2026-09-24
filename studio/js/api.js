@@ -68,7 +68,7 @@ export class Api {
 
   /** @param {string} method @param {string} path @param {any} [body] @param {Record<string,string>} [headers] */
   async req(method, path, body, headers = {}) {
-    const isRaw = body instanceof Blob || body instanceof ArrayBuffer;
+    const isRaw = body instanceof Blob || body instanceof ArrayBuffer || body instanceof FormData;
     const r = await fetch(`${this.base}/api/v1${path}`, {
       method,
       headers: {
@@ -82,6 +82,13 @@ export class Api {
     const data = await r.json().catch(() => null);
     if (!r.ok) throw new ApiError(r.status, data?.error ?? 'error', data?.message ?? `HTTP ${r.status}`);
     return data;
+  }
+
+  /** Binärdaten (z. B. Vorhören, Downloads) mit Auth laden. @param {string} path */
+  async blob(path) {
+    const r = await fetch(`${this.base}/api/v1${path}`, { headers: { Authorization: `Bearer ${this.token}` } });
+    if (!r.ok) throw new ApiError(r.status, 'error', `HTTP ${r.status}`);
+    return r.blob();
   }
 
   get = (/** @type {string} */ p) => this.req('GET', p);
@@ -106,7 +113,8 @@ export class Api {
     const types = [
       'sources.changed', 'queue.changed', 'now_playing.changed', 'deck.state_changed', 'library.changed',
       'cardwall.changed', 'cardwall.triggered', 'stream.state_changed', 'station.changed', 'automation.state_changed',
-      'playout.state', 'playout.log', 'source.takeover_completed', 'source.takeover_rejected', 'source.off_air', 'source.fallback_completed', 'source.source_failed',
+      'playout.state', 'playout.log', 'planning.changed', 'playlists.changed', 'recorder.changed', 'schedule.fired',
+      'automation.command', 'metadata.sent', 'source.takeover_completed', 'source.takeover_rejected', 'source.off_air', 'source.fallback_completed', 'source.source_failed',
     ];
     for (const t of types) es.addEventListener(t, (e) => onEvent(t, JSON.parse(/** @type {MessageEvent} */ (e).data)));
     es.onopen = () => onState(true);

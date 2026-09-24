@@ -19,6 +19,12 @@
       </div>
     </div>
     <select id="station-select" aria-label="Sender"></select>
+    <nav class="views tabs" id="view-tabs" aria-label="Bereiche">
+      <button data-view="studio" aria-pressed="true">Studio</button>
+      <button data-view="planning" aria-pressed="false">Planung</button>
+      <button data-view="recorder" aria-pressed="false">Recorder</button>
+      <button data-view="lautfm" aria-pressed="false">laut.fm</button>
+    </nav>
     <div class="onair" id="onair" data-state="off">
       <span class="dot"></span><span id="onair-text">OFF AIR</span>
     </div>
@@ -37,7 +43,10 @@
     <span class="conn" id="conn" title="Serververbindung"></span>
   </header>
 
-  <main class="studio">
+  <main class="view-page" id="view-planning" hidden></main>
+  <main class="view-page" id="view-recorder" hidden></main>
+  <main class="view-page" id="view-lautfm" hidden></main>
+  <main class="studio" id="view-studio">
     <section class="decks" id="decks" aria-label="Decks"></section>
 
     <section class="panel carts-panel" aria-label="Cardwall">
@@ -53,7 +62,10 @@
         <h2>Archiv</h2>
         <input type="search" id="lib-search" placeholder="Suchen …" aria-label="Archiv durchsuchen">
         <select id="lib-cat" aria-label="Kategorie-Filter"></select>
+        <select id="lib-folder" aria-label="Ordner-Filter"></select>
         <label class="btn small" title="Audiodateien hochladen">⭱ Upload<input type="file" id="lib-upload" accept="audio/*,.mp3,.ogg,.opus,.wav,.flac,.m4a,.aac,.webm" multiple hidden></label>
+        <label class="btn small" title="Ganzen Ordner hochladen (Ordnername wird übernommen)">⭱ Ordner<input type="file" id="lib-upload-dir" webkitdirectory multiple hidden></label>
+        <button class="btn small" id="btn-add-url" title="URL / Stream zur Bibliothek">＋ URL</button>
       </div>
       <div class="table-wrap" id="lib-drop">
         <table class="list">
@@ -70,6 +82,8 @@
         <span class="muted" id="queue-total"></span>
         <label class="chk"><input type="checkbox" id="chk-autofill"> Sendeuhr</label>
         <button class="btn small" id="btn-fill">Auffüllen</button>
+        <button class="btn small" id="btn-fill-from" title="Warteschlange aus Ordner oder Kategorie füllen">Aus Ordner …</button>
+        <button class="btn small" id="btn-m3u" title="Warteschlange als M3U exportieren">M3U</button>
         <button class="btn small" id="btn-clear">Leeren</button>
       </div>
       <div class="table-wrap" id="queue-drop">
@@ -87,6 +101,7 @@
         <div class="np-title" id="np-title">–</div>
         <div class="np-artist" id="np-artist"></div>
         <div class="np-next"><span class="muted">Next:</span> <span id="np-next">–</span></div>
+        <button class="btn small" id="btn-meta" style="margin-top:6px" title="Titelanzeige manuell an die Ausgänge senden">Titelanzeige senden …</button>
       </section>
 
       <section class="panel">
@@ -124,7 +139,7 @@
 
   <footer class="status">
     <span id="status-text">Bereit.</span>
-    <span class="muted">AirDeck 0.2 · local-first</span>
+    <span class="muted">AirDeck 0.3 · local-first</span>
   </footer>
 
   <dialog id="dialog"><form method="dialog" id="dialog-form"></form></dialog>
