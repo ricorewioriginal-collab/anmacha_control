@@ -25,6 +25,7 @@ WizardStyle=modern
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 UninstallDisplayIcon={app}\AirDeck.exe
+SetupIconFile=..\..\assets\icons\airdeck-windows.ico
 CloseApplications=yes
 RestartApplications=no
 
@@ -40,7 +41,7 @@ Source: "..\..\dist\AirDeck\*"; DestDir: "{app}"; Flags: ignoreversion recursesu
 
 [Icons]
 Name: "{group}\AirDeck"; Filename: "{app}\AirDeck.exe"; WorkingDir: "{app}"
-Name: "{group}\AirDeck (ohne Fenster, 24/7)"; Filename: "{app}\AirDeck.exe"; Parameters: "--headless"; WorkingDir: "{app}"
+Name: "{group}\AirDeck Server (ohne Fenster, 24/7)"; Filename: "{app}\AirDeck.exe"; Parameters: "--headless"; WorkingDir: "{app}"; IconFilename: "{app}\icons\airdeck-server.ico"
 Name: "{group}\AirDeck deinstallieren"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\AirDeck"; Filename: "{app}\AirDeck.exe"; WorkingDir: "{app}"; Tasks: desktopicon
 

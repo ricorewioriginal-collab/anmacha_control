@@ -53,6 +53,17 @@ if (sea) {
   execFileSync(process.execPath, ['--experimental-sea-config', join(dist, 'sea-config.json')], { stdio: 'inherit' });
   copyFileSync(process.execPath, exe);
   if (!win) chmodSync(exe, 0o755);
+  if (win) {
+    // Programm-Icon und Versionsinfos in die .exe schreiben (vor dem Einbetten des Programms)
+    const { default: rcedit } = await import('rcedit');
+    const rc = /** @type {any} */ (rcedit);
+    await (typeof rc === 'function' ? rc : rc.rcedit)(exe, {
+      icon: join(root, 'assets', 'icons', 'airdeck-windows.ico'),
+      'file-version': version, 'product-version': version,
+      'version-string': { ProductName: 'AirDeck', FileDescription: 'AirDeck Radio Automation', CompanyName: 'AirDeck', LegalCopyright: 'AirDeck – powered by AnMaCha', OriginalFilename: 'AirDeck.exe' },
+    });
+    console.log('✓ Icon & Versionsinfo gesetzt');
+  }
   if (process.platform === 'darwin') execFileSync('codesign', ['--remove-signature', exe]);
   const postject = join(root, 'node_modules', 'postject', 'dist', 'cli.js');
   execFileSync(process.execPath, [postject, exe, 'NODE_SEA_BLOB', join(dist, 'sea-prep.blob'),
@@ -61,7 +72,9 @@ if (sea) {
   if (process.platform === 'darwin') execFileSync('codesign', ['--sign', '-', exe]);
 
   cpSync(join(root, 'studio'), join(out, 'studio'), { recursive: true, filter: (src) => !src.endsWith('tsconfig.json') });
-  cpSync(join(root, 'packaging', 'windows'), out, { recursive: true });
+  cpSync(join(root, 'packaging', 'windows'), out, { recursive: true, filter: (src) => !src.endsWith('.iss') });
+  mkdirSync(join(out, 'icons'), { recursive: true });
+  for (const f of ['airdeck-windows.ico', 'airdeck-server.ico']) copyFileSync(join(root, 'assets', 'icons', f), join(out, 'icons', f));
   copyFileSync(join(root, 'README.md'), join(out, 'README.md'));
   mkdirSync(join(out, 'ffmpeg'), { recursive: true });
   console.log(`✓ ${exe}`);

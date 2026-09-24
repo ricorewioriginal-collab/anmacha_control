@@ -22,5 +22,8 @@ for (const perm of ['android.permission.RECORD_AUDIO', 'android.permission.MODIF
 if (!xml.includes('usesCleartextTraffic')) xml = xml.replace('<application', '<application android:usesCleartextTraffic="true"');
 writeFileSync(manifest, xml);
 
+// AirDeck-App-Icons (Launcher, rund, Adaptive-Icon-Vordergrund) übernehmen
+cpSync(join(here, 'res'), join(here, 'android/app/src/main/res'), { recursive: true });
+
 run('npx cap sync android');
 console.log('✓ Android-Projekt bereit: apps/android/android');

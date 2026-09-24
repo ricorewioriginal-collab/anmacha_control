@@ -20,6 +20,7 @@
     "@types/node": "^22.18.0",
     "esbuild": "^0.25.12",
     "postject": "^1.0.0-alpha.6",
+    "rcedit": "^4.0.1",
     "typescript": "^5.9.0"
   },
   "dependencies": {

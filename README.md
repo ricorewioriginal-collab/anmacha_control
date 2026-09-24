@@ -1,5 +1,12 @@
 # AirDeck
 
+<p>
+  <img src="assets/icons/airdeck-gesamt.png" width="96" alt="AirDeck">
+  <img src="assets/icons/airdeck-windows.png" width="96" alt="AirDeck Windows">
+  <img src="assets/icons/airdeck-android.png" width="96" alt="AirDeck Android">
+  <img src="assets/icons/airdeck-server.png" width="96" alt="AirDeck Server">
+</p>
+
 Unabhängige Radio-Automation für **Windows, Android und Self-Hosted-Server**.
 AirDeck läuft ohne AnMaCha. AnMaCha und laut.fm sind höchstens optionale Adapter.
 
