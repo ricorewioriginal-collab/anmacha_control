@@ -64,6 +64,41 @@ jobs:
           Stop-Process -Id $p.Id -Force
           if (-not $r.ok) { throw 'Health-Check fehlgeschlagen' }
           Write-Host 'AirDeck.exe startet und antwortet.'
+      - name: Installer bauen (Inno Setup)
+        shell: pwsh
+        run: |
+          $iscc = Get-Command iscc -ErrorAction SilentlyContinue
+          if (-not $iscc) {
+            $candidates = @("${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe", "$env:ProgramFiles\Inno Setup 6\ISCC.exe")
+            $found = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+            if (-not $found) { choco install innosetup -y --no-progress | Out-Null; $found = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1 }
+            $iscc = $found
+          } else { $iscc = $iscc.Source }
+          $version = (Get-Content package.json | ConvertFrom-Json).version
+          & $iscc "/DAppVersion=$version" packaging/windows/installer.iss
+          if ($LASTEXITCODE -ne 0) { throw 'Inno Setup fehlgeschlagen' }
+          Get-ChildItem dist/AirDeck-Setup-*.exe
+      - name: Installer-Test (still installieren, starten, deinstallieren)
+        shell: pwsh
+        run: |
+          $setup = Get-ChildItem dist/AirDeck-Setup-*.exe | Select-Object -First 1
+          Start-Process $setup.FullName -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/TASKS=""' -Wait
+          $exe = "$env:LOCALAPPDATA/Programs/AirDeck/AirDeck.exe"
+          if (-not (Test-Path $exe)) { throw 'AirDeck.exe nach Installation nicht gefunden' }
+          $env:AIRDECK_DATA = "$env:RUNNER_TEMP/airdeck-inst"
+          $env:AIRDECK_PORT = '8755'
+          $p = Start-Process $exe -ArgumentList '--headless' -PassThru
+          Start-Sleep -Seconds 5
+          $r = Invoke-RestMethod http://127.0.0.1:8755/api/v1/health
+          Stop-Process -Id $p.Id -Force
+          if (-not $r.ok) { throw 'Installierte Version antwortet nicht' }
+          Start-Process "$env:LOCALAPPDATA/Programs/AirDeck/unins000.exe" -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES' -Wait
+          Write-Host 'Installer: Installation, Start und Deinstallation OK'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AirDeck-Windows-Installer
+          path: dist/AirDeck-Setup-*.exe
+          retention-days: 30
       - uses: actions/upload-artifact@v4
         with:
           name: AirDeck-Windows
