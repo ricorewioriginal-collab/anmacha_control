@@ -23,9 +23,18 @@ export interface TargetStatus {
 
 const NEEDS_INIT = /webm|ogg|opus/i;
 
+/** Abgriff des Sendesignals (z. B. Recorder). */
+export interface RelayTap {
+  onStart(contentType: string, init?: Buffer): void;
+  onData(chunk: Buffer): void;
+  onStop(): void;
+}
+
 export class RelayTarget {
   private readonly sessions = new Map<string, Session>();
   private readonly listeners = new Set<ServerResponse>();
+  private readonly taps = new Set<RelayTap>();
+  private tapsStarted = false;
   private activeId: string | null = null;
   private readonly outputs: () => IcecastOutput[];
 
@@ -55,10 +64,14 @@ export class RelayTarget {
     if (first && NEEDS_INIT.test(s.contentType)) {
       s.init = chunk;
       // Falls die Quelle schon aktiv ist, bevor Daten kamen: Ausgänge jetzt mit Header starten.
-      if (this.activeId === sourceId) this.restartOutputs(s);
+      if (this.activeId === sourceId) {
+        this.restartOutputs(s);
+        this.startTaps(s);
+      }
       return;
     }
     if (sourceId !== this.activeId) return;
+    for (const t of this.taps) t.onData(chunk);
     for (const o of this.outputs()) o.write(chunk);
     for (const l of this.listeners) if (l.writableLength < 256 * 1024) l.write(chunk);
   }
@@ -74,11 +87,36 @@ export class RelayTarget {
       for (const l of this.listeners) l.end();
       this.listeners.clear();
     }
+    this.stopTaps();
     if (!next) {
       for (const o of this.outputs()) o.stop();
       return;
     }
-    if (!NEEDS_INIT.test(next.contentType) || next.init) this.restartOutputs(next);
+    if (!NEEDS_INIT.test(next.contentType) || next.init) {
+      this.restartOutputs(next);
+      this.startTaps(next);
+    }
+  }
+
+  addTap(t: RelayTap): void {
+    this.taps.add(t);
+    const s = this.activeId ? this.sessions.get(this.activeId) : undefined;
+    if (s && this.tapsStarted) t.onStart(s.contentType, s.init);
+  }
+
+  removeTap(t: RelayTap): void {
+    if (this.taps.delete(t) && this.tapsStarted) t.onStop();
+  }
+
+  private startTaps(s: Session): void {
+    this.tapsStarted = true;
+    for (const t of this.taps) t.onStart(s.contentType, s.init);
+  }
+
+  private stopTaps(): void {
+    if (!this.tapsStarted) return;
+    this.tapsStarted = false;
+    for (const t of this.taps) t.onStop();
   }
 
   addListener(res: ServerResponse): boolean {

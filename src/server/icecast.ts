@@ -137,7 +137,7 @@ export class IcecastOutput {
         'Content-Type': wanted.contentType,
         'Ice-Public': '0',
         'Ice-Name': this.cfg.name,
-        'User-Agent': 'AirDeck/0.1',
+        'User-Agent': 'AirDeck/0.3',
       },
     });
     this.req = req;

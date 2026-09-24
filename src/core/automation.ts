@@ -11,10 +11,11 @@ export type MediaCategory =
   | 'ad'
   | 'voice_track'
   | 'tts'
-  | 'bed';
+  | 'bed'
+  | 'stream';
 
 export const MEDIA_CATEGORIES: readonly MediaCategory[] = [
-  'music', 'jingle', 'sweeper', 'station_id', 'drop', 'news', 'ad', 'voice_track', 'tts', 'bed',
+  'music', 'jingle', 'sweeper', 'station_id', 'drop', 'news', 'ad', 'voice_track', 'tts', 'bed', 'stream',
 ];
 
 export interface MediaItem {
@@ -33,13 +34,19 @@ export interface MediaItem {
   bpm?: number;
   gainDb?: number;
   addedAt: number;
+  /** Frei wählbarer Ordner (wie in der Bibliothek der Live-Automation) */
+  folder?: string;
+  /** Ursprünglicher Dateiname beim Upload (für M3U-Abgleich) */
+  originalName?: string;
+  /** Externe Quelle (URL/Stream) statt Datei */
+  url?: string;
 }
 
 export interface QueueEntry {
   uid: string;
   mediaId: string;
   addedAt: number;
-  origin: 'manual' | 'clock' | 'emergency';
+  origin: 'manual' | 'clock' | 'emergency' | 'plan' | 'schedule';
 }
 
 export type DeckId = 'A' | 'B' | 'C' | 'D';
@@ -208,6 +215,11 @@ export class PlayQueue {
 
   clear(): void {
     this.items = [];
+  }
+
+  /** Entfernt automatisch hinzugefügte Einträge (z. B. bei Wechsel des Sendeplans). */
+  pruneOrigins(origins: ReadonlyArray<QueueEntry['origin']>): void {
+    this.items = this.items.filter((x) => !origins.includes(x.origin));
   }
 
   /** Entfernt Einträge, deren Medium nicht mehr existiert. */

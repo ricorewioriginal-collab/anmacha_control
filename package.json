@@ -1,6 +1,6 @@
 {
   "name": "airdeck",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "description": "AirDeck – unabhängige Radio-Automation (Windows, Android, Self-Hosted)",
   "type": "module",
