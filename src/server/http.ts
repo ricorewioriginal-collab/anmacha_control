@@ -191,6 +191,9 @@ export function createHttpServer(app: AirDeckApp, studioDir: string): Server {
   });
   add('POST', '/api/v1/stations/:sid/playout/start', 'automation:write', async (c) => app.startPlayout(c.p, sid(c), (await c.body()) as never));
   add('POST', '/api/v1/stations/:sid/playout/stop', 'automation:write', (c) => app.stopPlayout(c.p, sid(c)));
+  add('POST', '/api/v1/stations/:sid/playout/mic', 'automation:write', async (c) => app.setMic(sid(c), (await c.body()).on === true));
+  add('GET', '/api/v1/audio-devices', 'automation:read', () => app.inputDevices());
+  add('POST', '/api/v1/stations/:sid/queue/shuffle', 'queue:write', (c) => app.shuffleQueue(sid(c)));
   add('POST', '/api/v1/stations/:sid/playout/skip', 'automation:write', (c) => app.skipPlayout(sid(c)));
 
   // --- Ordner, URL-Streams, M3U, Titelanzeige, Verlauf ---

@@ -10,11 +10,29 @@ import {
   BYTES_PER_FRAME, CHANNELS, PcmFifo, SAMPLE_RATE, busRmsDb, busToS16, dbToGain, framesToMs, mixInto, msToFrames,
 } from '../core/pcm.ts';
 
-export type StreamFormat = 'mp3' | 'opus';
+export type StreamFormat = 'mp3' | 'opus' | 'aac';
+
+/** 10-Band-EQ (Hz) für die Master-Kette */
+export const EQ_BANDS = [60, 170, 310, 600, 1000, 3000, 6000, 12000, 14000, 16000] as const;
+
+export interface DspOptions {
+  /** Verstärkung je Band in dB (−12 … +12), Reihenfolge wie EQ_BANDS */
+  eq: number[];
+  compressor: boolean;
+  limiter: boolean;
+}
 
 export interface PlayoutOptions {
   format: StreamFormat;
   bitrateKbps: number;
+  /** Einblendzeit neuer Titel in ms (0 = sofort voll) */
+  fadeInMs: number;
+  dsp: DspOptions;
+  /** Programm über die Lautsprecher dieses PCs mithören (ffplay) */
+  monitor: boolean;
+  /** Aufnahmegerät für Mikrofon/Line-In (leer = keins) */
+  inputDevice: string;
+  micGainDb: number;
   /** Standard-Überblendung für Musik in ms */
   crossfadeMs: number;
   /** Absenkung der Musik, während Carts mit Ducking laufen */
@@ -25,7 +43,22 @@ export interface PlayoutOptions {
 
 export const DEFAULT_PLAYOUT: PlayoutOptions = {
   format: 'mp3', bitrateKbps: 128, crossfadeMs: 3000, duckDb: -10, silenceThresholdDb: -50, silenceMs: 10_000,
+  fadeInMs: 0, dsp: { eq: EQ_BANDS.map(() => 0), compressor: false, limiter: true }, monitor: false, inputDevice: '', micGainDb: 0,
 };
+
+/** ffmpeg-Filterkette für die Master-DSP. */
+export function dspFilter(d: DspOptions): string | null {
+  const parts: string[] = [];
+  EQ_BANDS.forEach((f, i) => {
+    const g = Math.max(-12, Math.min(12, Number(d.eq?.[i]) || 0));
+    if (g !== 0) parts.push(`equalizer=f=${f}:t=o:w=1:g=${g}`);
+  });
+  if (d.compressor) parts.push('acompressor=threshold=0.125:ratio=3:attack=20:release=250:makeup=2');
+  if (d.limiter) parts.push('alimiter=limit=0.95:level=disabled');
+  return parts.length ? parts.join(',') : null;
+}
+
+const RAW_IN = ['-f', 's16le', '-ar', String(SAMPLE_RATE), '-ch_layout', 'stereo'];
 
 export interface PlayoutHooks {
   nextTrack(): MediaItem | null;
@@ -38,7 +71,12 @@ export interface PlayoutHooks {
   log(event: string, data?: Record<string, unknown>): void;
 }
 
-export const CONTENT_TYPE: Record<StreamFormat, string> = { mp3: 'audio/mpeg', opus: 'audio/ogg' };
+export const CONTENT_TYPE: Record<StreamFormat, string> = { mp3: 'audio/mpeg', opus: 'audio/ogg', aac: 'audio/aac' };
+
+export interface PlayoutExtras {
+  ffplay?: string | null;
+  inputArgs?: (device: string) => string[];
+}
 
 const BLOCK_MS = 20;
 const MAX_BUFFER_BYTES = 10 * SAMPLE_RATE * BYTES_PER_FRAME; // 10 s Vorlauf pro Stimme
@@ -100,6 +138,9 @@ export interface PlayoutStatus {
   carts: number;
   startedAt: number | null;
   underruns: number;
+  micOn: boolean;
+  input: 'off' | 'running' | 'error';
+  monitor: boolean;
 }
 
 export class Playout {
@@ -120,11 +161,19 @@ export class Playout {
   private lastNextAttempt = -Infinity;
   private underruns = 0;
   private skipRequested = false;
+  private readonly extras: PlayoutExtras;
+  private monitorProc: ChildProcess | null = null;
+  private inputProc: ChildProcess | null = null;
+  private readonly inputFifo = new PcmFifo();
+  private inputState: PlayoutStatus['input'] = 'off';
+  private micOn = false;
+  private micGain = 0;
 
-  constructor(ffmpeg: string, hooks: PlayoutHooks, opts: Partial<PlayoutOptions> = {}) {
+  constructor(ffmpeg: string, hooks: PlayoutHooks, opts: Partial<PlayoutOptions> = {}, extras: PlayoutExtras = {}) {
     this.ffmpeg = ffmpeg;
     this.hooks = hooks;
-    this.opts = { ...DEFAULT_PLAYOUT, ...opts };
+    this.extras = extras;
+    this.opts = { ...DEFAULT_PLAYOUT, ...opts, dsp: { ...DEFAULT_PLAYOUT.dsp, ...opts.dsp } };
     this.silence = new SilenceDetector({ thresholdDb: this.opts.silenceThresholdDb, durationMs: this.opts.silenceMs });
   }
 
@@ -138,6 +187,8 @@ export class Playout {
     this.startedAt = Date.now();
     this.silence = new SilenceDetector({ thresholdDb: this.opts.silenceThresholdDb, durationMs: this.opts.silenceMs });
     this.startEncoder();
+    if (this.opts.monitor) this.startMonitor();
+    if (this.opts.inputDevice) this.startInput();
     this.t0 = performance.now();
     this.framesOut = 0;
     this.timer = setInterval(() => this.pump(), BLOCK_MS);
@@ -156,6 +207,9 @@ export class Playout {
     this.encoderState = 'stopped';
     enc?.stdin?.end();
     setTimeout(() => enc?.kill('SIGKILL'), 1000).unref();
+    this.monitorProc?.kill('SIGKILL');
+    this.monitorProc = null;
+    this.stopInput();
     this.hooks.onStreamStop();
     if (this.silent) this.hooks.onSilence(false);
     this.silent = false;
@@ -166,6 +220,13 @@ export class Playout {
   /** Aktuellen Titel kurz ausblenden und nächsten starten. */
   skip(): void {
     this.skipRequested = true;
+  }
+
+  /** Mikrofon/Line-In auf Sendung (mit Ducking der Musik) oder stumm. */
+  setMic(on: boolean): void {
+    if (on && this.inputState !== 'running') throw new Error('Kein Aufnahmegerät aktiv');
+    this.micOn = on;
+    this.hooks.log(on ? 'mic_on' : 'mic_off');
   }
 
   playCart(media: MediaItem, duck: boolean): void {
@@ -191,6 +252,9 @@ export class Playout {
       carts: this.voices.filter((v) => v.kind === 'cart').length,
       startedAt: this.startedAt,
       underruns: this.underruns,
+      micOn: this.micOn,
+      input: this.inputState,
+      monitor: !!this.monitorProc,
     };
   }
 
@@ -206,13 +270,15 @@ export class Playout {
   }
 
   private startEncoder(): void {
+    const br = `${this.opts.bitrateKbps}k`;
     const codec =
-      this.opts.format === 'opus'
-        ? ['-c:a', 'libopus', '-b:a', `${this.opts.bitrateKbps}k`, '-f', 'ogg', '-page_duration', '200000']
-        : ['-c:a', 'libmp3lame', '-b:a', `${this.opts.bitrateKbps}k`, '-f', 'mp3'];
+      this.opts.format === 'opus' ? ['-c:a', 'libopus', '-b:a', br, '-f', 'ogg', '-page_duration', '200000']
+      : this.opts.format === 'aac' ? ['-c:a', 'aac', '-b:a', br, '-f', 'adts']
+      : ['-c:a', 'libmp3lame', '-b:a', br, '-f', 'mp3'];
+    const af = dspFilter(this.opts.dsp);
     const enc = spawn(
       this.ffmpeg,
-      ['-hide_banner', '-loglevel', 'error', '-nostdin', '-f', 's16le', '-ar', String(SAMPLE_RATE), '-ac', String(CHANNELS), '-i', 'pipe:0', ...codec, '-flush_packets', '1', 'pipe:1'],
+      ['-hide_banner', '-loglevel', 'error', '-nostdin', ...RAW_IN, '-i', 'pipe:0', ...(af ? ['-af', af] : []), ...codec, '-flush_packets', '1', 'pipe:1'],
       { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true },
     );
     this.encoder = enc;
@@ -233,6 +299,46 @@ export class Playout {
       this.hooks.onStreamStop();
       setTimeout(() => this.running && !this.encoder && this.startEncoder(), 1000).unref();
     });
+  }
+
+  private startMonitor(): void {
+    const ffplay = this.extras.ffplay;
+    if (!ffplay) return this.hooks.log('monitor_unavailable', { reason: 'ffplay fehlt' });
+    const p = spawn(ffplay, ['-hide_banner', '-loglevel', 'error', '-nodisp', '-fflags', 'nobuffer', '-probesize', '32', ...RAW_IN, '-i', 'pipe:0'], { stdio: ['pipe', 'ignore', 'ignore'], windowsHide: true });
+    this.monitorProc = p;
+    p.stdin!.on('error', () => {});
+    p.on('error', () => (this.monitorProc = null));
+    p.on('close', () => {
+      if (this.monitorProc === p) this.monitorProc = null;
+    });
+  }
+
+  private startInput(): void {
+    const args = this.extras.inputArgs?.(this.opts.inputDevice);
+    if (!args) return;
+    const p = spawn(this.ffmpeg, ['-hide_banner', '-loglevel', 'error', '-nostdin', ...args, '-vn', '-f', 's16le', '-ar', String(SAMPLE_RATE), '-ac', String(CHANNELS), 'pipe:1'], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+    this.inputProc = p;
+    this.inputState = 'running';
+    p.stdout!.on('data', (d: Buffer) => this.inputFifo.push(d));
+    let err = '';
+    p.stderr!.on('data', (d) => (err = (err + d).slice(-300)));
+    p.on('error', () => (this.inputState = 'error'));
+    p.on('close', () => {
+      if (this.inputProc !== p) return;
+      this.inputProc = null;
+      this.inputState = 'error';
+      this.micOn = false;
+      this.hooks.log('input_failed', { device: this.opts.inputDevice, stderr: err.trim() });
+    });
+  }
+
+  private stopInput(): void {
+    const p = this.inputProc;
+    this.inputProc = null;
+    p?.kill('SIGKILL');
+    this.inputFifo.clear();
+    this.inputState = 'off';
+    this.micOn = false;
   }
 
   private startVoice(v: Voice): void {
@@ -258,7 +364,13 @@ export class Playout {
   private startNextTrack(): boolean {
     const m = this.hooks.nextTrack();
     if (!m) return false;
-    this.startVoice(new Voice(m, 'track', false));
+    const v = new Voice(m, 'track', false);
+    if (this.opts.fadeInMs > 0) {
+      const target = v.gain;
+      v.gain = 0;
+      v.fade(target, msToFrames(this.opts.fadeInMs));
+    }
+    this.startVoice(v);
     this.hooks.onNowPlaying(m);
     return true;
   }
@@ -282,7 +394,7 @@ export class Playout {
     this.automation(now);
 
     const bus = new Float32Array(due * CHANNELS);
-    const ducking = this.voices.some((v) => v.kind === 'cart' && v.duck);
+    const ducking = this.micOn || this.voices.some((v) => v.kind === 'cart' && v.duck);
     const duckTarget = ducking ? dbToGain(this.opts.duckDb) : 1;
     const duckFrom = this.duckGain;
     // Ducking weich über ca. 150 ms
@@ -307,6 +419,18 @@ export class Playout {
       v.played += got;
       if (v.proc && v.fifo.bytes < RESUME_BYTES) v.proc.stdout?.resume();
     }
+    // Mikrofon/Line-In: Latenz klein halten (max. ~200 ms Vorlauf), Ein-/Ausblenden weich
+    if (this.inputProc) {
+      const maxFrames = msToFrames(200) + due;
+      if (this.inputFifo.frames > maxFrames) this.inputFifo.read(this.inputFifo.frames - maxFrames);
+      const { samples } = this.inputFifo.read(due);
+      const target = this.micOn ? dbToGain(this.opts.micGainDb) : 0;
+      const from = this.micGain;
+      const to = from + Math.sign(target - from) * Math.min(Math.abs(target - from), due / msToFrames(80));
+      this.micGain = to;
+      if (from > 0 || to > 0) mixInto(bus, samples, from, to);
+    }
+
     this.voices = this.voices.filter((v) => {
       if (!v.finished) return true;
       v.stop();
@@ -315,7 +439,10 @@ export class Playout {
 
     this.framesOut += due;
     const enc = this.encoder;
-    if (enc?.stdin && enc.stdin.writableLength < 2 * 1024 * 1024) enc.stdin.write(busToS16(bus));
+    const pcm = busToS16(bus);
+    if (enc?.stdin && enc.stdin.writableLength < 2 * 1024 * 1024) enc.stdin.write(pcm);
+    const mon = this.monitorProc;
+    if (mon?.stdin && mon.stdin.writableLength < 512 * 1024) mon.stdin.write(pcm);
 
     const ev = this.silence.feed(busRmsDb(bus), Date.now());
     if (ev === 'silence') {

@@ -40,6 +40,9 @@ export interface MediaItem {
   originalName?: string;
   /** Externe Quelle (URL/Stream) statt Datei */
   url?: string;
+  album?: string;
+  genre?: string;
+  year?: number;
 }
 
 export interface QueueEntry {
@@ -215,6 +218,14 @@ export class PlayQueue {
 
   clear(): void {
     this.items = [];
+  }
+
+  /** Reihenfolge zufällig mischen (Fisher-Yates). */
+  shuffle(random: () => number = Math.random): void {
+    for (let i = this.items.length - 1; i > 0; i--) {
+      const j = Math.floor(random() * (i + 1));
+      [this.items[i], this.items[j]] = [this.items[j]!, this.items[i]!];
+    }
   }
 
   /** Entfernt automatisch hinzugefügte Einträge (z. B. bei Wechsel des Sendeplans). */

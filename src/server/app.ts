@@ -31,10 +31,12 @@ import {
 } from '../core/automation.ts';
 import { AuditLog, DebouncedJson, readJson, writeFileAtomic } from './store.ts';
 import { SecretStore } from './secrets.ts';
-import { IcecastOutput, type OutputConfig, type OutputState } from './icecast.ts';
+import { IcecastOutput, type BroadcastOutput, type OutputConfig, type OutputState } from './icecast.ts';
+import { ShoutcastOutput } from './shoutcast.ts';
+import { fetchListeners } from './stats.ts';
 import { RelayTarget } from './relay.ts';
-import { detectFfmpeg, probeDurationMs, type FfmpegInfo } from './ffmpeg.ts';
-import { DEFAULT_PLAYOUT, Playout, type PlayoutOptions } from './playout.ts';
+import { detectFfmpeg, inputDeviceArgs, listInputDevices, probeMedia, type FfmpegInfo } from './ffmpeg.ts';
+import { DEFAULT_PLAYOUT, EQ_BANDS, Playout, type PlayoutOptions } from './playout.ts';
 import {
   activeWindow, clockDue, dueJobs, nextOccurrence, parseM3U, toM3U, validateClock, validateWindow,
   type ClockEvent, type JobTarget, type ProgramPlan, type RecordingPlan, type Repeat, type ScheduledJob,
@@ -186,7 +188,7 @@ export class AirDeckApp {
   readonly secrets: SecretStore;
   readonly audit: AuditLog;
   private readonly stations = new Map<string, StationRuntime>();
-  private readonly outputs = new Map<string, IcecastOutput>();
+  private readonly outputs = new Map<string, BroadcastOutput>();
   private readonly relays = new Map<string, RelayTarget>();
   private readonly playouts = new Map<string, { playout: Playout; source: SourceConfig }>();
   readonly ffmpeg: FfmpegInfo | null;
@@ -341,6 +343,17 @@ export class AirDeckApp {
       this.processSchedules();
     } catch (err) {
       this.audit.write({ kind: 'schedule', event: 'error', message: (err as Error).message });
+    }
+    // Hörerzahlen alle 30 s von den verbundenen Ausgängen
+    if (this.tickCount % 60 === 0) {
+      for (const o of this.outputs.values()) {
+        if (o.state.status !== 'connected') continue;
+        fetchListeners(o.cfg).then((n) => {
+          if (o.state.listeners === n) return;
+          o.state.listeners = n;
+          this.publish('stream.state_changed', o.cfg.stationId, { id: o.cfg.id, ...o.state });
+        });
+      }
     }
     if (++this.tickCount % 2 === 0) {
       for (const [id, { playout }] of this.playouts) this.publish('playout.state', id, playout.status());
@@ -587,9 +600,10 @@ export class AirDeckApp {
 
   // ---------- Ausgänge ----------
 
-  private mountOutput(cfg: OutputConfig): IcecastOutput {
+  private mountOutput(cfg: OutputConfig): BroadcastOutput {
     this.outputs.get(cfg.id)?.stop();
-    const o = new IcecastOutput(cfg, () => this.secrets.get(cfg.passwordRef), (s: OutputState) => this.publish('stream.state_changed', cfg.stationId, { id: cfg.id, ...s }));
+    const Cls = cfg.type === 'shoutcast' ? ShoutcastOutput : IcecastOutput;
+    const o = new Cls(cfg, () => this.secrets.get(cfg.passwordRef), (s: OutputState) => this.publish('stream.state_changed', cfg.stationId, { id: cfg.id, ...s }));
     this.outputs.set(cfg.id, o);
     return o;
   }
@@ -626,6 +640,8 @@ export class AirDeckApp {
       tls: Boolean(input.tls ?? prev?.tls ?? false),
       sourceTarget: normalizeMount(String(input.sourceTarget ?? prev?.sourceTarget ?? '/live')),
       priority: priority as number | undefined,
+      streamId: type === 'shoutcast' ? posInt('streamId' in input ? input.streamId : prev?.streamId) : undefined,
+      bitrateKbps: posInt('bitrateKbps' in input ? input.bitrateKbps : prev?.bitrateKbps),
       enabled: Boolean(input.enabled ?? prev?.enabled ?? true),
     };
     if (typeof input.password === 'string' && input.password) this.secrets.set(cfg.passwordRef, input.password);
@@ -667,11 +683,20 @@ export class AirDeckApp {
     rt.data.library.push(item);
     this.publish('library.changed', stationId, { added: item });
     this.changed();
-    // Laufzeit serverseitig ermitteln (wichtig für Crossfade/Backtiming im Headless-Betrieb)
+    // Laufzeit und ID3-Tags serverseitig lesen (wichtig für Crossfade/Backtiming im Headless-Betrieb)
     const ffprobe = this.ffmpeg?.ffprobe;
-    if (ffprobe && item.durationMs == null) {
-      probeDurationMs(ffprobe, this.mediaPath(stationId, item)).then((ms) => {
-        if (ms && item.durationMs == null && rt.data.library.includes(item)) this.updateMedia(stationId, item.id, { durationMs: ms });
+    if (ffprobe && !item.url) {
+      probeMedia(ffprobe, this.mediaPath(stationId, item)).then(({ durationMs, tags }) => {
+        if (!rt.data.library.includes(item)) return;
+        const patch: Record<string, unknown> = {};
+        if (durationMs && item.durationMs == null) patch.durationMs = durationMs;
+        if (tags.title) patch.title = tags.title;
+        if (tags.artist) patch.artist = tags.artist;
+        if (tags.bpm && item.bpm == null) patch.bpm = tags.bpm;
+        if (tags.album) item.album = tags.album;
+        if (tags.genre) item.genre = tags.genre;
+        if (tags.year) item.year = tags.year;
+        if (Object.keys(patch).length || tags.album || tags.genre || tags.year) this.updateMedia(stationId, item.id, patch);
       });
     }
     return item;
@@ -879,7 +904,7 @@ export class AirDeckApp {
         this.audit.write({ kind: 'playout', event, stationId, ...data });
         this.publish('playout.log', stationId, { event, ...data });
       },
-    }, cfg);
+    }, cfg, { ffplay: this.ffmpeg.ffplay, inputArgs: inputDeviceArgs });
     this.playouts.set(stationId, { playout, source });
     playout.start();
     rt.data.playout = { ...cfg, autostart: input.autostart ?? true };
@@ -903,6 +928,27 @@ export class AirDeckApp {
     return this.playoutView(stationId);
   }
 
+  setMic(stationId: string, on: boolean): void {
+    const po = this.playouts.get(stationId);
+    if (!po) throw new AppError(409, 'not_running', 'Server-Playout läuft nicht');
+    try {
+      po.playout.setMic(on);
+    } catch (err) {
+      throw new AppError(409, 'no_input', (err as Error).message);
+    }
+    this.publish('playout.state', stationId, po.playout.status());
+  }
+
+  inputDevices(): unknown {
+    if (!this.ffmpeg) return { supported: false, devices: [] };
+    return { supported: true, devices: listInputDevices(this.ffmpeg.ffmpeg), monitor: !!this.ffmpeg.ffplay, eqBands: EQ_BANDS };
+  }
+
+  shuffleQueue(stationId: string): void {
+    this.rt(stationId).queue.shuffle();
+    this.publishQueue(stationId);
+  }
+
   skipPlayout(stationId: string): void {
     const po = this.playouts.get(stationId);
     if (!po) throw new AppError(409, 'not_running', 'Server-Playout läuft nicht');
@@ -912,10 +958,20 @@ export class AirDeckApp {
   savePlayoutConfig(stationId: string, input: Partial<PlayoutConfig>): PlayoutConfig {
     const rt = this.rt(stationId);
     const cur: PlayoutConfig = { ...DEFAULT_PLAYOUT, autostart: false, ...rt.data.playout };
-    if (input.format === 'mp3' || input.format === 'opus') cur.format = input.format;
+    if (input.format === 'mp3' || input.format === 'opus' || input.format === 'aac') cur.format = input.format;
+    cur.dsp = { ...DEFAULT_PLAYOUT.dsp, ...cur.dsp };
+    if (input.dsp && typeof input.dsp === 'object') {
+      if (Array.isArray(input.dsp.eq)) cur.dsp.eq = EQ_BANDS.map((_, i) => Math.max(-12, Math.min(12, Number(input.dsp!.eq[i]) || 0)));
+      if (typeof input.dsp.compressor === 'boolean') cur.dsp.compressor = input.dsp.compressor;
+      if (typeof input.dsp.limiter === 'boolean') cur.dsp.limiter = input.dsp.limiter;
+    }
+    if (typeof input.monitor === 'boolean') cur.monitor = input.monitor;
+    if (typeof input.inputDevice === 'string') cur.inputDevice = input.inputDevice.slice(0, 200);
     const num = (v: unknown, min: number, max: number) => (typeof v === 'number' && Number.isFinite(v) && v >= min && v <= max ? v : undefined);
     cur.bitrateKbps = num(input.bitrateKbps, 32, 320) ?? cur.bitrateKbps;
     cur.crossfadeMs = num(input.crossfadeMs, 0, 15000) ?? cur.crossfadeMs;
+    cur.fadeInMs = num(input.fadeInMs, 0, 10000) ?? cur.fadeInMs ?? 0;
+    cur.micGainDb = num(input.micGainDb, -20, 20) ?? cur.micGainDb ?? 0;
     cur.duckDb = num(input.duckDb, -40, 0) ?? cur.duckDb;
     cur.silenceThresholdDb = num(input.silenceThresholdDb, -90, -10) ?? cur.silenceThresholdDb;
     cur.silenceMs = num(input.silenceMs, 2000, 120000) ?? cur.silenceMs;
@@ -1544,7 +1600,7 @@ export class AirDeckApp {
     return s;
   }
 
-  private outputOf(stationId: string, id: string): IcecastOutput {
+  private outputOf(stationId: string, id: string): BroadcastOutput {
     const o = this.outputs.get(id);
     if (!o || o.cfg.stationId !== stationId) throw new AppError(404, 'not_found', 'Ausgang nicht gefunden');
     return o;
@@ -1570,6 +1626,11 @@ export function normalizeMount(m: unknown): string {
     throw new AppError(400, 'invalid_mount', 'Ungültiger Mountpoint/Target');
   }
   return withSlash;
+}
+
+function posInt(v: unknown): number | undefined {
+  const n = Number(v);
+  return v !== null && v !== '' && Number.isFinite(n) && n > 0 ? Math.floor(n) : undefined;
 }
 
 function safeColor(v: unknown, fallback: string): string {
@@ -1601,7 +1662,7 @@ function publicSource<T extends SourceConfig>(s: T, secrets: SecretStore): Omit<
   return { ...rest, hasPassword: !!credentialRef && secrets.has(credentialRef) };
 }
 
-function publicOutput(o: IcecastOutput, secrets: SecretStore): Record<string, unknown> {
+function publicOutput(o: BroadcastOutput, secrets: SecretStore): Record<string, unknown> {
   const { passwordRef, ...cfg } = o.cfg;
   return { ...cfg, hasPassword: secrets.has(passwordRef), state: { ...o.state } };
 }
