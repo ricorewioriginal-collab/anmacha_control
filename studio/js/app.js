@@ -4,7 +4,7 @@
 
 import { Api, ApiError, isNativeApp, readToken, saveServer, saveToken, serverBase } from './api.js';
 import { AudioEngine, DECKS, SilenceDetector, openMic, recordStream } from './audio.js';
-import { $, clockTime, download, fmt, formDialog, h, mediaTitle, run, status } from './ui.js';
+import { $, CATEGORY_STYLE, clockTime, download, fmt, formDialog, h, hydrateIcons, icon, mediaTitle, run, status } from './ui.js';
 import { mountPlanning, mountRecorder } from './planning.js';
 import { mountLautfm } from './lautfm.js';
 
@@ -67,6 +67,7 @@ const url = (/** @type {string} */ p) => `/stations/${sid()}${p}`;
 // ---------- Start ----------
 
 async function boot() {
+  hydrateIcons();
   const token = readToken();
   if (!token || (isNativeApp() && !serverBase())) return askToken();
   api = new Api(token);
@@ -220,6 +221,7 @@ function applyBranding() {
   r.setProperty('--primary', S.station.primaryColor);
   r.setProperty('--accent', S.station.accentColor);
   $('station-slogan').textContent = S.station.slogan || S.station.name;
+  $('station-logo').textContent = S.station.name.split(/\s+/).map((/** @type {string} */ w) => w[0]).join('').slice(0, 3).toUpperCase();
   document.title = `${S.station.name} · AirDeck Studio`;
 }
 
@@ -365,7 +367,20 @@ async function toggleStream() {
 
 // ---------- Server-Playout ----------
 
+function renderAutoState() {
+  const server = serverMode();
+  $('st-auto').classList.toggle('on', server || S.auto);
+  $('st-auto-text').textContent = server ? 'Server-Automation läuft (24/7)' : S.auto ? 'Browser-Automation läuft' : 'Automation aus';
+  const po = S.playout?.status;
+  const lvOn = server && po?.input === 'running' ? !!po.micOn : !!S.mic && S.mic.stream.getAudioTracks().some((t) => t.enabled);
+  $('lv-mic').classList.toggle('on', lvOn);
+  $('lv-state').textContent = lvOn ? 'on air' : 'bereit';
+  $('lv-state').className = `pill ${lvOn ? 'failed' : ''}`;
+  $('lv-info').textContent = server && po?.input === 'running' ? 'Mikrofon am PC (Server)' : S.mic ? `Browser → ${sourceName(S.mic.sourceId)}` : 'Browser-Mikrofon';
+}
+
 function renderPlayout() {
+  renderAutoState();
   const p = S.playout;
   const st = p?.status;
   const pill = $('po-state');
@@ -482,33 +497,44 @@ function toggleListen() {
 /** @type {Record<string, Record<string, HTMLElement>>} */
 const deckEls = {};
 
+const DECK_ROLE = /** @type {Record<string, [string, string]>} */ ({ A: ['Musik', 'music'], B: ['Musik', 'music'], C: ['Jingle', 'jingle'], D: ['Spezial', 'star'] });
+
 function buildDecks() {
   const root = $('decks');
   for (const id of DECKS) {
+    const [role, ico] = DECK_ROLE[id];
     const els = {
-      title: h('div', { class: 'deck-title' }),
+      cover: h('div', { class: 'cover' }, id),
+      title: h('div', { class: 'deck-title' }, '–'),
       artist: h('div', { class: 'deck-artist' }),
       status: h('span', { class: 'deck-status' }, 'leer'),
       elapsed: h('span', { class: 'muted' }, '0:00'),
       remain: h('span', { class: 'deck-remain' }, '--:--'),
       bar: h('i'),
       meter: h('i'),
-      play: h('button', { class: 'deck-btn play', title: 'Play/Pause', 'aria-pressed': 'false', onclick: () => togglePlay(id) }, '▶'),
+      bpm: h('span', {}, '–'),
+      gain: h('span', {}, '0.0 dB'),
+      total: h('span', {}, '--:--'),
+      play: h('button', { class: 'deck-btn play', title: `Play/Pause (F${DECKS.indexOf(id) + 1})`, 'aria-pressed': 'false', onclick: () => togglePlay(id) }, icon('play', 16)),
+      cue: h('button', { class: 'deck-btn cue', title: 'CUE: vorhören (PFL, nicht auf Sendung)', 'aria-pressed': 'false', onclick: () => togglePfl(id) }, 'CUE'),
     };
     const progress = h('div', { class: 'progress', title: 'Klicken zum Springen', onclick: (/** @type {MouseEvent} */ e) => seek(id, e) }, els.bar);
     const vol = h('input', { type: 'range', min: '0', max: '1', step: '0.01', value: '1', 'aria-label': `Deck ${id} Lautstärke`, oninput: (/** @type {Event} */ e) => ensureAudio().decks[id].setVolume(Number(/** @type {HTMLInputElement} */ (e.target).value)) });
-    const card = h('div', { class: 'deck', 'data-status': 'empty' },
-      h('div', { class: 'deck-head' }, h('span', { class: 'deck-id' }, `Deck ${id}`), els.status),
-      els.title, els.artist,
-      h('div', { class: 'deck-time' }, els.elapsed, els.remain),
+    const card = h('div', { class: 'deck', 'data-deck': id, 'data-status': 'empty' },
+      h('div', { class: 'deck-head' }, icon(ico, 16), h('span', {}, `Deck ${id}`), h('span', { class: 'role' }, `– ${role}`), els.status),
+      h('div', { class: 'deck-body' }, els.cover,
+        h('div', { style: 'min-width:0' }, els.title, els.artist, h('div', { class: 'deck-time' }, els.elapsed, els.remain)),
+        h('div', { class: 'vu-deck' }, els.meter)),
       progress,
-      h('div', { class: 'mini-meter' }, els.meter),
       h('div', { class: 'deck-ctrl' },
+        h('button', { class: 'deck-btn', title: 'Zum Anfang', onclick: () => { const d = ensureAudio().decks[id]; if (d.media) d.el.currentTime = (d.media.cueInMs ?? 0) / 1000; } }, icon('prev', 14)),
         els.play,
-        h('button', { class: 'deck-btn', title: 'Stop', onclick: () => { ensureAudio().decks[id].stop(); run(() => api.put(url(`/decks/${id}`), { status: 'cued' })); renderDeck(id); } }, '■'),
-        h('button', { class: 'deck-btn', title: 'Nächster Titel aus Queue laden', onclick: () => loadFromQueue(id) }, '⭳'),
-        h('button', { class: 'deck-btn', title: 'Auswerfen', onclick: () => { ensureAudio().decks[id].eject(); run(() => api.put(url(`/decks/${id}`), { mediaId: null, status: 'empty' })); renderDeck(id); } }, '⏏'),
+        h('button', { class: 'deck-btn', title: 'Nächsten Titel aus der Queue laden', onclick: () => loadFromQueue(id) }, icon('next', 14)),
+        els.cue,
+        h('button', { class: 'deck-btn', title: 'Stop', onclick: () => { ensureAudio().decks[id].stop(); run(() => api.put(url(`/decks/${id}`), { status: 'cued' })); renderDeck(id); } }, icon('stop', 14)),
+        h('button', { class: 'deck-btn', title: 'Auswerfen', onclick: () => { stopPfl(id); ensureAudio().decks[id].eject(); run(() => api.put(url(`/decks/${id}`), { mediaId: null, status: 'empty' })); renderDeck(id); } }, icon('eject', 14)),
         vol),
+      h('div', { class: 'deck-stats' }, h('div', {}, h('span', {}, 'BPM'), els.bpm), h('div', {}, h('span', {}, 'Gain'), els.gain), h('div', {}, h('span', {}, 'Länge'), els.total)),
     );
     dropTarget(card, (dt) => {
       const mid = dt.getData(MIME.MEDIA);
@@ -564,10 +590,65 @@ function renderDeck(id) {
   els.title.textContent = m?.title ?? '–';
   els.artist.textContent = m ? `${m.artist || CATEGORY_LABEL[m.category] || ''}` : '';
   els.play.setAttribute('aria-pressed', String(st === 'playing'));
-  els.play.textContent = st === 'playing' ? '❚❚' : '▶';
+  els.play.replaceChildren(icon(st === 'playing' ? 'pause' : 'play', 16));
+  els.bpm.textContent = m?.bpm ? String(m.bpm) : '–';
+  els.gain.textContent = `${(m?.gainDb ?? 0).toFixed(1)} dB`;
+  els.total.textContent = fmt(m?.durationMs);
+  els.cover.replaceWith((els.cover = coverEl(m, 'cover', id)));
+}
+
+/** Cover-Element: eingebettetes Bild der Datei, sonst Initialen auf Farbverlauf. @param {any} m @param {string} cls @param {string} [fallback] */
+function coverEl(m, cls, fallback) {
+  const initials = m ? ((m.artist || m.title || '?').split(/\s+/).map((/** @type {string} */ w) => w[0]).join('').slice(0, 2).toUpperCase()) : fallback ?? '';
+  const el = h('div', { class: cls, style: m ? `--c:${CATEGORY_STYLE[m.category]?.color ?? '#2f8cff'}` : '' }, initials);
+  if (m && !m.url) {
+    const img = h('img', { alt: '', src: `${api.base}/api/v1/stations/${sid()}/media/${encodeURIComponent(m.id)}/cover?token=${encodeURIComponent(api.token)}` });
+    img.addEventListener('load', () => el.replaceChildren(img), { once: true });
+  }
+  return el;
+}
+
+// ---------- Vorhören (PFL / CUE) ----------
+
+/** @type {{ id: string, el: HTMLAudioElement } | null} */
+let pfl = null;
+
+/** @param {string} id */
+function stopPfl(id) {
+  if (!pfl || (id && pfl.id !== id)) return;
+  pfl.el.pause();
+  deckEls[pfl.id]?.cue.setAttribute('aria-pressed', 'false');
+  pfl = null;
+}
+
+/** CUE: Titel des Decks separat vorhören (nicht auf Sendung), optional auf eigenem Ausgabegerät. @param {string} id */
+async function togglePfl(id) {
+  const d = audio?.decks[id];
+  if (pfl?.id === id) return stopPfl(id);
+  stopPfl('');
+  if (!d?.media) return status('Deck ist leer', true);
+  const el = new Audio(api.mediaUrl(S.station.id, d.media.id));
+  el.volume = Number(/** @type {HTMLInputElement} */ ($('fx-pfl')).value);
+  el.currentTime = d.el.currentTime;
+  const sink = localStorage.getItem('airdeck.pflSink');
+  if (sink && 'setSinkId' in el) await /** @type {any} */ (el).setSinkId(sink).catch(() => {});
+  el.play().catch(() => status('Vorhören nicht möglich', true));
+  pfl = { id, el };
+  deckEls[id].cue.setAttribute('aria-pressed', 'true');
+}
+
+async function choosePflDevice() {
+  if (!navigator.mediaDevices?.enumerateDevices) return status('Ausgabegeräte-Wahl wird von diesem Browser nicht unterstützt', true);
+  const devs = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === 'audiooutput');
+  const v = await formDialog('Vorhör-Ausgang (Kopfhörer)', [
+    { name: 'sink', label: 'Gerät', value: localStorage.getItem('airdeck.pflSink') ?? '', options: [['', 'Standard'], ...devs.map((d, i) => /** @type {[string,string]} */ ([d.deviceId, d.label || `Ausgang ${i + 1}`]))] },
+  ]);
+  if (v) localStorage.setItem('airdeck.pflSink', v.sink);
 }
 
 // ---------- Render: Cardwall ----------
+
+const GROUP_ICON = /** @type {Record<string, string>} */ ({ Jingles: 'jingle', Sweeper: 'sweeper', 'Station IDs': 'id', Drops: 'drop', News: 'news', Werbung: 'ad', TTS: 'tts', Voice: 'voice', Humor: 'humor', Events: 'event' });
 
 function renderCarts() {
   const groups = ['Alle', ...new Set(S.carts.map((c) => c.group))];
@@ -577,16 +658,18 @@ function renderCarts() {
   const list = S.carts.filter((c) => S.cartGroup === 'Alle' || c.group === S.cartGroup);
   $('carts').replaceChildren(...list.map((c) => {
     const m = c.mediaId ? S.libById.get(c.mediaId) : null;
+    const ico = (m && CATEGORY_STYLE[m.category]?.icon) || GROUP_ICON[c.group] || 'music';
     const el = h('div', {
-      class: `cart${m ? '' : ' empty'}`, style: m ? `--c:${c.color}` : '', role: 'button', tabindex: '0', 'data-cart': c.id,
+      class: `cart${m ? '' : ' empty'}`, style: `--c:${c.color}`, role: 'button', tabindex: '0', 'data-cart': c.id,
       draggable: m ? 'true' : null,
       title: m ? `${mediaTitle(m)} (${fmt(m.durationMs)})` : 'Titel hierher ziehen',
       onclick: () => (m ? fireCart(c) : undefined),
       onkeydown: (/** @type {KeyboardEvent} */ e) => { if (m && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); fireCart(c); } },
       ondragstart: (/** @type {DragEvent} */ e) => m && e.dataTransfer?.setData(MIME.MEDIA, m.id),
     },
-      h('span', { class: 'cart-label' }, c.label),
-      h('span', { class: 'cart-sub' }, m ? `${m.title} · ${fmt(m.durationMs)}` : 'leer'),
+      h('div', { class: 'cart-top' }, h('span', { class: 'cart-ico' }, icon(ico, 16)), h('span', { class: 'cart-label' }, c.label)),
+      h('span', { class: 'cart-sub' }, m ? m.title : 'leer'),
+      m ? h('span', { class: 'cart-dur' }, fmt(m.durationMs)) : null,
       h('button', { class: 'cart-edit', title: 'Cart bearbeiten', onclick: (/** @type {Event} */ e) => { e.stopPropagation(); editCart(c); } }, '⋯'),
     );
     dropTarget(el, (dt) => {
@@ -635,7 +718,8 @@ function renderLibrary() {
     ondblclick: () => run(() => api.post(url('/queue'), { mediaId: m.id })),
     title: 'Doppelklick: in Queue · Ziehen: auf Deck, Cart oder Queue',
   },
-    h('td', {}, m.title), h('td', {}, m.artist), h('td', {}, h('span', { class: 'tag' }, CATEGORY_LABEL[m.category] ?? m.category)),
+    h('td', {}, coverEl(m, 'cover small')), h('td', {}, m.title), h('td', {}, m.artist), h('td', { class: 'num muted' }, m.bpm ? String(m.bpm) : ''),
+    h('td', {}, h('span', { class: 'tag cat', style: `--c:${CATEGORY_STYLE[m.category]?.color ?? '#2f8cff'}` }, CATEGORY_LABEL[m.category] ?? m.category)),
     h('td', { class: 'num' }, fmt(m.durationMs)),
     h('td', { class: 'act' },
       h('button', { title: 'In Queue', onclick: () => run(() => api.post(url('/queue'), { mediaId: m.id })) }, '＋'),
@@ -752,7 +836,19 @@ async function editSource(s) {
   if (saved) status(`Quelle gespeichert. Encoder-Benutzer: ${saved.id}`);
 }
 
+function renderOutputSummary() {
+  const on = S.outputs.filter((o) => o.state?.status === 'connected');
+  const listeners = S.outputs.map((o) => o.state?.listeners).filter((n) => typeof n === 'number');
+  $('sum-listeners').textContent = listeners.length ? String(listeners.reduce((a, b) => a + b, 0)) : '–';
+  $('sum-outputs').textContent = `${on.length}/${S.outputs.length}`;
+  $('m-stream').textContent = on.length ? `Online · ${on.map((o) => o.name).join(', ')}` : S.outputs.length ? 'Offline' : 'kein Ausgang';
+  const cls = (/** @type {any} */ o) => (o.state?.status === 'connected' ? 'on' : o.state?.status === 'error' ? 'err' : '');
+  $('side-outputs').replaceChildren(...(S.outputs.length ? S.outputs.map((o) => h('div', { class: `side-out ${cls(o)}` }, h('span', { class: 'dot' }), o.name)) : [h('div', { class: 'side-out' }, h('span', { class: 'dot' }), 'kein Ausgang')]));
+  $('st-chips').replaceChildren(...S.outputs.map((o) => h('span', { class: `chip ${cls(o)}` }, h('span', { class: 'dot' }), o.type === 'shoutcast' ? 'SHOUTcast' : /laut\.fm/i.test(o.host) ? 'laut.fm' : 'Icecast')));
+}
+
 function renderOutputs() {
+  renderOutputSummary();
   $('outputs').replaceChildren(...(S.outputs.length ? S.outputs.map((o) => h('li', { class: 'out' },
     h('span', { class: `pill ${o.state?.status ?? 'idle'}` }, o.state?.status ?? 'idle'),
     h('span', { class: 'out-name' }, o.name),
@@ -800,8 +896,21 @@ function renderNowPlaying() {
   const m = S.nowPlaying?.media;
   $('np-title').textContent = m?.title ?? '–';
   $('np-artist').textContent = m?.artist ?? '';
-  const next = S.queue.items?.[0]?.media;
-  $('np-next').textContent = next ? mediaTitle(next) : '–';
+  const cover = $('np-cover');
+  const nc = coverEl(m, 'cover big');
+  nc.id = 'np-cover';
+  cover.replaceWith(nc);
+  const next = (S.queue.items ?? []).slice(0, 3);
+  $('next-list').replaceChildren(...(next.length ? next.map((/** @type {any} */ q) => h('li', {},
+    coverEl(q.media, 'cover small'),
+    h('div', { class: 't' }, h('div', {}, q.media?.title ?? '–'), h('div', {}, q.media?.artist ?? '')),
+    h('span', { class: 'muted num' }, fmt(q.media?.durationMs)))) : [h('li', { class: 'muted' }, 'Queue leer')]));
+  $('st-next').textContent = next[0]?.media ? mediaTitle(next[0].media) : '–';
+  $('m-title').textContent = m?.title ?? '–';
+  $('m-artist').textContent = m?.artist ?? '';
+  const mc = coverEl(m, 'cover big');
+  mc.id = 'm-cover';
+  $('m-cover').replaceWith(mc);
 }
 
 // ---------- Drag & Drop ----------
@@ -871,10 +980,29 @@ function bindStatic() {
     ], 'Senden');
     if (v) run(() => api.post(url('/metadata'), v));
   });
-  $('view-tabs').addEventListener('click', (e) => {
+  const nav = (/** @type {Event} */ e) => {
     const b = /** @type {HTMLElement} */ (e.target).closest('button');
     if (b?.dataset.view) showView(b.dataset.view);
+    if (b?.dataset.jump) {
+      showView('studio');
+      $(b.dataset.jump).scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  };
+  $('view-tabs').addEventListener('click', nav);
+  $('bottom-nav').addEventListener('click', nav);
+  document.querySelector('.m-tiles')?.addEventListener('click', nav);
+  $('m-play').addEventListener('click', () => $('btn-auto').click());
+  $('m-next').addEventListener('click', () => (serverMode() ? run(() => api.post(url('/playout/skip'))) : autoNext()));
+  $('m-restart').addEventListener('click', () => {
+    const d = DECKS.map((id) => audio?.decks[id]).find((x) => x?.playing);
+    if (d?.media) d.el.currentTime = (d.media.cueInMs ?? 0) / 1000;
   });
+  $('btn-menu').addEventListener('click', () => $('sidebar').classList.toggle('open'));
+  buildQuick();
+  bindLiveVoice();
+  bindProcessing();
+  setInterval(pollSystem, 5000);
+  pollSystem();
   $('lib-upload').addEventListener('change', (e) => {
     const input = /** @type {HTMLInputElement} */ (e.target);
     if (input.files?.length) upload([...input.files]).finally(() => (input.value = ''));
@@ -898,6 +1026,7 @@ function bindStatic() {
     S.auto = !S.auto;
     $('btn-auto').setAttribute('aria-pressed', String(S.auto));
     status(S.auto ? 'Automation EIN' : 'Automation AUS');
+    renderAutoState();
     if (S.auto) {
       await ensureAudio().resume();
       if (!AUTO_DECKS.some((id) => audio?.decks[id].playing)) autoNext();
@@ -934,10 +1063,100 @@ function bindStatic() {
   });
 }
 
+// ---------- Schnelltrigger, Live-Voice, Processing, System ----------
+
+const QUICK = /** @type {Array<[string, string]>} */ ([
+  ['news', 'News'], ['jingle', 'Jingle'], ['ad', 'Werbung'], ['station_id', 'Station ID'],
+  ['voice_track', 'Voice Track'], ['sweeper', 'Sweeper'], ['drop', 'Drop'], ['tts', 'TTS'],
+]);
+
+function buildQuick() {
+  $('quick').replaceChildren(...QUICK.map(([cat, label]) => h('button', {
+    style: `--c:${CATEGORY_STYLE[cat]?.color}`,
+    title: ['news', 'ad', 'voice_track'].includes(cat) ? `${label}: sofort per Crossfade` : `${label}: über der Musik`,
+    onclick: async () => {
+      const m = await run(() => api.post(url(`/quick/${cat}`), {}));
+      if (m) status(`Schnelltrigger ${label}: ${mediaTitle(m)}`);
+    },
+  }, icon(CATEGORY_STYLE[cat]?.icon ?? 'music', 16), label)));
+}
+
+/** @type {AnalyserNode|null} */
+let micAnalyser = null;
+const micBuf = new Float32Array(1024);
+
+function bindLiveVoice() {
+  const btn = $('lv-mic');
+  const ptt = /** @type {HTMLInputElement} */ ($('lv-ptt'));
+  const serverMic = () => serverMode() && S.playout?.status?.input === 'running';
+  /** @param {boolean} on */
+  const setOn = async (on) => {
+    if (serverMic()) {
+      await run(() => api.post(url('/playout/mic'), { on }));
+    } else if (S.mic) {
+      for (const t of S.mic.stream.getAudioTracks()) t.enabled = on;
+    } else if (on) {
+      await toggleMic();
+      attachMicMeter();
+    }
+    renderAutoState();
+  };
+  const isOn = () => (serverMic() ? !!S.playout?.status?.micOn : !!S.mic && S.mic.stream.getAudioTracks().some((t) => t.enabled));
+  btn.addEventListener('click', () => { if (!ptt.checked) setOn(!isOn()); });
+  btn.addEventListener('pointerdown', () => { if (ptt.checked) setOn(true); });
+  for (const ev of ['pointerup', 'pointerleave']) btn.addEventListener(ev, () => { if (ptt.checked && isOn()) setOn(false); });
+}
+
+function attachMicMeter() {
+  if (!S.mic) return;
+  const a = ensureAudio();
+  micAnalyser = a.ctx.createAnalyser();
+  micAnalyser.fftSize = 1024;
+  a.ctx.createMediaStreamSource(S.mic.stream).connect(micAnalyser);
+}
+
+function bindProcessing() {
+  const master = /** @type {HTMLInputElement} */ ($('fx-master'));
+  const duck = /** @type {HTMLInputElement} */ ($('fx-duck'));
+  const pflVol = /** @type {HTMLInputElement} */ ($('fx-pfl'));
+  master.addEventListener('input', () => {
+    const v = Number(master.value);
+    ensureAudio().master.gain.value = v;
+    $('fx-master-v').textContent = v > 0 ? `${(20 * Math.log10(v)).toFixed(1)} dB` : '-∞';
+  });
+  duck.addEventListener('input', () => {
+    ensureAudio().duckDb = Number(duck.value);
+    $('fx-duck-v').textContent = `${duck.value} dB`;
+  });
+  pflVol.addEventListener('input', () => {
+    if (pfl) pfl.el.volume = Number(pflVol.value);
+    $('fx-pfl-v').textContent = `${Math.round(Number(pflVol.value) * 100)} %`;
+  });
+  $('fx-pfl-v').parentElement?.firstElementChild?.addEventListener('click', choosePflDevice);
+  $('fx-pfl-v').title = 'Klick auf „Vorhören“: Ausgabegerät wählen';
+}
+
+async function pollSystem() {
+  if (!api || document.hidden) return;
+  try {
+    const s = await api.get('/system');
+    /** @param {string} id @param {number} pct @param {string} txt */
+    const bar = (id, pct, txt) => { $(id).style.width = `${Math.max(0, Math.min(100, pct))}%`; $(`${id}-v`).textContent = txt; };
+    bar('sys-cpu', s.cpu, `${s.cpu} %`);
+    bar('sys-ram', s.ram, `${s.ram} %`);
+    const kbit = (s.streamBytesPerSec * 8) / 1000;
+    bar('sys-net', Math.min(100, kbit / 5), `${kbit.toFixed(0)} kbit/s`);
+    $('sum-rate').textContent = kbit ? `${kbit.toFixed(0)} k` : '–';
+  } catch {
+    // Monitoring ist optional
+  }
+}
+
 /** @param {string} name */
 function showView(name) {
   currentView = name;
-  for (const b of document.querySelectorAll('#view-tabs button')) b.setAttribute('aria-pressed', String(/** @type {HTMLElement} */ (b).dataset.view === name));
+  for (const b of document.querySelectorAll('#view-tabs button, #bottom-nav button')) b.setAttribute('aria-pressed', String(/** @type {HTMLElement} */ (b).dataset.view === name));
+  $('sidebar').classList.remove('open');
   for (const id of ['studio', 'planning', 'recorder', 'lautfm']) $(`view-${id}`).hidden = id !== name;
   if (name !== 'studio') views[name]?.show();
 }
@@ -960,7 +1179,33 @@ function meter(el, db) {
   el.style.width = `${Math.max(0, Math.min(100, ((db + 60) / 60) * 100))}%`;
 }
 
+function liveProgress() {
+  // Now Playing: Fortschritt aus laufendem Deck bzw. Server-Playout
+  const po = S.playout?.status;
+  const playing = DECKS.map((id) => audio?.decks[id]).find((d) => d?.playing && d.media?.id === S.nowPlaying?.mediaId);
+  const pos = playing ? playing.positionMs : po?.running ? po.current?.positionMs : null;
+  const dur = playing ? playing.durationMs : po?.running ? po.current?.durationMs : null;
+  $('np-time').textContent = pos != null ? `${fmt(pos)} / ${fmt(dur)}` : '';
+  $('np-progress').style.width = pos != null && dur ? `${Math.min(100, (pos / dur) * 100)}%` : '0';
+  $('m-time').textContent = $('np-time').textContent;
+  $('m-progress').style.width = $('np-progress').style.width;
+  const running = serverMode() || S.auto;
+  const mp = $('m-play');
+  if (mp.dataset.on !== String(running)) {
+    mp.dataset.on = String(running);
+    mp.replaceChildren(icon(running ? 'pause' : 'play', 30));
+  }
+  if (micAnalyser) {
+    micAnalyser.getFloatTimeDomainData(micBuf);
+    let sum = 0;
+    for (const v of micBuf) sum += v * v;
+    const db = 20 * Math.log10(Math.sqrt(sum / micBuf.length) || 1e-9);
+    $('lv-meter').style.height = `${Math.max(0, Math.min(100, ((db + 60) / 60) * 100))}%`;
+  }
+}
+
 function tick() {
+  liveProgress();
   if (!audio) return;
   for (const id of DECKS) {
     const d = audio.decks[id];
@@ -973,7 +1218,7 @@ function tick() {
     els.remain.classList.toggle('warn', d.playing && rem < 20_000 && rem >= 10_000);
     els.remain.classList.toggle('end', d.playing && rem < 10_000);
     els.bar.style.width = dur ? `${Math.min(100, (d.positionMs / dur) * 100)}%` : '0';
-    meter(els.meter, d.playing ? d.level().rmsDb : -90);
+    els.meter.style.height = `${Math.max(0, Math.min(100, (((d.playing ? d.level().rmsDb : -90) + 60) / 60) * 100))}%`;
     if (els.card.dataset.status !== deckStatus(d)) renderDeck(id);
 
     // Automation: Überblendpunkt erreicht → nächster Titel
@@ -985,7 +1230,8 @@ function tick() {
     }
   }
   const lv = audio.masterLevel();
-  meter($('m-rms'), lv.rmsDb);
+  meter($("m-rms"), lv.rmsDb);
+  $("lufs-v").textContent = lv.rmsDb <= -90 ? "– dB" : `${lv.rmsDb.toFixed(1)} dB RMS`;
   meter($('m-peak'), lv.peakDb);
   $('m-rms-v').textContent = lv.rmsDb <= -90 ? '-∞' : lv.rmsDb.toFixed(1);
   $('m-peak-v').textContent = lv.peakDb <= -90 ? '-∞' : lv.peakDb.toFixed(1);

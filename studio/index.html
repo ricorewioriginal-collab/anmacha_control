@@ -2,149 +2,264 @@
 <html lang="de">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#0a1120">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#07101f">
   <title>AirDeck Studio</title>
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-  <header class="top">
-    <div class="brand">
-      <img src="icon.svg" alt="" width="28" height="28">
-      <div>
-        <div class="brand-name">AirDeck</div>
-        <div class="brand-sub" id="station-slogan"></div>
-      </div>
+<div class="app">
+  <!-- Seitenleiste -->
+  <aside class="sidebar" id="sidebar">
+    <div class="logo">
+      <svg viewBox="0 0 40 36" width="30" height="27" aria-hidden="true"><path d="M20 2L2 34h9l9-17l9 17h9z" fill="currentColor"/></svg>
+      <span>AIRDECK</span>
     </div>
-    <select id="station-select" aria-label="Sender"></select>
-    <nav class="views tabs" id="view-tabs" aria-label="Bereiche">
-      <button data-view="studio" aria-pressed="true">Studio</button>
-      <button data-view="planning" aria-pressed="false">Planung</button>
-      <button data-view="recorder" aria-pressed="false">Recorder</button>
-      <button data-view="lautfm" aria-pressed="false">laut.fm</button>
+    <nav class="nav" id="view-tabs" aria-label="Bereiche">
+      <button data-view="studio" aria-pressed="true"><i data-icon="dashboard"></i><span>Dashboard</span></button>
+      <button data-jump="decks"><i data-icon="music"></i><span>Decks</span></button>
+      <button data-jump="carts-panel"><i data-icon="grid"></i><span>Cardwall</span></button>
+      <button data-jump="work-panel"><i data-icon="list"></i><span>Playlist &amp; Queue</span></button>
+      <button data-jump="live-panel"><i data-icon="mic"></i><span>Live Studio</span></button>
+      <button data-view="planning" aria-pressed="false"><i data-icon="calendar"></i><span>Sendeplan &amp; Events</span></button>
+      <button data-view="recorder" aria-pressed="false"><i data-icon="record"></i><span>Recorder</span></button>
+      <button data-view="lautfm" aria-pressed="false"><i data-icon="lautfm"></i><span>laut.fm</span></button>
+      <button id="btn-station"><i data-icon="settings"></i><span>Sender &amp; Branding</span></button>
     </nav>
-    <div class="onair" id="onair" data-state="off">
-      <span class="dot"></span><span id="onair-text">OFF AIR</span>
+    <div class="side-foot">
+      <div class="side-label">Sender</div>
+      <div class="side-outputs" id="side-outputs"></div>
     </div>
-    <div class="top-actions">
-      <button class="toggle" id="btn-auto" aria-pressed="false" title="Automation: Queue automatisch abspielen">AUTO</button>
-      <button class="toggle" id="btn-stream" aria-pressed="false" title="Studio-Summe als Automation-Quelle senden">STREAM</button>
-      <button class="toggle" id="btn-mic" aria-pressed="false" title="Mikrofon live senden (z. B. Android Live, Priority 3)">MIC LIVE</button>
-      <button class="toggle" id="btn-listen" aria-pressed="false" title="Sendesignal mithören">🎧</button>
-      <label class="chk" title="Musik absenken, während Carts laufen"><input type="checkbox" id="chk-duck" checked> Ducking</label>
-      <button class="icon-btn" id="btn-station" title="Sender-Einstellungen">⚙</button>
-    </div>
-    <div class="clock">
-      <div id="clock-time">--:--:--</div>
-      <div id="clock-date"></div>
-    </div>
-    <span class="conn" id="conn" title="Serververbindung"></span>
-  </header>
+  </aside>
 
-  <main class="view-page" id="view-planning" hidden></main>
-  <main class="view-page" id="view-recorder" hidden></main>
-  <main class="view-page" id="view-lautfm" hidden></main>
-  <main class="studio" id="view-studio">
-    <section class="decks" id="decks" aria-label="Decks"></section>
-
-    <section class="panel carts-panel" aria-label="Cardwall">
-      <div class="panel-head">
-        <h2>Cardwall</h2>
-        <div class="tabs" id="cart-groups"></div>
-      </div>
-      <div class="carts" id="carts"></div>
-    </section>
-
-    <section class="panel lib-panel" aria-label="Musikarchiv">
-      <div class="panel-head">
-        <h2>Archiv</h2>
-        <input type="search" id="lib-search" placeholder="Suchen …" aria-label="Archiv durchsuchen">
-        <select id="lib-cat" aria-label="Kategorie-Filter"></select>
-        <select id="lib-folder" aria-label="Ordner-Filter"></select>
-        <label class="btn small" title="Audiodateien hochladen">⭱ Upload<input type="file" id="lib-upload" accept="audio/*,.mp3,.ogg,.opus,.wav,.flac,.m4a,.aac,.webm" multiple hidden></label>
-        <label class="btn small" title="Ganzen Ordner hochladen (Ordnername wird übernommen)">⭱ Ordner<input type="file" id="lib-upload-dir" webkitdirectory multiple hidden></label>
-        <button class="btn small" id="btn-add-url" title="URL / Stream zur Bibliothek">＋ URL</button>
-      </div>
-      <div class="table-wrap" id="lib-drop">
-        <table class="list">
-          <thead><tr><th>Titel</th><th>Interpret</th><th>Kat.</th><th class="num">Dauer</th><th></th></tr></thead>
-          <tbody id="lib-body"></tbody>
-        </table>
-        <div class="empty" id="lib-empty">Audiodateien hierher ziehen oder über „Upload“ hinzufügen.</div>
-      </div>
-    </section>
-
-    <section class="panel queue-panel" aria-label="Queue">
-      <div class="panel-head">
-        <h2>Queue</h2>
-        <span class="muted" id="queue-total"></span>
-        <label class="chk"><input type="checkbox" id="chk-autofill"> Sendeuhr</label>
-        <button class="btn small" id="btn-fill">Auffüllen</button>
- <button class="btn small" id="btn-shuffle" title="Warteschlange mischen">Mischen</button>
-        <button class="btn small" id="btn-fill-from" title="Warteschlange aus Ordner oder Kategorie füllen">Aus Ordner …</button>
-        <button class="btn small" id="btn-m3u" title="Warteschlange als M3U exportieren">M3U</button>
-        <button class="btn small" id="btn-clear">Leeren</button>
-      </div>
-      <div class="table-wrap" id="queue-drop">
-        <table class="list">
-          <thead><tr><th class="num">Start</th><th>Titel</th><th class="num">Dauer</th><th></th></tr></thead>
-          <tbody id="queue-body"></tbody>
-        </table>
-        <div class="empty" id="queue-empty">Queue ist leer – Titel aus dem Archiv hierher ziehen.</div>
-      </div>
-    </section>
-
-    <aside class="side">
-      <section class="panel np">
-        <h2>Now Playing</h2>
-        <div class="np-title" id="np-title">–</div>
-        <div class="np-artist" id="np-artist"></div>
-        <div class="np-next"><span class="muted">Next:</span> <span id="np-next">–</span></div>
-        <button class="btn small" id="btn-meta" style="margin-top:6px" title="Titelanzeige manuell an die Ausgänge senden">Titelanzeige senden …</button>
-      </section>
-
-      <section class="panel">
-        <div class="panel-head"><h2>Server-Automation 24/7</h2><span class="pill" id="po-state">–</span></div>
-        <div class="po-title" id="po-title">–</div>
-        <div class="po-meta muted" id="po-meta"></div>
-        <div class="po-actions">
-          <button class="btn small primary" id="po-start">Start</button>
-          <button class="btn small" id="po-skip">Weiter ⏭</button>
-          <button class="toggle" id="po-mic" aria-pressed="false" hidden title="Mikrofon/Line-In am PC über die Musik legen (Musik wird abgesenkt)">🎙 Mikro</button>
-          <button class="btn small danger" id="po-stop">Stop</button>
-          <button class="btn small" id="po-settings" title="Format, Bitrate, Überblendung">⋯</button>
+  <div class="main">
+    <!-- Kopfzeile -->
+    <header class="top">
+      <button class="icon-btn mobile-only" id="btn-menu" title="Menü"><i data-icon="menu"></i></button>
+      <div class="station-pick">
+        <span class="station-logo" id="station-logo">FM</span>
+        <div class="station-text">
+          <select id="station-select" aria-label="Sender"></select>
+          <span class="brand-sub" id="station-slogan"></span>
         </div>
-      </section>
+      </div>
+      <div class="onair" id="onair" data-state="off"><span class="dot"></span><span id="onair-text">OFF AIR</span></div>
+      <div class="top-actions">
+        <button class="toggle" id="btn-auto" aria-pressed="false" title="Browser-Automation: Queue automatisch abspielen"><i data-icon="auto" data-size="16"></i> AUTO</button>
+        <button class="toggle" id="btn-stream" aria-pressed="false" title="Studio-Summe als Automation-Quelle senden"><i data-icon="stream" data-size="16"></i> STREAM</button>
+        <button class="toggle" id="btn-mic" aria-pressed="false" title="Mikrofon live senden (Übernahme nach Priorität)"><i data-icon="mic" data-size="16"></i> MIC LIVE</button>
+        <button class="toggle" id="btn-listen" aria-pressed="false" title="Sendesignal mithören"><i data-icon="headphones" data-size="16"></i></button>
+      </div>
+      <div class="clock">
+        <div id="clock-time">--:--:--</div>
+        <div id="clock-date"></div>
+      </div>
+      <span class="conn" id="conn" title="Serververbindung"></span>
+    </header>
 
-      <section class="panel">
-        <div class="panel-head"><h2>Quellen · Priorität</h2><button class="btn small" id="btn-add-source">＋</button></div>
-        <p class="hint">Kleinere Zahl = höhere Priorität</p>
-        <ul class="sources" id="sources"></ul>
-      </section>
+    <main class="view-page" id="view-planning" hidden></main>
+    <main class="view-page" id="view-recorder" hidden></main>
+    <main class="view-page" id="view-lautfm" hidden></main>
 
-      <section class="panel">
-        <div class="panel-head"><h2>Ausgänge</h2><button class="btn small" id="btn-add-output">＋</button></div>
-        <ul class="outputs" id="outputs"></ul>
-      </section>
+    <!-- Dashboard -->
+    <main class="dash" id="view-studio">
+      <div class="dash-main">
+        <section class="m-home" aria-label="Mobil-Übersicht">
+          <div class="m-np">
+            <div class="cover big" id="m-cover"></div>
+            <div class="m-np-text">
+              <div class="np-title" id="m-title">–</div>
+              <div class="np-artist" id="m-artist"></div>
+              <div class="np-time" id="m-time"></div>
+            </div>
+          </div>
+          <div class="np-bar"><i id="m-progress"></i></div>
+          <div class="m-transport">
+            <button class="icon-btn" id="m-restart" title="Zum Anfang"><i data-icon="prev" data-size="22"></i></button>
+            <button class="m-play" id="m-play" title="Automation starten/stoppen"><i data-icon="play" data-size="30"></i></button>
+            <button class="icon-btn" id="m-next" title="Nächster Titel"><i data-icon="next" data-size="22"></i></button>
+          </div>
+          <div class="m-tiles">
+            <button data-jump="work-panel"><i data-icon="list" data-size="22"></i>Playlist</button>
+            <button data-jump="work-panel"><i data-icon="queue" data-size="22"></i>Queue</button>
+            <button data-jump="carts-panel"><i data-icon="grid" data-size="22"></i>Cardwall</button>
+            <button data-jump="live-panel"><i data-icon="bolt" data-size="22"></i>Quick Trigger</button>
+            <button data-jump="live-panel"><i data-icon="mic" data-size="22"></i>Live</button>
+            <button data-view="planning"><i data-icon="calendar" data-size="22"></i>Sendeplan</button>
+          </div>
+          <div class="m-stream"><span class="muted">Stream</span> <strong id="m-stream">–</strong></div>
+        </section>
+        <section class="decks" id="decks" aria-label="Decks"></section>
 
-      <section class="panel meters-panel">
-        <h2>Master</h2>
-        <div class="meter-row"><span>RMS</span><div class="meter"><i id="m-rms"></i></div><span class="num" id="m-rms-v">-∞</span></div>
-        <div class="meter-row"><span>Peak</span><div class="meter"><i id="m-peak"></i></div><span class="num" id="m-peak-v">-∞</span></div>
-        <div class="meter-row"><span>Limiter</span><div class="meter gr"><i id="m-gr"></i></div><span class="num" id="m-gr-v">0.0</span></div>
-        <div class="silence" id="silence" hidden>STILLE ERKANNT</div>
-      </section>
-    </aside>
-  </main>
+        <div class="row2">
+          <section class="panel carts-panel" id="carts-panel" aria-label="Cardwall">
+            <div class="panel-head">
+              <h2>Cardwall</h2>
+              <div class="tabs" id="cart-groups"></div>
+              <label class="chk" title="Musik absenken, während Carts laufen"><input type="checkbox" id="chk-duck" checked> Ducking</label>
+            </div>
+            <div class="carts" id="carts"></div>
+          </section>
 
-  <footer class="status">
-    <span id="status-text">Bereit.</span>
-    <span class="muted">AirDeck 0.3 · local-first</span>
-  </footer>
+          <section class="panel np-panel">
+            <div class="panel-head"><h2>Now Playing</h2></div>
+            <div class="np-card">
+              <div class="cover big" id="np-cover"></div>
+              <div class="np-text">
+                <div class="np-title" id="np-title">–</div>
+                <div class="np-artist" id="np-artist"></div>
+                <div class="np-time" id="np-time"></div>
+              </div>
+            </div>
+            <div class="np-bar"><i id="np-progress"></i></div>
+            <div class="np-next-head">Next</div>
+            <ul class="next-list" id="next-list"></ul>
+            <button class="btn small" id="btn-meta" title="Titelanzeige manuell an die Ausgänge senden">Titelanzeige senden …</button>
+          </section>
+        </div>
 
-  <dialog id="dialog"><form method="dialog" id="dialog-form"></form></dialog>
-  <script type="module" src="js/app.js"></script>
+        <div class="row3" id="work-panel">
+          <section class="panel lib-panel" aria-label="Musikarchiv">
+            <div class="panel-head">
+              <h2>Playlist / Archiv</h2>
+              <input type="search" id="lib-search" placeholder="Suchen …" aria-label="Archiv durchsuchen">
+              <select id="lib-cat" aria-label="Kategorie-Filter"></select>
+              <select id="lib-folder" aria-label="Ordner-Filter"></select>
+            </div>
+            <div class="row-btns">
+              <label class="btn small" title="Audiodateien hochladen"><i data-icon="plus" data-size="14"></i> Titel<input type="file" id="lib-upload" accept="audio/*,.mp3,.ogg,.opus,.wav,.flac,.m4a,.aac,.webm" multiple hidden></label>
+              <label class="btn small" title="Ganzen Ordner hochladen (Ordnername wird übernommen)"><i data-icon="plus" data-size="14"></i> Ordner<input type="file" id="lib-upload-dir" webkitdirectory multiple hidden></label>
+              <button class="btn small" id="btn-add-url" title="URL / Stream zur Bibliothek"><i data-icon="stream" data-size="14"></i> URL</button>
+            </div>
+            <div class="table-wrap" id="lib-drop">
+              <table class="list">
+                <thead><tr><th></th><th>Titel</th><th>Interpret</th><th class="num">BPM</th><th>Kat.</th><th class="num">Dauer</th><th></th></tr></thead>
+                <tbody id="lib-body"></tbody>
+              </table>
+              <div class="empty" id="lib-empty">Audiodateien hierher ziehen oder über „Titel“ hinzufügen.</div>
+            </div>
+          </section>
+
+          <section class="panel queue-panel" aria-label="Queue">
+            <div class="panel-head">
+              <h2>Queue</h2>
+              <span class="muted" id="queue-total"></span>
+              <label class="chk" title="Automatisch nach Sendeuhr/Sendeplan auffüllen"><input type="checkbox" id="chk-autofill"> Sendeuhr</label>
+            </div>
+            <div class="row-btns">
+              <button class="btn small" id="btn-fill">Auffüllen</button>
+              <button class="btn small" id="btn-fill-from">Aus Ordner …</button>
+              <button class="btn small" id="btn-shuffle">Mischen</button>
+              <button class="btn small" id="btn-m3u">M3U</button>
+              <button class="btn small danger" id="btn-clear">Leeren</button>
+            </div>
+            <div class="table-wrap" id="queue-drop">
+              <table class="list">
+                <thead><tr><th class="num">Start</th><th>Titel</th><th class="num">Dauer</th><th></th></tr></thead>
+                <tbody id="queue-body"></tbody>
+              </table>
+              <div class="empty" id="queue-empty">Queue ist leer – Titel aus dem Archiv hierher ziehen.</div>
+            </div>
+          </section>
+
+          <div class="stack" id="live-panel">
+            <section class="panel">
+              <div class="panel-head"><h2>Schnelltrigger</h2></div>
+              <div class="quick" id="quick"></div>
+            </section>
+            <section class="panel live-voice">
+              <div class="panel-head"><h2>Live-Voice</h2><span class="pill" id="lv-state">bereit</span></div>
+              <div class="lv-body">
+                <div class="vu-v"><i id="lv-meter"></i></div>
+                <button class="mic-btn" id="lv-mic" title="Mikrofon an/aus"><i data-icon="mic" data-size="30"></i></button>
+                <div class="lv-side">
+                  <label class="chk"><input type="checkbox" id="lv-ptt"> Push-to-Talk</label>
+                  <span class="muted" id="lv-info">Browser-Mikrofon</span>
+                </div>
+              </div>
+            </section>
+          </div>
+        </div>
+      </div>
+
+      <!-- Rechte Spalte -->
+      <aside class="side">
+        <section class="panel">
+          <div class="panel-head"><h2>Stream &amp; Encoder</h2><button class="btn small" id="btn-add-output" title="Ausgang hinzufügen">＋</button></div>
+          <div class="stream-sum">
+            <div><span class="muted">Hörer</span><strong id="sum-listeners">–</strong></div>
+            <div><span class="muted">Ausgänge</span><strong id="sum-outputs">0</strong></div>
+            <div><span class="muted">Durchsatz</span><strong id="sum-rate">–</strong></div>
+          </div>
+          <ul class="outputs" id="outputs"></ul>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head"><h2>Server-Automation 24/7</h2><span class="pill" id="po-state">–</span></div>
+          <div class="po-title" id="po-title">–</div>
+          <div class="po-meta muted" id="po-meta"></div>
+          <div class="po-actions">
+            <button class="btn small primary" id="po-start">Start</button>
+            <button class="btn small" id="po-skip">Weiter ⏭</button>
+            <button class="toggle small" id="po-mic" aria-pressed="false" hidden title="Mikrofon/Line-In am PC über die Musik legen">🎙 Mikro</button>
+            <button class="btn small danger" id="po-stop">Stop</button>
+            <button class="btn small" id="po-settings" title="Format, DSP, Mikrofon, Abhören">⋯</button>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head"><h2>Lautstärke / Processing</h2></div>
+          <div class="fader-row"><span>Master</span><input type="range" id="fx-master" min="0" max="1" step="0.01" value="1"><span class="num" id="fx-master-v">0.0 dB</span></div>
+          <div class="fader-row"><span>Ducking</span><input type="range" id="fx-duck" min="-30" max="0" step="1" value="-10"><span class="num" id="fx-duck-v">-10 dB</span></div>
+          <div class="fader-row"><span>Vorhören</span><input type="range" id="fx-pfl" min="0" max="1" step="0.01" value="0.8"><span class="num" id="fx-pfl-v">80 %</span></div>
+        </section>
+
+        <section class="panel meters-panel">
+          <div class="panel-head"><h2>VU / Pegel</h2><span class="muted" id="lufs-v">– dB</span></div>
+          <div class="vu-h"><i id="m-rms"></i></div>
+          <div class="meter-row"><span>RMS</span><span class="num" id="m-rms-v">-∞</span><span>Peak</span><span class="num" id="m-peak-v">-∞</span></div>
+          <div class="meter-row small"><span>Peak</span><div class="meter"><i id="m-peak"></i></div></div>
+          <div class="meter-row small"><span>Limiter</span><div class="meter gr"><i id="m-gr"></i></div><span class="num" id="m-gr-v">0.0</span></div>
+          <div class="silence" id="silence" hidden>STILLE ERKANNT</div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head"><h2>Quellen · Priorität</h2><button class="btn small" id="btn-add-source">＋</button></div>
+          <p class="hint">Kleinere Zahl = höhere Priorität</p>
+          <ul class="sources" id="sources"></ul>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head"><h2>System</h2></div>
+          <div class="sys-row"><span>CPU</span><div class="meter"><i id="sys-cpu"></i></div><span class="num" id="sys-cpu-v">–</span></div>
+          <div class="sys-row"><span>RAM</span><div class="meter"><i id="sys-ram"></i></div><span class="num" id="sys-ram-v">–</span></div>
+          <div class="sys-row"><span>Stream</span><div class="meter"><i id="sys-net"></i></div><span class="num" id="sys-net-v">–</span></div>
+        </section>
+      </aside>
+    </main>
+
+    <!-- Statusleiste -->
+    <footer class="status">
+      <span class="st-auto" id="st-auto"><span class="dot"></span><span id="st-auto-text">Automation aus</span></span>
+      <span class="st-next">Nächster Track: <strong id="st-next">–</strong></span>
+      <span class="st-msg" id="status-text">Bereit.</span>
+      <span class="st-chips" id="st-chips"></span>
+    </footer>
+
+    <!-- Handy-Navigation -->
+    <nav class="bottom-nav" id="bottom-nav">
+      <button data-view="studio" aria-pressed="true"><i data-icon="dashboard"></i><span>Home</span></button>
+      <button data-jump="carts-panel"><i data-icon="grid"></i><span>Cardwall</span></button>
+      <button data-jump="live-panel"><i data-icon="mic"></i><span>Live</span></button>
+      <button data-view="planning"><i data-icon="calendar"></i><span>Plan</span></button>
+      <button data-view="lautfm"><i data-icon="more"></i><span>Mehr</span></button>
+    </nav>
+  </div>
+</div>
+
+<dialog id="dialog"><form method="dialog" id="dialog-form"></form></dialog>
+<script type="module" src="js/app.js"></script>
 </body>
 </html>
