@@ -8,6 +8,7 @@ import { $, CATEGORY_STYLE, clockTime, download, fmt, formDialog, h, hydrateIcon
 import { mountPlanning, mountRecorder } from './planning.js';
 import { mountLautfm } from './lautfm.js';
 import { mountUpdates } from './updates.js';
+import { JUMP_TO_WIN, mountLayout } from './layout.js';
 
 const CATEGORY_LABEL = /** @type {Record<string,string>} */ ({
   music: 'Musik', jingle: 'Jingle', sweeper: 'Sweeper', station_id: 'Station ID', drop: 'Drop', news: 'News',
@@ -62,6 +63,8 @@ const AUDIO_FILE = /\.(mp3|ogg|opus|wav|flac|m4a|aac|webm)$/i;
 /** @type {Record<string, { show: () => any, onEvent?: (t: string, d: any) => void }>} */
 let views = {};
 let currentView = 'studio';
+/** @type {ReturnType<typeof mountLayout>} */
+let layout;
 const silence = new SilenceDetector(-50, 10_000);
 
 const sid = () => encodeURIComponent(S.station.id);
@@ -995,7 +998,9 @@ function bindStatic() {
     if (b?.dataset.view) showView(b.dataset.view);
     if (b?.dataset.jump) {
       showView('studio');
-      $(b.dataset.jump).scrollIntoView({ behavior: 'smooth', block: 'start' });
+      const win = JUMP_TO_WIN[b.dataset.jump];
+      if (layout.active && win) layout.focus(win);
+      else $(b.dataset.jump).scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
   };
   $('view-tabs').addEventListener('click', nav);
@@ -1009,6 +1014,17 @@ function bindStatic() {
   });
   $('btn-menu').addEventListener('click', () => $('sidebar').classList.toggle('open'));
   $('btn-storage').addEventListener('click', editStorage);
+  layout = mountLayout($('view-studio'));
+  $('btn-windows').addEventListener('click', editWindows);
+  // Tastatur: Alt+1…4 wechselt die Bereiche
+  addEventListener('keydown', (e) => {
+    if (!e.altKey || e.ctrlKey || e.metaKey) return;
+    const v = ({ 1: 'studio', 2: 'planning', 3: 'recorder', 4: 'lautfm' })[/** @type {1|2|3|4} */ (Number(e.key))];
+    if (v) {
+      e.preventDefault();
+      showView(v);
+    }
+  });
   $('btn-notify').addEventListener('click', editNotify);
   mountUpdates(api);
   buildQuick();
@@ -1185,6 +1201,24 @@ function showView(name) {
   $('sidebar').classList.remove('open');
   for (const id of ['studio', 'planning', 'recorder', 'lautfm']) $(`view-${id}`).hidden = id !== name;
   if (name !== 'studio') views[name]?.show();
+}
+
+// ---------- Fenster & Layout ----------
+
+async function editWindows() {
+  showView('studio');
+  if (!layout.active) return status('Fenster lassen sich ab 1100 px Breite frei anordnen – auf dem Handy gilt das mobile Layout');
+  const list = layout.list();
+  const v = await formDialog('Fenster & Layout', [
+    { name: 'info', label: 'Bedienung', type: 'info', value: 'Titelleiste ziehen = verschieben · Ecke unten rechts = Größe · Symbol = abdocken (frei schwebend) · × = ausblenden' },
+    ...list.map((w) => ({ name: `w_${w.id}`, label: `${w.title}${w.float ? ' (schwebend)' : ''}`, type: 'checkbox', value: !w.hidden })),
+    { name: 'locked', label: 'Layout sperren (kein versehentliches Verschieben)', type: 'checkbox', value: layout.locked },
+    { name: 'reset', label: 'Standard-Layout wiederherstellen', type: 'checkbox', value: false },
+  ], 'Übernehmen');
+  if (!v) return;
+  if (v.reset) return layout.reset();
+  for (const w of list) if (v[`w_${w.id}`] === w.hidden) layout.toggle(w.id, v[`w_${w.id}`]);
+  layout.lock(v.locked);
 }
 
 // ---------- Datenspeicher & Sync ----------

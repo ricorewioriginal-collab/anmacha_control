@@ -19,14 +19,18 @@
       <span>AIRDECK</span>
     </div>
     <nav class="nav" id="view-tabs" aria-label="Bereiche">
-      <button data-view="studio" aria-pressed="true"><i data-icon="dashboard"></i><span>Dashboard</span></button>
+      <div class="nav-group">Studio</div>
+      <button data-view="studio" aria-pressed="true"><i data-icon="dashboard"></i><span>Dashboard</span><kbd>1</kbd></button>
       <button data-jump="decks"><i data-icon="music"></i><span>Decks</span></button>
       <button data-jump="carts-panel"><i data-icon="grid"></i><span>Cardwall</span></button>
       <button data-jump="work-panel"><i data-icon="list"></i><span>Playlist &amp; Queue</span></button>
       <button data-jump="live-panel"><i data-icon="mic"></i><span>Live Studio</span></button>
-      <button data-view="planning" aria-pressed="false"><i data-icon="calendar"></i><span>Sendeplan &amp; Events</span></button>
-      <button data-view="recorder" aria-pressed="false"><i data-icon="record"></i><span>Recorder</span></button>
-      <button data-view="lautfm" aria-pressed="false"><i data-icon="lautfm"></i><span>laut.fm</span></button>
+      <button id="btn-windows"><i data-icon="sliders"></i><span>Fenster &amp; Layout</span></button>
+      <div class="nav-group">Programm</div>
+      <button data-view="planning" aria-pressed="false"><i data-icon="calendar"></i><span>Sendeplan &amp; Events</span><kbd>2</kbd></button>
+      <button data-view="recorder" aria-pressed="false"><i data-icon="record"></i><span>Recorder</span><kbd>3</kbd></button>
+      <button data-view="lautfm" aria-pressed="false"><i data-icon="lautfm"></i><span>laut.fm</span><kbd>4</kbd></button>
+      <div class="nav-group">Einstellungen</div>
       <button id="btn-station"><i data-icon="settings"></i><span>Sender &amp; Branding</span></button>
       <button id="btn-storage"><i data-icon="cloud"></i><span>Datenspeicher &amp; Sync</span></button>
       <button id="btn-notify"><i data-icon="bell"></i><span>Benachrichtigungen</span></button>
@@ -95,10 +99,10 @@
           </div>
           <div class="m-stream"><span class="muted">Stream</span> <strong id="m-stream">–</strong></div>
         </section>
-        <section class="decks" id="decks" aria-label="Decks"></section>
+        <section class="decks" id="decks" aria-label="Decks" data-win="decks" data-title="Decks"></section>
 
         <div class="row2">
-          <section class="panel carts-panel" id="carts-panel" aria-label="Cardwall">
+          <section class="panel carts-panel" id="carts-panel" aria-label="Cardwall" data-win="carts" data-title="Cardwall">
             <div class="panel-head">
               <h2>Cardwall</h2>
               <div class="tabs" id="cart-groups"></div>
@@ -107,7 +111,7 @@
             <div class="carts" id="carts"></div>
           </section>
 
-          <section class="panel np-panel">
+          <section class="panel np-panel" data-win="np" data-title="Now Playing">
             <div class="panel-head"><h2>Now Playing</h2></div>
             <div class="np-card">
               <div class="cover big" id="np-cover"></div>
@@ -125,7 +129,7 @@
         </div>
 
         <div class="row3" id="work-panel">
-          <section class="panel lib-panel" aria-label="Musikarchiv">
+          <section class="panel lib-panel" aria-label="Musikarchiv" data-win="lib" data-title="Playlist / Archiv">
             <div class="panel-head">
               <h2>Playlist / Archiv</h2>
               <input type="search" id="lib-search" placeholder="Suchen …" aria-label="Archiv durchsuchen">
@@ -146,7 +150,7 @@
             </div>
           </section>
 
-          <section class="panel queue-panel" aria-label="Queue">
+          <section class="panel queue-panel" aria-label="Queue" data-win="queue" data-title="Queue">
             <div class="panel-head">
               <h2>Queue</h2>
               <span class="muted" id="queue-total"></span>
@@ -169,11 +173,11 @@
           </section>
 
           <div class="stack" id="live-panel">
-            <section class="panel">
+            <section class="panel" data-win="quick" data-title="Schnelltrigger">
               <div class="panel-head"><h2>Schnelltrigger</h2></div>
               <div class="quick" id="quick"></div>
             </section>
-            <section class="panel live-voice">
+            <section class="panel live-voice" data-win="live" data-title="Live-Voice">
               <div class="panel-head"><h2>Live-Voice</h2><span class="pill" id="lv-state">bereit</span></div>
               <div class="lv-body">
                 <div class="vu-v"><i id="lv-meter"></i></div>
@@ -190,7 +194,7 @@
 
       <!-- Rechte Spalte -->
       <aside class="side">
-        <section class="panel">
+        <section class="panel" data-win="stream" data-title="Stream &amp; Encoder">
           <div class="panel-head"><h2>Stream &amp; Encoder</h2><button class="btn small" id="btn-add-output" title="Ausgang hinzufügen">＋</button></div>
           <div class="stream-sum">
             <div><span class="muted">Hörer</span><strong id="sum-listeners">–</strong></div>
@@ -200,7 +204,7 @@
           <ul class="outputs" id="outputs"></ul>
         </section>
 
-        <section class="panel">
+        <section class="panel" data-win="playout" data-title="Server-Automation 24/7">
           <div class="panel-head"><h2>Server-Automation 24/7</h2><span class="pill" id="po-state">–</span></div>
           <div class="po-title" id="po-title">–</div>
           <div class="po-meta muted" id="po-meta"></div>
@@ -213,14 +217,14 @@
           </div>
         </section>
 
-        <section class="panel">
+        <section class="panel" data-win="processing" data-title="Lautstärke / Processing">
           <div class="panel-head"><h2>Lautstärke / Processing</h2></div>
           <div class="fader-row"><span>Master</span><input type="range" id="fx-master" min="0" max="1" step="0.01" value="1"><span class="num" id="fx-master-v">0.0 dB</span></div>
           <div class="fader-row"><span>Ducking</span><input type="range" id="fx-duck" min="-30" max="0" step="1" value="-10"><span class="num" id="fx-duck-v">-10 dB</span></div>
           <div class="fader-row"><span>Vorhören</span><input type="range" id="fx-pfl" min="0" max="1" step="0.01" value="0.8"><span class="num" id="fx-pfl-v">80 %</span></div>
         </section>
 
-        <section class="panel meters-panel">
+        <section class="panel meters-panel" data-win="meters" data-title="VU / Pegel">
           <div class="panel-head"><h2>VU / Pegel</h2><span class="muted" id="lufs-v">– dB</span></div>
           <div class="vu-h"><i id="m-rms"></i></div>
           <div class="meter-row"><span>RMS</span><span class="num" id="m-rms-v">-∞</span><span>Peak</span><span class="num" id="m-peak-v">-∞</span></div>
@@ -229,13 +233,13 @@
           <div class="silence" id="silence" hidden>STILLE ERKANNT</div>
         </section>
 
-        <section class="panel">
+        <section class="panel" data-win="sources" data-title="Quellen · Priorität">
           <div class="panel-head"><h2>Quellen · Priorität</h2><button class="btn small" id="btn-add-source">＋</button></div>
           <p class="hint">Kleinere Zahl = höhere Priorität</p>
           <ul class="sources" id="sources"></ul>
         </section>
 
-        <section class="panel">
+        <section class="panel" data-win="system" data-title="System">
           <div class="panel-head"><h2>System</h2></div>
           <div class="sys-row"><span>CPU</span><div class="meter"><i id="sys-cpu"></i></div><span class="num" id="sys-cpu-v">–</span></div>
           <div class="sys-row"><span>RAM</span><div class="meter"><i id="sys-ram"></i></div><span class="num" id="sys-ram-v">–</span></div>
