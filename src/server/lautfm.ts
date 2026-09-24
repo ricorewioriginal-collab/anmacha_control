@@ -7,8 +7,9 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { Readable } from 'node:stream';
 
-export const RADIOADMIN = 'https://api.radioadmin.laut.fm';
-export const PUBLIC_API = 'https://api.laut.fm';
+// Umgebungsvariablen nur für Tests/Staging (z. B. lokaler Mock); Standard sind die echten laut.fm-Server
+export const RADIOADMIN = process.env.AIRDECK_RADIOADMIN_URL || 'https://api.radioadmin.laut.fm';
+export const PUBLIC_API = process.env.AIRDECK_LAUTFM_API_URL || 'https://api.laut.fm';
 
 /**
  * Radioadmin-Tokens gehören zu einer „callback_url“. Bei jeder Anfrage muss derselbe Wert als
@@ -42,8 +43,10 @@ export function allowedRadioadminPath(path: string, stationId: number | undefine
   return path === `/stations/${stationId}` || path.startsWith(`/stations/${stationId}/`);
 }
 
+/** Öffentliche laut.fm-API laut api-spec (ohne die Dauer-Streams song_change.*). */
 export function allowedPublicPath(path: string): boolean {
-  return /^\/(station\/[a-z0-9_-]+(\/(current_song|last_songs|listeners|playlists|schedule|next_artists))?|listeners|stations(\/names)?)$/i.test(path);
+  if (path.includes('..')) return false;
+  return /^\/(server_status|time|letters|genres|station_names|listeners|stations(\/(live|numbers|letter\/[a-z0-9]|genre\/[A-Za-z0-9%._ -]{1,60}|[a-z0-9_,-]{1,400}))?|station\/[a-z0-9_-]+(\/(listeners|images\/[a-z_]{1,30}|schedule|playlists|current_song|last_songs|next_artists))?)$/.test(path);
 }
 
 const HOP = new Set(['connection', 'keep-alive', 'transfer-encoding', 'content-encoding', 'content-length', 'set-cookie']);

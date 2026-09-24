@@ -18,6 +18,8 @@ export function h(tag, attrs = {}, ...children) {
     if (k.startsWith('on')) el.addEventListener(k.slice(2), v);
     else if (k === 'class') el.className = v;
     else if (k === 'style') el.style.cssText = v;
+    // <textarea> ignoriert das value-Attribut – Wert immer als Eigenschaft setzen
+    else if (k === 'value' && tag === 'textarea') /** @type {HTMLTextAreaElement} */ (el).value = String(v);
     else if (k in el && typeof v !== 'string') /** @type {any} */ (el)[k] = v;
     else el.setAttribute(k, v === true ? '' : String(v));
   }

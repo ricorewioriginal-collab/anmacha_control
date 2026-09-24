@@ -4,10 +4,11 @@
 // Endpunkte der Radioadmin-API. Kein eigener PHP-Server nötig.
 
 import { DAYS, clockTime, fmt, formDialog, h, run, status } from './ui.js';
+import { ALGO_TEMPLATES } from './lautfm-algos.js';
 
 const TABS = /** @type {const} */ ([
-  ['overview', 'Übersicht'], ['playlists', 'Playlists'], ['tracks', 'Titel'], ['schedule', 'Sendeplan'],
-  ['stats', 'Statistik'], ['users', 'Benutzer'], ['station', 'Station'], ['live', 'Live'],
+  ['overview', 'Übersicht'], ['playlists', 'Playlists'], ['tracks', 'Titel'], ['algos', 'Algorithmen'], ['schedule', 'Sendeplan'],
+  ['stats', 'Statistik'], ['ads', 'Werbe-Log'], ['users', 'Benutzer'], ['station', 'Station'], ['live', 'Live'],
 ]);
 const ROLES = /** @type {Array<[string,string]>} */ ([['owner', 'Inhaber'], ['editor', 'Editor'], ['dj', 'DJ']]);
 
@@ -85,7 +86,7 @@ export function mountLautfm(root, ctx) {
   function renderTab() {
     root.querySelectorAll('.lf-head .tabs button').forEach((b, i) => b.setAttribute('aria-pressed', String(TABS[i][0] === tab)));
     content.replaceChildren(h('div', { class: 'empty' }, 'Lade …'));
-    const fn = { overview, playlists: playlistsTab, tracks, schedule, stats, users, station, live }[tab];
+    const fn = { overview, playlists: playlistsTab, tracks, algos, schedule, stats, ads, users, station, live }[tab];
     run(async () => content.replaceChildren(...(await fn())));
   }
 
@@ -97,6 +98,8 @@ export function mountLautfm(root, ctx) {
 
   // ---------- Übersicht ----------
   async function overview() {
+    const pub = (/** @type {string} */ path) => (cfg.stationName ? ctx.api.get(`/lautfm/public/station/${cfg.stationName}${path}`).catch(() => null) : null);
+    const [apiState, last, nextArtists] = await Promise.all([ra('GET', '/server_status').catch(() => null), pub('/last_songs'), pub('/next_artists')]);
     const [info, state, statsNow, current, song] = await Promise.all([
       ra('GET', st()), ra('GET', `${st()}/state`).catch(() => null), ra('GET', `${st()}/stats`).catch(() => null),
       ra('GET', `${st()}/current_playlist`).catch(() => null),
@@ -108,6 +111,10 @@ export function mountLautfm(root, ctx) {
         !state?.active ? h('button', { class: 'btn primary', onclick: () => run(async () => { await ra('POST', `${st()}/state`); status('Station aktiviert'); renderTab(); }) }, 'Station aktivieren') : null),
       card('Jetzt', kv('Titel', song ? `${song.artist?.name ?? ''} – ${song.title ?? ''}` : null), kv('Hörer jetzt', statsNow?.listeners_now), kv('Position', statsNow?.position_now),
         kv('Playlist', current?.playlist_info?.title), kv('Grund', current?.playlist_info?.reason)),
+      card('laut.fm-Dienste',
+        kv('Radioadmin-API', apiState ? (apiState.running ? 'läuft ✔' : `gestört: ${apiState.message ?? ''}`) : 'nicht erreichbar'),
+        kv('Nächste Interpreten', Array.isArray(nextArtists) ? nextArtists.map((/** @type {any} */ a) => a.name ?? a).slice(0, 6).join(', ') : null),
+        ...(Array.isArray(last) ? last.slice(0, 6).map((/** @type {any} */ t) => kv(t.started_at ? clockTime(new Date(t.started_at).getTime()) : '', `${t.artist?.name ?? ''} – ${t.title ?? ''}`)) : [])),
       card('Nächste Titel', ...(current?.tracks ?? []).slice(0, 12).map((/** @type {any} */ t) => h('div', { class: 'kv' }, h('span', {}, `${t.artist ?? ''} – ${t.title ?? ''}`), h('span', { class: 'muted num' }, fmt((t.length ?? t.duration ?? 0) * 1000)))))),
     ];
   }
@@ -151,8 +158,11 @@ export function mountLautfm(root, ctx) {
       { name: 'color', label: 'Farbe', type: 'color', value: /^#[0-9a-f]{6}$/i.test(p.color) ? p.color : '#19c3e6' },
       { name: 'description', label: 'Beschreibung', value: p.description ?? '' },
       { name: 'shuffled', label: 'Gemischt abspielen', type: 'checkbox', value: !!p.shuffled },
+      { name: 'algo', label: 'Automations-Algorithmus (beim Mischen)', value: p.automation_algorithm_name ?? '', options: [['', '– Standard von laut.fm –'], ...(await installedAlgos()).map((n) => /** @type {[string,string]} */ ([n, ALGO_TEMPLATES.find((t) => t.name === n)?.label ?? n]))], hint: 'Neue Algorithmen unter „Algorithmen“ speichern' },
     ]);
-    if (v) await run(async () => { await ra('PATCH', `${st()}/playlists/${p.id}`, v); renderTab(); });
+    if (!v) return;
+    const { algo, ...rest } = v;
+    await run(async () => { await ra('PATCH', `${st()}/playlists/${p.id}`, { ...rest, automation_algorithm_name: algo || null }); status('Playlist gespeichert'); renderTab(); });
   }
 
   /** @param {any} p */
@@ -165,11 +175,147 @@ export function mountLautfm(root, ctx) {
   function trackTable(tracks, action) {
     if (!tracks.length) return h('div', { class: 'empty' }, 'Keine Titel.');
     return h('div', { class: 'table-wrap' }, h('table', { class: 'list' },
-      h('thead', {}, h('tr', {}, h('th', {}, 'ID'), h('th', {}, 'Interpret'), h('th', {}, 'Titel'), h('th', {}, 'Genre'), h('th', { class: 'num' }, 'Dauer'), h('th', {}))),
-      h('tbody', {}, ...tracks.map((t) => h('tr', {},
+      h('thead', {}, h('tr', {}, h('th', {}, 'ID'), h('th', {}, 'Interpret'), h('th', {}, 'Titel'), h('th', {}, 'Genre'), h('th', { class: 'num' }, 'Dauer'), h('th', {}, 'Tags'), h('th', {}))),
+      h('tbody', {}, ...tracks.map((t) => (t._tagCell = h('td', {}, ...(t.tags ?? []).map((/** @type {string} */ g) => h('span', { class: 'tag' }, g)))) && h('tr', {},
         h('td', { class: 'num muted' }, String(t.id)), h('td', {}, typeof t.artist === 'object' ? t.artist?.name ?? '' : t.artist ?? ''), h('td', {}, t.title ?? ''),
         h('td', {}, t.genre ?? ''), h('td', { class: 'num' }, fmt((t.duration ?? t.length ?? 0) * 1000)),
-        h('td', { class: 'act' }, h('button', { title: 'Vorhören', onclick: () => prelisten(t) }, '▶'), action ? action(t) : null))))));
+        t._tagCell,
+        h('td', { class: 'act' }, h('button', { title: 'Vorhören', onclick: () => prelisten(t) }, '▶'), h('button', { title: 'Tags bearbeiten', onclick: () => editTags(t) }, '#'), action ? action(t) : null))))));
+  }
+
+  /** Tags eines Titels (Radioadmin: GET/POST/DELETE …/tracks/{id}/tags). @param {any} t */
+  async function editTags(t) {
+    const [cur, all] = await Promise.all([ra('GET', `${st()}/tracks/${t.id}/tags`).catch(() => t.tags ?? []), ra('GET', `${st()}/tracks/tags`).catch(() => [])]);
+    const before = /** @type {string[]} */ (Array.isArray(cur) ? cur : []);
+    const v = await formDialog(`Tags: ${t.title ?? t.id}`, [
+      { name: 'tags', label: 'Tags (mit Komma getrennt)', value: before.join(', '), hint: Array.isArray(all) && all.length ? `Vorhanden: ${all.slice(0, 40).join(', ')}` : 'z. B. recent, chill, hit, A-Rotation' },
+    ]);
+    if (!v) return;
+    const after = [...new Set(String(v.tags).split(',').map((x) => x.trim()).filter(Boolean))];
+    const add = after.filter((x) => !before.includes(x));
+    const del = before.filter((x) => !after.includes(x));
+    await run(async () => {
+      if (add.length) await ra('POST', `${st()}/tracks/${t.id}/tags`, { tags: add });
+      if (del.length) await ra('DELETE', `${st()}/tracks/${t.id}/tags`, { tags: del });
+      t.tags = after;
+      t._tagCell?.replaceChildren(...after.map((g) => h('span', { class: 'tag' }, g)));
+      status(`Tags gespeichert (${add.length} neu, ${del.length} entfernt)`);
+    });
+  }
+
+  /** Namen der bei laut.fm gespeicherten Algorithmen (aus Playlists und Vorlagen, per GET geprüft). */
+  async function installedAlgos() {
+    if (!playlists.length) await loadPlaylists().catch(() => {});
+    const names = [...new Set([...playlists.map((p) => p.automation_algorithm_name).filter(Boolean), ...ALGO_TEMPLATES.map((t) => t.name)])];
+    const found = await Promise.all(names.map((n) => ra('GET', `/automation_algorithms/${encodeURIComponent(n)}`).then(() => n).catch(() => null)));
+    return /** @type {string[]} */ (found.filter(Boolean));
+  }
+
+  // ---------- Algorithmen ----------
+  async function algos() {
+    await loadPlaylists();
+    const installed = new Set(await installedAlgos());
+    const custom = [...installed].filter((n) => !ALGO_TEMPLATES.some((t) => t.name === n));
+    const usedBy = (/** @type {string} */ n) => playlists.filter((p) => p.automation_algorithm_name === n).map((p) => p.title).join(', ');
+    return [
+      card('Automations-Algorithmen',
+        h('p', { class: 'muted' }, 'laut.fm führt den Algorithmus aus, wenn eine Playlist gemischt wird (function(tracks) → tracks). Speichern legt ihn bei laut.fm an; zuweisen hier oder unter „Playlists → Bearbeiten“.'),
+        h('div', { class: 'algo-grid' },
+          ...ALGO_TEMPLATES.map((t) => h('div', { class: `algo${installed.has(t.name) ? ' on' : ''}` },
+            h('div', { class: 'algo-head' }, h('span', {}, t.icon), h('strong', {}, t.label), installed.has(t.name) ? h('span', { class: 'pill live' }, 'gespeichert') : null),
+            h('p', { class: 'muted' }, t.desc),
+            installed.has(t.name) && usedBy(t.name) ? h('div', { class: 'small' }, `Genutzt von: ${usedBy(t.name)}`) : null,
+            h('div', { class: 'row-btns' },
+              h('button', { class: 'btn small primary', onclick: () => editAlgo(t.name, t.body.trim(), installed.has(t.name)) }, installed.has(t.name) ? 'Bearbeiten' : 'Ansehen & speichern'),
+              installed.has(t.name) ? h('button', { class: 'btn small', onclick: () => assignAlgo(t.name) }, 'Zuweisen') : null,
+              installed.has(t.name) ? h('button', { class: 'btn small danger', onclick: () => deleteAlgo(t.name) }, 'Löschen') : null))),
+          ...custom.map((n) => h('div', { class: 'algo on' },
+            h('div', { class: 'algo-head' }, h('strong', {}, n), h('span', { class: 'pill live' }, 'eigener')),
+            usedBy(n) ? h('div', { class: 'small' }, `Genutzt von: ${usedBy(n)}`) : null,
+            h('div', { class: 'row-btns' },
+              h('button', { class: 'btn small primary', onclick: async () => { const a = await run(() => ra('GET', `/automation_algorithms/${encodeURIComponent(n)}`)); if (a) editAlgo(n, a.body ?? '', true); } }, 'Bearbeiten'),
+              h('button', { class: 'btn small', onclick: () => assignAlgo(n) }, 'Zuweisen'),
+              h('button', { class: 'btn small danger', onclick: () => deleteAlgo(n) }, 'Löschen'))))),
+        h('button', { class: 'btn', onclick: () => editAlgo('', '(function(tracks) {\n  return tracks;\n})', false) }, '＋ Eigener Algorithmus')),
+    ];
+  }
+
+  /** @param {string} name @param {string} body @param {boolean} exists */
+  async function editAlgo(name, body, exists) {
+    const v = await formDialog(exists ? `Algorithmus: ${name}` : 'Algorithmus speichern', [
+      { name: 'name', label: 'Name (a–z, 0–9, _)', value: name, required: true },
+      { name: 'body', label: 'Funktion', type: 'textarea', value: body, hint: 'Eine Funktion, die die Titelliste nimmt und sortiert zurückgibt' },
+    ], 'Bei laut.fm speichern');
+    if (!v) return;
+    const n = String(v.name).trim().toLowerCase().replace(/[^a-z0-9_]/g, '_');
+    // Grobe Strukturprüfung (Code wird hier bewusst nicht ausgeführt – laut.fm prüft beim Speichern selbst)
+    const code = String(v.body).trim();
+    const depth = [...code.replace(/(["'`])(?:\\.|(?!\1).)*\1/g, '')].reduce((d, c) => (d < 0 ? d : d + (c === '{' || c === '(' ? 1 : c === '}' || c === ')' ? -1 : 0)), 0);
+    if (!/^\(?\s*function\s*\(/.test(code) || depth !== 0) return status('Algorithmus muss eine Funktion sein: (function(tracks) { … return tracks; }) – Klammern prüfen', true);
+    await run(async () => {
+      await ra(exists && n === name ? 'PATCH' : 'PUT', `/automation_algorithms/${encodeURIComponent(n)}`, { body: v.body.trim() });
+      status(`Algorithmus „${n}“ gespeichert`);
+      renderTab();
+    });
+  }
+
+  /** @param {string} name */
+  async function assignAlgo(name) {
+    const v = await formDialog(`„${name}“ zuweisen`, playlists.map((p) => ({ name: `p${p.id}`, label: p.title, type: 'checkbox', value: p.automation_algorithm_name === name })), 'Übernehmen');
+    if (!v) return;
+    await run(async () => {
+      for (const p of playlists) {
+        const want = !!v[`p${p.id}`];
+        const has = p.automation_algorithm_name === name;
+        if (want !== has) await ra('PATCH', `${st()}/playlists/${p.id}`, { automation_algorithm_name: want ? name : null });
+      }
+      status('Zuweisung gespeichert');
+      renderTab();
+    });
+  }
+
+  /** @param {string} name */
+  async function deleteAlgo(name) {
+    const used = playlists.filter((p) => p.automation_algorithm_name === name);
+    if (!confirm(`Algorithmus „${name}“ bei laut.fm löschen?${used.length ? `\nWird genutzt von: ${used.map((p) => p.title).join(', ')} – dort wird er vorher entfernt.` : ''}`)) return;
+    await run(async () => {
+      for (const p of used) await ra('PATCH', `${st()}/playlists/${p.id}`, { automation_algorithm_name: null });
+      await ra('DELETE', `/automation_algorithms/${encodeURIComponent(name)}`);
+      status('Algorithmus gelöscht');
+      renderTab();
+    });
+  }
+
+  // ---------- Werbe-Log (Anregung von laut.fm: Werbe-Trigger aus den Track-Statistiken) ----------
+  async function ads() {
+    const day = /** @type {HTMLInputElement} */ (h('input', { type: 'date', value: new Date().toISOString().slice(0, 10) }));
+    const out = h('div', {});
+    const load = () => run(async () => {
+      const today = day.value === new Date().toISOString().slice(0, 10);
+      const list = /** @type {any[]} */ (await ra('GET', `${st()}/tracks/stats/${today ? '24h' : day.value}`)) ?? [];
+      const isAd = (/** @type {any} */ t) => /^(ad|ads|advert|advertisement|commercial|werbung)$/i.test(String(t.type ?? ''));
+      const hits = list.filter(isAd);
+      const types = [...new Set(list.map((t) => t.type).filter(Boolean))];
+      out.replaceChildren(
+        kv('Werbe-Trigger', hits.length),
+        kv('Hörer bei Werbung (Summe)', hits.reduce((a, t) => a + (t.listeners ?? 0), 0)),
+        kv('Gefundene Typen', types.join(', ') || '– (laut.fm liefert keinen Typ)'),
+        hits.length ? h('div', { class: 'table-wrap' }, h('table', { class: 'list' },
+          h('thead', {}, h('tr', {}, h('th', {}, 'Start'), h('th', {}, 'Ende'), h('th', {}, 'Spot'), h('th', { class: 'num' }, 'Hörer'), h('th', {}, ''))),
+          h('tbody', {}, ...hits.map((t) => h('tr', {},
+            h('td', { class: 'num' }, t.started_at ? clockTime(new Date(t.started_at).getTime()) : ''),
+            h('td', { class: 'num' }, t.ends_at ? clockTime(new Date(t.ends_at).getTime()) : ''),
+            h('td', {}, `${t.artist?.name ?? t.artist ?? ''} – ${t.title ?? ''}`),
+            h('td', { class: 'num' }, String(t.listeners ?? '')),
+            h('td', {}, t.live ? h('span', { class: 'pill failed' }, 'live') : '')))))) : h('div', { class: 'empty' }, 'Keine Werbe-Trigger an diesem Tag.'),
+        hits.length ? h('button', { class: 'btn small', onclick: () => {
+          const csv = ['Start;Ende;Spot;Hörer;Live', ...hits.map((t) => [t.started_at, t.ends_at, `${t.artist?.name ?? ''} - ${t.title ?? ''}`.replace(/;/g, ','), t.listeners ?? '', t.live ? 'ja' : 'nein'].join(';'))].join('\n');
+          h('a', { href: URL.createObjectURL(new Blob([csv], { type: 'text/csv' })), download: `werbe-log-${day.value}.csv` }).click();
+        } }, 'Als CSV') : null);
+    });
+    day.addEventListener('change', load);
+    load();
+    return [card('Werbe-Trigger-Log', h('p', { class: 'muted' }, 'Aus den laut.fm-Track-Statistiken (inkl. Live-Sendungen), gefiltert nach Typ „Werbung“ – Nachweis für Werbekunden.'), h('div', { class: 'row-btns' }, day), out)];
   }
 
   /** @param {any} t */

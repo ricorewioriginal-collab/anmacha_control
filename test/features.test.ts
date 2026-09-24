@@ -144,6 +144,11 @@ test('laut.fm: nur erlaubte Pfade, Token bleibt serverseitig', async () => {
   assert.equal(allowedRadioadminPath('/stations/42', undefined), false);
   assert.equal(allowedPublicPath('/station/80er-radio/current_song'), true);
   assert.equal(allowedPublicPath('/station/x/../../etc'), false);
+  // alle GET-Endpunkte der öffentlichen laut.fm-API (api-spec)
+  for (const ok of ['/server_status', '/time', '/letters', '/genres', '/station_names', '/listeners', '/stations', '/stations/live', '/stations/numbers',
+    '/stations/letter/a', '/stations/genre/Hip%20Hop', '/stations/eins,zwei', '/station/eins', '/station/eins/listeners', '/station/eins/images/logo',
+    '/station/eins/schedule', '/station/eins/playlists', '/station/eins/last_songs', '/station/eins/next_artists']) assert.equal(allowedPublicPath(ok), true, ok);
+  for (const bad of ['/song_change.stream.json', '/stations/names/../x', '/station/eins/tracks', '/admin']) assert.equal(allowedPublicPath(bad), false, bad);
 
   // forward() gegen einen lokalen Upstream: Authorization wird ergänzt, Upload-Body gestreamt
   const seen: { auth?: string; origin?: string; body: string; method?: string }[] = [];
