@@ -3,7 +3,7 @@
 // und Mithör-Listener weiter. Die UI steuert das nie direkt.
 
 import type { ServerResponse } from 'node:http';
-import type { IcecastOutput } from './icecast.ts';
+import type { BroadcastOutput } from './icecast.ts';
 
 interface Session {
   contentType: string;
@@ -36,9 +36,9 @@ export class RelayTarget {
   private readonly taps = new Set<RelayTap>();
   private tapsStarted = false;
   private activeId: string | null = null;
-  private readonly outputs: () => IcecastOutput[];
+  private readonly outputs: () => BroadcastOutput[];
 
-  constructor(outputs: () => IcecastOutput[]) {
+  constructor(outputs: () => BroadcastOutput[]) {
     this.outputs = outputs;
   }
 
@@ -130,7 +130,7 @@ export class RelayTarget {
   }
 
   /** Bereits laufende Ausgänge (z. B. neu angelegt) mit aktivem Format starten. */
-  startOutput(o: IcecastOutput): void {
+  startOutput(o: BroadcastOutput): void {
     const s = this.activeId ? this.sessions.get(this.activeId) : undefined;
     if (s && (!NEEDS_INIT.test(s.contentType) || s.init)) o.start(s.contentType, s.init);
   }
