@@ -49,6 +49,9 @@ import type { RelayTap } from './relay.ts';
 import { DEFAULT_ORIGIN, ORIGIN_RE, RADIOADMIN, loginUrl, type LautfmConfig } from './lautfm.ts';
 import { SyncManager } from './sync.ts';
 import { DEFAULT_SOURCE, Updater, type UpdateSource } from './update.ts';
+import { AiService } from './ai/service.ts';
+import { AiDirector, DEFAULT_AI, type AiStationConfig, type AiSource } from './ai/director.ts';
+import { AiError } from './ai/providers.ts';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { NOTIFY_EVENTS, Notifier, validateExportPath, validateWebhookUrl, type IntegrationsConfig, type NotifyEvent } from './notify.ts';
 
@@ -83,6 +86,7 @@ interface StationData {
   planCursor?: Record<string, number>;
   lautfm?: LautfmConfig;
   integrations?: IntegrationsConfig;
+  ai?: AiStationConfig;
 }
 
 export interface Playlist {
@@ -180,7 +184,7 @@ export const ALL_SCOPES = [
   'now_playing:read', 'schedule:read', 'stream:read', 'branding:read', 'queue:read', 'queue:write',
   'cardwall:read', 'cardwall:trigger', 'sources:read', 'sources:write', 'automation:read', 'automation:write',
   'media:read', 'media:write', 'stations:write', 'outputs:read', 'outputs:write', 'audit:read', 'tokens:write',
-  'lautfm:read', 'lautfm:write',
+  'lautfm:read', 'lautfm:write', 'ai:read', 'ai:write',
 ] as const;
 
 const SLUG = /^[a-z0-9][a-z0-9-]{0,39}$/;
@@ -220,6 +224,8 @@ export class AirDeckApp {
   readonly sync: SyncManager;
 
   readonly updater: Updater;
+  readonly ai: AiService;
+  readonly director: AiDirector;
   readonly packaged: boolean;
   readonly headless: boolean;
 
@@ -233,6 +239,33 @@ export class AirDeckApp {
     this.packaged = opts.packaged ?? false;
     this.headless = opts.headless ?? false;
     this.audit = new AuditLog(join(dataDir, 'audit.log'));
+    this.ai = new AiService(dataDir, {
+      get: (ref) => this.secrets.get(ref),
+      set: (ref, v) => (v === null ? this.secrets.delete(ref) : this.secrets.set(ref, v)),
+    }, (event, data) => this.audit.write({ kind: 'ai', event, ...data }));
+    this.director = new AiDirector({
+      station: (id) => this.rt(id).station,
+      library: (id) => this.rt(id).data.library,
+      queue: (id) => this.rt(id).queue.list(),
+      history: (id) => (this.rt(id).data.playLog ?? []).map((e) => e.mediaId),
+      insert: (id, mediaId, index) => {
+        this.rt(id).queue.add(mediaId, 'ai', index);
+        this.publishQueue(id);
+      },
+      addGenerated: (id, audio, ext, title, category) => this.addGeneratedMedia(id, audio, ext, title, category),
+      remove: (id, mediaId) => {
+        if (this.rt(id).data.library.some((m) => m.id === mediaId)) this.removeMedia(id, mediaId);
+      },
+      nowPlayingId: (id) => this.rt(id).nowPlaying.mediaId,
+      pickJingle: (id) => {
+        const rt = this.rt(id);
+        return pickFromPool(rt.data.library, 'station_id', rt.data.history, rt.data.rotation) ?? pickFromPool(rt.data.library, 'jingle', rt.data.history, rt.data.rotation);
+      },
+      event: (id, type, payload) => {
+        this.audit.write({ kind: 'ai', event: type, stationId: id, ok: payload.ok, detail: typeof payload.detail === 'string' ? payload.detail.slice(0, 300) : undefined, cost: payload.cost });
+        if (id !== '*') this.publish(type, id, payload);
+      },
+    }, this.ai, (id) => this.aiConfig(id));
     this.tokensFile = join(dataDir, 'tokens.json');
     this.tokens = readJson<ApiToken[]>(this.tokensFile, []);
     this.notifier = new Notifier((ref) => this.secrets.get(ref), (event, data) => this.audit.write({ kind: 'notify', event, ...data }));
@@ -275,6 +308,7 @@ export class AirDeckApp {
   }
 
   shutdown(): void {
+    this.ai.flush();
     if (this.tickTimer) clearInterval(this.tickTimer);
     if (this.levelTimer) clearInterval(this.levelTimer);
     for (const { playout } of this.playouts.values()) playout.stop();
@@ -390,6 +424,8 @@ export class AirDeckApp {
         });
       }
     }
+    // KI-Musikplanung alle 10 s prüfen (nur wenn aktiviert, sonst kostenlos)
+    if (this.tickCount % 20 === 0) for (const id of this.stations.keys()) this.director.tick(id);
     if (++this.tickCount % 2 === 0) {
       for (const [id, { playout }] of this.playouts) this.publish('playout.state', id, playout.status());
     }
@@ -918,6 +954,7 @@ export class AirDeckApp {
     for (const o of this.outputs.values()) if (o.cfg.stationId === stationId) o.updateMetadata(song);
     this.publish('now_playing.changed', stationId, { ...rt.nowPlaying, media: m });
     this.changed();
+    this.director.onTrack(stationId, m);
     return rt.nowPlaying;
   }
 
@@ -1761,6 +1798,97 @@ export class AirDeckApp {
     return { installing: true, to: info.latest };
   }
 
+  // ---------- KI-Automation ----------
+
+  aiConfig(stationId: string): AiStationConfig {
+    const c = this.rt(stationId).data.ai;
+    return { ...DEFAULT_AI, ...c, text: { ...DEFAULT_AI.text, ...c?.text }, voice: { ...DEFAULT_AI.voice, ...c?.voice }, music: { ...DEFAULT_AI.music, ...c?.music } };
+  }
+
+  setAiConfig(p: Principal, stationId: string, input: Record<string, any>): AiStationConfig {
+    const cur = this.aiConfig(stationId);
+    const str = (v: unknown, max: number, d: string) => (typeof v === 'string' ? v.trim().slice(0, max) : d);
+    const int = (v: unknown, lo: number, hi: number, d: number) => (typeof v === 'number' && Number.isFinite(v) ? Math.max(lo, Math.min(hi, Math.round(v))) : d);
+    const bool = (v: unknown, d: boolean) => (typeof v === 'boolean' ? v : d);
+    const target = (t: any, d: any) => (t && typeof t === 'object' ? {
+      providerId: str(t.providerId, 40, d?.providerId ?? ''), model: str(t.model, 120, d?.model ?? ''),
+      ...(typeof t.temperature === 'number' ? { temperature: Math.max(0, Math.min(2, t.temperature)) } : {}),
+      ...(typeof t.maxTokens === 'number' ? { maxTokens: int(t.maxTokens, 50, 8000, 600) } : d?.maxTokens ? { maxTokens: d.maxTokens } : {}),
+    } : d);
+    const voice = (t: any, d: any) => (t && typeof t === 'object' ? {
+      providerId: str(t.providerId, 40, d?.providerId ?? ''), voice: str(t.voice, 300, d?.voice ?? ''), model: str(t.model, 120, d?.model ?? '') || undefined,
+      ...(typeof t.speed === 'number' ? { speed: Math.max(0.5, Math.min(2, t.speed)) } : {}),
+    } : d);
+    const sources: AiSource[] = Array.isArray(input.sources) ? input.sources.slice(0, 12).map((s: any, i: number) => {
+      const url = String(s.url ?? '').trim();
+      if (!/^https?:\/\//.test(url)) throw new AppError(400, 'invalid_url', `Quelle ${i + 1}: URL muss mit http(s):// beginnen`);
+      return { id: str(s.id, 40, '') || newId('ais'), name: str(s.name, 60, `Quelle ${i + 1}`), url, kind: ['rss', 'json', 'text'].includes(s.kind) ? s.kind : 'rss', use: ['news', 'weather', 'info'].includes(s.use) ? s.use : 'info' };
+    }) : cur.sources;
+    const next: AiStationConfig = {
+      enabled: bool(input.enabled, cur.enabled),
+      approval: bool(input.approval, cur.approval),
+      everySongs: int(input.everySongs, 0, 20, cur.everySongs),
+      topOfHourNews: bool(input.topOfHourNews, cur.topOfHourNews),
+      language: str(input.language, 40, cur.language) || 'Deutsch',
+      persona: str(input.persona, 400, cur.persona),
+      style: str(input.style, 600, cur.style),
+      maxWords: int(input.maxWords, 10, 300, cur.maxWords),
+      sources,
+      text: { ...target(input.text, cur.text), fallback: input.text && 'fallback' in input.text ? (input.text.fallback?.providerId ? target(input.text.fallback, undefined) : undefined) : cur.text.fallback },
+      voice: { ...voice(input.voice, cur.voice), fallback: input.voice && 'fallback' in input.voice ? (input.voice.fallback?.providerId ? voice(input.voice.fallback, undefined) : undefined) : cur.voice.fallback },
+      music: input.music && typeof input.music === 'object' ? {
+        enabled: bool(input.music.enabled, cur.music.enabled), lookahead: int(input.music.lookahead, 1, 10, cur.music.lookahead),
+        instructions: str(input.music.instructions, 600, cur.music.instructions), jingleEvery: int(input.music.jingleEvery, 0, 20, cur.music.jingleEvery),
+      } : cur.music,
+      keepGenerated: int(input.keepGenerated, 5, 500, cur.keepGenerated),
+    };
+    if (next.enabled && !next.text.providerId) throw new AppError(400, 'no_provider', 'Für die KI-Automation zuerst einen Text-Provider und ein Modell wählen');
+    if (next.enabled && next.everySongs > 0 && !next.voice.providerId) throw new AppError(400, 'no_voice', 'Für Moderationen einen Sprach-Provider und eine Stimme wählen');
+    this.rt(stationId).data.ai = next;
+    this.audit.write({ kind: 'ai', event: 'config', actor: p.id, stationId, enabled: next.enabled, music: next.music.enabled, approval: next.approval });
+    this.changed();
+    return next;
+  }
+
+  /** KI-Sprachdatei als Medium ablegen (wird automatisch aufgeräumt). */
+  addGeneratedMedia(stationId: string, audio: Buffer, ext: string, title: string, category: MediaItem['category'], generated = true): MediaItem {
+    const id = newId('m');
+    const file = `${id}.${ext === 'wav' ? 'wav' : 'mp3'}`;
+    writeFileSync(join(this.mediaDir, stationId, file), audio);
+    return this.addMedia(stationId, {
+      id, title: title.slice(0, 200), artist: this.rt(stationId).station.name, category, file, durationMs: null, addedAt: Date.now(),
+      folder: generated ? 'KI' : 'KI-Studio', ...(generated ? { generatedBy: 'ai' as const } : {}),
+    });
+  }
+
+  /** KI-Werkzeug: Text erzeugen (Assistent, Spot-Texte, Sendungsplanung). */
+  async aiText(stationId: string, prompt: string, system?: string): Promise<unknown> {
+    const c = this.aiConfig(stationId);
+    if (!prompt.trim()) throw new AppError(400, 'empty', 'Bitte eine Anweisung eingeben');
+    try {
+      const r = await this.ai.text(stationId, 'assistant', [c.text, c.text.fallback], system?.trim() || `Du bist der Redaktionsassistent des Radiosenders „${this.rt(stationId).station.name}“. Antworte auf ${c.language}.`, prompt.slice(0, 20_000), 90_000);
+      return { text: r.text, providerId: r.providerId, model: r.model, cost: r.cost };
+    } catch (err) {
+      throw new AppError(502, 'ai_failed', (err as Error).message);
+    }
+  }
+
+  /** KI-Werkzeug: Text vertonen und in die Bibliothek legen (Voice Studio, Spots, Jingles). */
+  async aiSpeech(stationId: string, input: { text?: string; title?: string; category?: string; voice?: string; providerId?: string; model?: string }): Promise<MediaItem> {
+    const c = this.aiConfig(stationId);
+    const text = String(input.text ?? '').trim();
+    if (!text) throw new AppError(400, 'empty', 'Kein Text');
+    if (text.length > 5000) throw new AppError(413, 'too_long', 'Höchstens 5000 Zeichen');
+    const target = input.providerId ? { providerId: input.providerId, voice: input.voice ?? '', model: input.model } : { ...c.voice, ...(input.voice ? { voice: input.voice } : {}) };
+    try {
+      const r = await this.ai.voice(stationId, 'voice_studio', [target, input.providerId ? undefined : c.voice.fallback], text, 120_000);
+      const category = (MEDIA_CATEGORIES as readonly string[]).includes(String(input.category)) ? (input.category as MediaItem['category']) : 'tts';
+      return this.addGeneratedMedia(stationId, r.audio, r.ext, input.title?.trim() || text.slice(0, 60), category, false);
+    } catch (err) {
+      throw new AppError(err instanceof AiError && err.code === 'no_voice' ? 400 : 502, 'ai_failed', (err as Error).message);
+    }
+  }
+
   // ---------- laut.fm ----------
 
   lautfmConfig(stationId: string): LautfmConfig & { origin: string; hasToken: boolean; loginUrl: string } {
@@ -1878,6 +2006,9 @@ export class AirDeckApp {
 
   private autoFill(rt: StationRuntime, force = false): void {
     if (!rt.data.autoFill && !force) return;
+    // KI plant die Musik: Sendeuhr springt nur ein, wenn die Queue leer ist (Rückfall)
+    const ai = rt.data.ai;
+    if (!force && ai?.enabled && ai.music.enabled && rt.queue.length > 0) return;
     // Sendeplan: im aktiven Zeitfenster kommt die Musik aus der zugeordneten Playlist
     const plan = activeWindow(rt.data.plans ?? [], new Date());
     const pl = plan ? rt.data.playlists?.find((x) => x.id === plan.playlistId) : undefined;

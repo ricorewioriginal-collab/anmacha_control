@@ -51,7 +51,7 @@ export interface QueueEntry {
   uid: string;
   mediaId: string;
   addedAt: number;
-  origin: 'manual' | 'clock' | 'emergency' | 'plan' | 'schedule';
+  origin: 'manual' | 'clock' | 'emergency' | 'plan' | 'schedule' | 'ai';
 }
 
 export type DeckId = 'A' | 'B' | 'C' | 'D';

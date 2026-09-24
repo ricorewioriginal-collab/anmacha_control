@@ -7,6 +7,7 @@ import path, { extname, join, normalize, resolve } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import { Readable } from 'node:stream';
 import { AirDeckApp, AppError, canSee, newId, type Principal } from './app.ts';
+import { AiError } from './ai/providers.ts';
 import { MEDIA_CATEGORIES, parseFileName, type MediaCategory } from '../core/automation.ts';
 import { OUTPUT_CAPABILITIES } from './icecast.ts';
 import { PUBLIC_API, RADIOADMIN, allowedPublicPath, allowedRadioadminPath, forward } from './lautfm.ts';
@@ -322,6 +323,41 @@ export function createHttpServer(app: AirDeckApp, studioDir: string): Server {
     await pipeline(Readable.fromWeb(r.body as never), c.res);
     return STREAMED;
   });
+
+  // --- KI-Automation ---
+  const aiErr = (err: unknown) => (err instanceof AppError ? err : new AppError(err instanceof AiError && err.code === 'not_found' ? 404 : err instanceof AiError && ['invalid', 'unknown_provider'].includes(err.code) ? 400 : 502, 'ai_error', (err as Error).message));
+  const aiCall = async <T>(fn: () => T | Promise<T>): Promise<T> => {
+    try {
+      return await fn();
+    } catch (err) {
+      throw aiErr(err);
+    }
+  };
+  add('GET', '/api/v1/ai/settings', null, (c) => (globalAdmin(c), app.ai.view()));
+  add('PUT', '/api/v1/ai/settings', null, async (c) => {
+    globalAdmin(c);
+    const b = await c.body();
+    return aiCall(() => app.ai.update(b));
+  });
+  add('GET', '/api/v1/ai/usage', null, (c) => (globalAdmin(c), app.ai.usageView()));
+  add('GET', '/api/v1/ai/providers/:id/models', null, (c) => (globalAdmin(c), aiCall(() => app.ai.models(c.params.id!))));
+  add('GET', '/api/v1/ai/providers/:id/voices', null, (c) => (globalAdmin(c), aiCall(() => app.ai.voices(c.params.id!))));
+  add('GET', '/api/v1/stations/:sid/ai', 'ai:read', (c) => ({ config: app.aiConfig(sid(c)), state: app.director.view(sid(c)) }));
+  add('PUT', '/api/v1/stations/:sid/ai', 'ai:write', async (c) => app.setAiConfig(c.p, sid(c), await c.body()));
+  add('POST', '/api/v1/stations/:sid/ai/moderation', 'ai:write', async (c) => {
+    const kind = (await c.body()).kind === 'news' ? 'news' : 'break';
+    const r = await app.director.produce(sid(c), kind);
+    if (!r) throw new AppError(502, 'ai_failed', (app.director.view(sid(c)) as { log: { detail: string }[] }).log[0]?.detail ?? 'KI-Moderation fehlgeschlagen oder läuft bereits');
+    return r;
+  });
+  add('POST', '/api/v1/stations/:sid/ai/music', 'ai:write', async (c) => ({ added: await app.director.maintainMusic(sid(c), true) }));
+  add('POST', '/api/v1/stations/:sid/ai/pending/:id/approve', 'ai:write', (c) => aiCall(() => app.director.approve(sid(c), c.params.id!)));
+  add('POST', '/api/v1/stations/:sid/ai/pending/:id/reject', 'ai:write', (c) => aiCall(() => app.director.reject(sid(c), c.params.id!)));
+  add('POST', '/api/v1/stations/:sid/ai/text', 'ai:write', async (c) => {
+    const b = await c.body();
+    return app.aiText(sid(c), String(b.prompt ?? ''), typeof b.system === 'string' ? b.system : undefined);
+  });
+  add('POST', '/api/v1/stations/:sid/ai/speech', 'ai:write', async (c) => app.aiSpeech(sid(c), await c.body()));
 
   // --- Benachrichtigungen / Webhooks / Now-Playing-Export ---
   add('GET', '/api/v1/stations/:sid/integrations', 'stations:write', (c) => app.integrations(sid(c)));
