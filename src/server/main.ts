@@ -43,7 +43,9 @@ function openStudio(url: string): void {
   const detached = { detached: true, stdio: 'ignore' as const, windowsHide: true };
   if (process.platform === 'win32') {
     // '' wird von Node als "" übergeben = leerer Fenstertitel für "start"
-    const edge = spawn('cmd', ['/c', 'start', '', 'msedge', `--app=${url}`], detached);
+    // Eigenes Profil: App-Fenster startet unabhängig vom normalen Edge, darf ohne Klick mithören (Autoplay)
+    const profile = join(process.env.LOCALAPPDATA ?? join(homedir(), 'AppData', 'Local'), 'AirDeck', 'browser');
+    const edge = spawn('cmd', ['/c', 'start', '', 'msedge', `--app=${url}`, `--user-data-dir=${profile}`, '--no-first-run', '--autoplay-policy=no-user-gesture-required'], detached);
     edge.on('exit', (code) => {
       if (code) spawn('cmd', ['/c', 'start', '', url], detached).unref();
     });

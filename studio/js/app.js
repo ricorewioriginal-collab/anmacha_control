@@ -57,6 +57,7 @@ const S = {
   /** @type {{ rmsDb: number, peakDb: number }|null} */ srvLevel: null,
   /** @type {{ rec: MediaRecorder, stream: MediaStream, sourceId: string }|null} */ mic: null,
   /** @type {HTMLAudioElement|null} */ listen: null,
+  /** @type {ReturnType<typeof setTimeout>|undefined} */ listenRetry: undefined,
 };
 const serverMode = () => !!S.playout?.status?.running;
 const AUDIO_FILE = /\.(mp3|ogg|opus|wav|flac|m4a|aac|webm)$/i;
@@ -96,6 +97,7 @@ async function boot() {
   buildDecks();
   bindStatic();
   await loadStation();
+  if (pref(AUDIO_PREF.auto) === '1') toggleListen(true);
   setInterval(tick, 200);
   setInterval(clock, 1000);
   clock();
@@ -253,6 +255,7 @@ function renderAll() {
 function ensureAudio() {
   if (!audio) {
     audio = new AudioEngine();
+    applySink(audio.ctx, pref(AUDIO_PREF.program));
     for (const id of DECKS) audio.decks[id].onEnded = (d) => onDeckEnded(d.id);
   }
   return audio;
@@ -485,20 +488,89 @@ async function toggleMic() {
   status(`Mikrofon sendet als „${sourceName(sourceId)}“ – Übernahme nach Priorität (Anti-Flapping 2 s)`);
 }
 
-function toggleListen() {
+// ---------- Mithören / Audio-Routing ----------
+
+const AUDIO_PREF = { program: 'airdeck.progSink', cue: 'airdeck.pflSink', auto: 'airdeck.autoListen' };
+const pref = (/** @type {string} */ k) => { try { return localStorage.getItem(k) ?? ''; } catch { return ''; } };
+const setPref = (/** @type {string} */ k, /** @type {string} */ v) => { try { localStorage.setItem(k, v); } catch {} };
+
+/** Ausgabegerät setzen (Edge/Chrome: setSinkId), still ignorieren, wenn nicht unterstützt. @param {any} target @param {string} sink */
+async function applySink(target, sink) {
+  if (!target || typeof target.setSinkId !== 'function') return;
+  await target.setSinkId(sink).catch((/** @type {Error} */ e) => status(`Ausgabegerät nicht verfügbar: ${e.message}`, true));
+}
+
+/** Sendesignal mithören – verbindet sich nach Quellenwechsel/Abbruch selbst neu. @param {boolean} [force] */
+async function toggleListen(force) {
   const btn = $('btn-listen');
+  const on = force ?? !S.listen;
   if (S.listen) {
+    S.listen.onerror = S.listen.onended = null;
     S.listen.pause();
     S.listen.removeAttribute('src');
     S.listen = null;
-    btn.setAttribute('aria-pressed', 'false');
-    return;
   }
-  const el = new Audio(api.listenUrl(S.station.id, '/live'));
-  el.play().catch(() => status('Mithören nicht möglich – ist eine Quelle auf Sendung?', true));
-  el.addEventListener('error', () => { status('Mithör-Stream beendet (Quellenwechsel?) – erneut klicken', true); btn.setAttribute('aria-pressed', 'false'); S.listen = null; }, { once: true });
+  clearTimeout(S.listenRetry);
+  btn.setAttribute('aria-pressed', String(on));
+  setPref(AUDIO_PREF.auto, on ? '1' : '');
+  if (!on) return;
+  const el = new Audio();
+  el.preload = 'none';
+  await applySink(el, pref(AUDIO_PREF.program));
+  const again = () => {
+    if (S.listen !== el) return;
+    S.listen = null;
+    // Quellenwechsel oder noch nichts auf Sendung: nach kurzer Pause erneut verbinden
+    S.listenRetry = setTimeout(() => btn.getAttribute('aria-pressed') === 'true' && toggleListen(true), 2000);
+  };
+  el.onerror = el.onended = again;
+  el.src = api.listenUrl(S.station.id, '/live');
   S.listen = el;
-  btn.setAttribute('aria-pressed', 'true');
+  el.play().catch((e) => {
+    if (e?.name === 'NotAllowedError') {
+      status('Mithören: einmal auf den Kopfhörer-Knopf klicken (Browser verlangt eine Aktion)', true);
+      btn.setAttribute('aria-pressed', 'false');
+      S.listen = null;
+    } else again();
+  });
+}
+
+/** Ausgabegeräte (Beschriftungen gibt es erst nach Mikrofon-Freigabe). */
+async function outputDevices() {
+  if (!navigator.mediaDevices?.enumerateDevices) return [];
+  let devs = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === 'audiooutput');
+  if (devs.length && devs.every((d) => !d.label)) {
+    try {
+      const s = await navigator.mediaDevices.getUserMedia({ audio: true });
+      for (const t of s.getTracks()) t.stop();
+      devs = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === 'audiooutput');
+    } catch {}
+  }
+  return devs;
+}
+
+async function editAudio() {
+  const outs = await outputDevices();
+  const opts = /** @type {[string,string][]} */ ([['', 'Windows-Standardgerät'], ...outs.filter((d) => d.deviceId !== 'default').map((d, i) => /** @type {[string,string]} */ ([d.deviceId, d.label || `Ausgang ${i + 1}`]))]);
+  const dev = /** @type {any} */ (await run(() => api.get('/audio-devices'))) ?? { devices: [] };
+  const cfg = S.playout?.config ?? {};
+  const canSink = 'setSinkId' in HTMLMediaElement.prototype;
+  const v = await formDialog('Audio & Geräte', [
+    { name: 'info', label: 'So läuft das Audio', type: 'info', value: 'Server-Automation → Encoder → Stream. Hier wählst du, wo du im Studio mithörst (Sendesignal) und wo du vorhörst (CUE/PFL), z. B. Lautsprecher und Kopfhörer getrennt.' },
+    { name: 'program', label: 'Sendesignal mithören auf', value: pref(AUDIO_PREF.program), options: opts, hint: canSink ? '' : 'Dieser Browser kann kein Ausgabegerät wählen – es gilt das Standardgerät' },
+    { name: 'cue', label: 'Vorhören (CUE/PFL) auf', value: pref(AUDIO_PREF.cue), options: opts },
+    { name: 'auto', label: 'Beim Start automatisch mithören', type: 'checkbox', value: pref(AUDIO_PREF.auto) === '1' },
+    { name: 'input', label: 'Mikrofon / Line-In am AirDeck-PC (für die Server-Automation)', value: cfg.inputDevice ?? '', options: [['', '– kein Eingang –'], ...(dev.devices ?? []).map((/** @type {any} */ d) => /** @type {[string,string]} */ ([d.id, d.name]))], hint: dev.devices?.length ? 'Einschalten mit „Mic“ in der Server-Automation' : 'Keine Eingänge gefunden (ffmpeg nötig)' },
+  ]);
+  if (!v) return;
+  setPref(AUDIO_PREF.program, v.program);
+  setPref(AUDIO_PREF.cue, v.cue);
+  setPref(AUDIO_PREF.auto, v.auto ? '1' : '');
+  if (audio) await applySink(audio.ctx, v.program);
+  if (S.listen) await applySink(S.listen, v.program);
+  if (pfl) await applySink(pfl.el, v.cue);
+  if ((v.input || '') !== (cfg.inputDevice ?? '')) S.playout = (await run(() => api.patch(url('/playout'), { inputDevice: v.input }))) ?? S.playout;
+  status('Audio-Einstellungen gespeichert');
 }
 
 // ---------- Render: Decks ----------
@@ -545,9 +617,8 @@ function buildDecks() {
         vol),
       h('div', { class: 'deck-stats' }, h('div', {}, h('span', {}, 'BPM'), els.bpm), h('div', {}, h('span', {}, 'Gain'), els.gain), h('div', {}, h('span', {}, 'Länge'), els.total)),
     );
-    dropTarget(card, (dt) => {
-      const mid = dt.getData(MIME.MEDIA);
-      const m = mid && S.libById.get(mid);
+    dropTarget(card, async (dt) => {
+      const [m] = await dropMedia(dt);
       if (m) loadDeck(id, m);
     });
     els.card = card;
@@ -639,20 +710,10 @@ async function togglePfl(id) {
   const el = new Audio(api.mediaUrl(S.station.id, d.media.id));
   el.volume = Number(/** @type {HTMLInputElement} */ ($('fx-pfl')).value);
   el.currentTime = d.el.currentTime;
-  const sink = localStorage.getItem('airdeck.pflSink');
-  if (sink && 'setSinkId' in el) await /** @type {any} */ (el).setSinkId(sink).catch(() => {});
+  await applySink(el, pref(AUDIO_PREF.cue));
   el.play().catch(() => status('Vorhören nicht möglich', true));
   pfl = { id, el };
   deckEls[id].cue.setAttribute('aria-pressed', 'true');
-}
-
-async function choosePflDevice() {
-  if (!navigator.mediaDevices?.enumerateDevices) return status('Ausgabegeräte-Wahl wird von diesem Browser nicht unterstützt', true);
-  const devs = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === 'audiooutput');
-  const v = await formDialog('Vorhör-Ausgang (Kopfhörer)', [
-    { name: 'sink', label: 'Gerät', value: localStorage.getItem('airdeck.pflSink') ?? '', options: [['', 'Standard'], ...devs.map((d, i) => /** @type {[string,string]} */ ([d.deviceId, d.label || `Ausgang ${i + 1}`]))] },
-  ]);
-  if (v) localStorage.setItem('airdeck.pflSink', v.sink);
 }
 
 // ---------- Render: Cardwall ----------
@@ -681,9 +742,9 @@ function renderCarts() {
       m ? h('span', { class: 'cart-dur' }, fmt(m.durationMs)) : null,
       h('button', { class: 'cart-edit', title: 'Cart bearbeiten', onclick: (/** @type {Event} */ e) => { e.stopPropagation(); editCart(c); } }, '⋯'),
     );
-    dropTarget(el, (dt) => {
-      const mid = dt.getData(MIME.MEDIA);
-      if (mid) run(() => api.patch(url(`/cardwall/${encodeURIComponent(c.id)}`), { mediaId: mid, label: S.libById.get(mid)?.title?.slice(0, 40) ?? c.label }));
+    dropTarget(el, async (dt) => {
+      const [m] = await dropMedia(dt);
+      if (m) run(() => api.patch(url(`/cardwall/${encodeURIComponent(c.id)}`), { mediaId: m.id, label: m.title?.slice(0, 40) ?? c.label }));
     });
     return el;
   }));
@@ -752,11 +813,17 @@ async function editMedia(m) {
 }
 
 /** @param {FileList|File[]} files */
+/** @returns {Promise<any[]>} angelegte Medien */
 async function upload(files) {
   const cat = /** @type {HTMLSelectElement} */ ($('lib-cat')).value || 'music';
   const selFolder = /** @type {HTMLSelectElement} */ ($('lib-folder')).value;
   files = [...files].filter((f) => AUDIO_FILE.test(f.name));
-  if (!files.length) return status('Keine Audiodateien gefunden', true);
+  if (!files.length) {
+    status('Keine Audiodateien gefunden', true);
+    return [];
+  }
+  /** @type {any[]} */
+  const created = [];
   let ok = 0;
   for (const f of files) {
     status(`Upload: ${f.name} …`);
@@ -764,9 +831,22 @@ async function upload(files) {
     const rel = /** @type {any} */ (f).webkitRelativePath || '';
     const folder = rel.includes('/') ? rel.split('/').slice(0, -1).join(' / ') : selFolder;
     const r = await run(() => api.req('PUT', url(`/media?name=${encodeURIComponent(f.name)}&category=${cat}&folder=${encodeURIComponent(folder)}`), f, { 'Content-Type': 'application/octet-stream' }));
-    if (r) ok++;
+    if (r) {
+      ok++;
+      created.push(r);
+      S.libById.set(r.id, r);
+    }
   }
   status(`${ok} von ${files.length} Datei(en) hochgeladen`, ok < files.length);
+  return created;
+}
+
+/** Medien aus einem Drop: Titel aus der Bibliothek oder Dateien vom PC (werden erst hochgeladen). @param {DataTransfer} dt */
+async function dropMedia(dt) {
+  const mid = dt.getData(MIME.MEDIA);
+  if (mid) return [S.libById.get(mid)].filter(Boolean);
+  if (dt.files?.length) return upload([...dt.files]);
+  return [];
 }
 
 // ---------- Render: Queue ----------
@@ -791,11 +871,11 @@ function renderQueue() {
 }
 
 /** @param {DataTransfer} dt @param {number} index */
-function queueDrop(dt, index) {
+async function queueDrop(dt, index) {
   const uid = dt.getData(MIME.QUEUE);
-  const mid = dt.getData(MIME.MEDIA);
-  if (uid) run(() => api.post(url(`/queue/${encodeURIComponent(uid)}/move`), { index }));
-  else if (mid) run(() => api.post(url('/queue'), { mediaId: mid, index }));
+  if (uid) return run(() => api.post(url(`/queue/${encodeURIComponent(uid)}/move`), { index }));
+  const list = await dropMedia(dt);
+  for (const [i, m] of list.entries()) await run(() => api.post(url('/queue'), { mediaId: m.id, index: index + i }));
 }
 
 // ---------- Render: Quellen / Ausgänge / Now Playing ----------
@@ -933,7 +1013,7 @@ function dropTarget(el, onDrop, row = false) {
   const cls = row ? 'drop-before' : 'drop';
   el.addEventListener('dragover', (e) => {
     const types = e.dataTransfer?.types ?? [];
-    if (types.includes(MIME.MEDIA) || types.includes(MIME.QUEUE)) {
+    if (types.includes(MIME.MEDIA) || types.includes(MIME.QUEUE) || types.includes('Files')) {
       e.preventDefault();
       e.stopPropagation();
       el.classList.add(cls);
@@ -1014,6 +1094,18 @@ function bindStatic() {
   });
   $('btn-menu').addEventListener('click', () => $('sidebar').classList.toggle('open'));
   $('btn-storage').addEventListener('click', editStorage);
+  // Dateien irgendwo ins Fenster gezogen: in die Bibliothek laden statt die Datei im Browser zu öffnen
+  addEventListener('dragover', (e) => {
+    if (e.dataTransfer?.types.includes('Files')) {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'copy';
+    }
+  });
+  addEventListener('drop', (e) => {
+    if (!e.dataTransfer?.files.length) return;
+    e.preventDefault();
+    upload([...e.dataTransfer.files]);
+  });
   layout = mountLayout($('view-studio'));
   $('btn-windows').addEventListener('click', editWindows);
   // Tastatur: Alt+1…4 wechselt die Bereiche
@@ -1043,7 +1135,7 @@ function bindStatic() {
   libDrop.addEventListener('dragleave', () => libDrop.classList.remove('drop'));
   libDrop.addEventListener('drop', (e) => {
     libDrop.classList.remove('drop');
-    if (e.dataTransfer?.files.length) { e.preventDefault(); upload([...e.dataTransfer.files]); }
+    if (e.dataTransfer?.files.length) { e.preventDefault(); e.stopPropagation(); upload([...e.dataTransfer.files]); }
   });
   dropTarget($('queue-drop'), (dt) => queueDrop(dt, S.queue.items?.length ?? 0));
 
@@ -1076,7 +1168,8 @@ function bindStatic() {
   });
   $('btn-stream').addEventListener('click', toggleStream);
   $('btn-mic').addEventListener('click', toggleMic);
-  $('btn-listen').addEventListener('click', toggleListen);
+  $('btn-listen').addEventListener('click', () => toggleListen());
+  $('btn-audio').addEventListener('click', editAudio);
   $('po-start').addEventListener('click', () => {
     if (S.auto) { S.auto = false; $('btn-auto').setAttribute('aria-pressed', 'false'); }
     if (S.streaming) toggleStream();
@@ -1094,6 +1187,7 @@ function bindStatic() {
     const id = /** @type {HTMLSelectElement} */ (e.target).value;
     S.station = S.stations.find((s) => s.id === id);
     await run(loadStation);
+    if (S.listen) toggleListen(true);
   });
 
   // Tastatur: F1–F4 Deck Play/Pause, Leertaste = Automation weiter
@@ -1174,7 +1268,7 @@ function bindProcessing() {
     if (pfl) pfl.el.volume = Number(pflVol.value);
     $('fx-pfl-v').textContent = `${Math.round(Number(pflVol.value) * 100)} %`;
   });
-  $('fx-pfl-v').parentElement?.firstElementChild?.addEventListener('click', choosePflDevice);
+  $('fx-pfl-v').parentElement?.firstElementChild?.addEventListener('click', editAudio);
   $('fx-pfl-v').title = 'Klick auf „Vorhören“: Ausgabegerät wählen';
 }
 
