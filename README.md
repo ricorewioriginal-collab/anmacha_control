@@ -3,14 +3,15 @@
 Unabhängige Radio-Automation für **Windows, Android und Self-Hosted-Server**.
 AirDeck läuft ohne AnMaCha. AnMaCha und laut.fm sind höchstens optionale Adapter.
 
-**Stand 0.2:** Core, Server, Studio, 24/7-Server-Playout, Windows-Programm und Android-App.
+**Stand 0.3:** Core, Server, Studio, 24/7-Server-Playout, Planung (Zeitplan, Stunden-Uhr, Sendeplan, Playlists), Recorder, laut.fm Radioadmin, Windows-Installer und Android-App.
+Der Abgleich mit dem AnMaCha-Dashboard steht in [`docs/FEATURE_PARITY.md`](docs/FEATURE_PARITY.md).
 Die Roadmap steht in [`docs/CLAUDE_PROGRESS.md`](docs/CLAUDE_PROGRESS.md).
 
 ## Plattformen
 
 | Plattform | Was | Wie |
 |---|---|---|
-| **Windows** | `AirDeck.exe`: Server, Studio-Fenster und 24/7-Automation, ffmpeg liegt bei | GitHub Actions → Artefakt `AirDeck-Windows`, lokal mit `npm run build:win` auf Windows |
+| **Windows** | Installer `AirDeck-Setup.exe`: läuft komplett lokal, ohne eigenen Server (Startmenü, Desktop, optional Autostart 24/7), ffmpeg liegt bei | GitHub Actions → Artefakt `AirDeck-Windows-Installer` |
 | **Android** | App: Studio-Fernbedienung, MIC LIVE (Priority 3), Mithören | GitHub Actions → Artefakt `AirDeck-Android` (APK), siehe [`apps/android`](apps/android/README.md) |
 | **Self-Hosted** | Server unter Linux/macOS, headless 24/7 | `npm start` bzw. `node dist/airdeck.cjs --headless` mit ffmpeg im PATH |
 
