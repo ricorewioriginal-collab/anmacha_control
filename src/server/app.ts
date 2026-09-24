@@ -2,7 +2,7 @@
 // Keine Abhängigkeit zu AnMaCha oder anderen externen Diensten.
 
 import { createHash, randomBytes } from 'node:crypto';
-import { cpus, freemem, totalmem, uptime as osUptime } from 'node:os';
+import { cpus, freemem, networkInterfaces, totalmem, uptime as osUptime } from 'node:os';
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { createWriteStream, mkdirSync, rmSync, type WriteStream } from 'node:fs';
@@ -228,6 +228,9 @@ export class AirDeckApp {
   readonly director: AiDirector;
   readonly packaged: boolean;
   readonly headless: boolean;
+  readonly appRoot: string;
+  listenHost = '127.0.0.1';
+  listenPort = 8750;
 
   constructor(dataDir: string, opts: { stableMs?: number; cooldownMs?: number; appRoot?: string; ffmpeg?: FfmpegInfo | null; secrets?: SecretStore; sync?: SyncManager; build?: string; packaged?: boolean; headless?: boolean } = {}) {
     this.dataDir = dataDir;
@@ -237,6 +240,7 @@ export class AirDeckApp {
     this.secrets = opts.secrets ?? new SecretStore(dataDir);
     this.updater = new Updater(opts.build ?? 'dev');
     this.packaged = opts.packaged ?? false;
+    this.appRoot = opts.appRoot ?? process.cwd();
     this.headless = opts.headless ?? false;
     this.audit = new AuditLog(join(dataDir, 'audit.log'));
     this.ai = new AiService(dataDir, {
@@ -1796,6 +1800,30 @@ export class AirDeckApp {
     this.updater.runWindowsSetup(file, this.headless);
     setTimeout(exit, 1500).unref();
     return { installing: true, to: info.latest };
+  }
+
+  // ---------- Android-App / Netzwerk ----------
+
+  /** Mitgelieferte APK (Windows-Paket) oder null. */
+  localApk(): string | null {
+    const f = join(this.appRoot, 'android', 'AirDeck-Android.apk');
+    return existsSync(f) ? f : null;
+  }
+
+  appConnect(): unknown {
+    const lanSetting = readJson<{ lan?: boolean }>(join(this.dataDir, 'network.json'), {}).lan === true;
+    const listening = this.listenHost === '0.0.0.0' || this.listenHost === '::';
+    const addresses: string[] = [];
+    for (const list of Object.values(networkInterfaces())) {
+      for (const a of list ?? []) if (a.family === 'IPv4' && !a.internal) addresses.push(`http://${a.address}:${this.listenPort}`);
+    }
+    return { lan: lanSetting, listening, restartNeeded: lanSetting !== listening && !process.env.AIRDECK_HOST, addresses, apk: this.localApk() ? 'local' : 'release' };
+  }
+
+  setNetwork(lan: boolean): unknown {
+    writeFileAtomic(join(this.dataDir, 'network.json'), JSON.stringify({ lan }));
+    this.audit.write({ kind: 'network', event: 'lan', lan });
+    return this.appConnect();
   }
 
   // ---------- KI-Automation ----------

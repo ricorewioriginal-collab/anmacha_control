@@ -36,7 +36,7 @@ jobs:
       - run: npm run check
 
   windows:
-    needs: test
+    needs: [test, android]
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -45,6 +45,9 @@ jobs:
       - run: npm ci
       - name: AirDeck.exe bauen (Node Single Executable)
         run: node scripts/build.mjs --sea
+      - name: Android-App beilegen (Download direkt aus AirDeck)
+        uses: actions/download-artifact@v4
+        with: { name: AirDeck-Android, path: dist/AirDeck/android }
       - name: ffmpeg beilegen
         shell: pwsh
         run: |
@@ -135,15 +138,31 @@ jobs:
         with: { node-version: '22' }
       - uses: actions/setup-java@v4
         with: { distribution: temurin, java-version: '21' }
-      - name: APK bauen (Debug)
+      - name: APK bauen (offiziell signiert, falls Keystore hinterlegt – sonst Debug)
         working-directory: apps/android
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
           npm install --no-audit --no-fund
-          npm run build:debug
+          mkdir -p out
+          if [ -n "$KEYSTORE_B64" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/airdeck.jks"
+            export ANDROID_KEYSTORE="$RUNNER_TEMP/airdeck.jks"
+            npm run build:release
+            cp android/app/build/outputs/apk/release/app-release.apk out/AirDeck-Android.apk
+            echo "Release-APK (offiziell signiert)"
+          else
+            npm run build:debug
+            cp android/app/build/outputs/apk/debug/app-debug.apk out/AirDeck-Android.apk
+            echo "::warning::Kein Keystore hinterlegt (Secret ANDROID_KEYSTORE_B64) – Debug-APK gebaut"
+          fi
       - uses: actions/upload-artifact@v4
         with:
           name: AirDeck-Android
-          path: apps/android/android/app/build/outputs/apk/debug/app-debug.apk
+          path: apps/android/out/AirDeck-Android.apk
           retention-days: 30
 
   # Download-Bereich: Nach jedem Push auf den Hauptbranch liegen Installer, portable Version und APK
@@ -162,7 +181,7 @@ jobs:
           mkdir -p out
           cp artifacts/AirDeck-Windows-Installer/*.exe out/AirDeck-Setup.exe
           mv artifacts/AirDeck-Windows artifacts/AirDeck && (cd artifacts && zip -qr ../out/AirDeck-Windows-Portable.zip AirDeck)
-          cp artifacts/AirDeck-Android/app-debug.apk out/AirDeck-Android.apk
+          cp artifacts/AirDeck-Android/AirDeck-Android.apk out/AirDeck-Android.apk
           ls -la out
       - uses: softprops/action-gh-release@v2
         with:

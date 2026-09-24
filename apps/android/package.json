@@ -5,7 +5,8 @@
   "description": "AirDeck Studio für Android (Capacitor-Hülle um studio/)",
   "scripts": {
     "setup": "node prepare.mjs",
-    "build:debug": "node prepare.mjs && cd android && ./gradlew assembleDebug"
+    "build:debug": "node prepare.mjs && cd android && ./gradlew assembleDebug",
+    "build:release": "node prepare.mjs && cd android && ./gradlew assembleRelease"
   },
   "dependencies": {
     "@capacitor/android": "^7.0.0",

@@ -108,10 +108,17 @@ async function boot() {
 async function askToken(msg) {
   const needServer = isNativeApp() || !!serverBase();
   const v = await formDialog('Mit AirDeck verbinden', [
-    ...(needServer ? [{ name: 'server', label: 'Server-Adresse', value: serverBase() || 'http://192.168.', required: true, hint: 'z. B. http://192.168.1.20:8750 (AirDeck auf dem PC/Server, AIRDECK_HOST=0.0.0.0)' }] : []),
-    { name: 'token', label: 'API-Token', type: 'password', required: true, hint: msg ?? 'Das Token wird beim ersten Serverstart in der Konsole angezeigt.' },
+    ...(needServer ? [{ name: 'server', label: 'Server-Adresse', value: serverBase() || 'http://192.168.', hint: 'z. B. http://192.168.1.20:8750 – entfällt, wenn du unten einen Verbindungslink einfügst' }] : []),
+    { name: 'token', label: 'Verbindungslink oder API-Token', type: 'password', required: true, hint: msg ?? 'Am einfachsten: im AirDeck am PC „Android-App → Zugang erstellen“ und den Link hier einfügen.' },
   ], 'Verbinden');
   if (!v?.token) return;
+  // Verbindungslink aus dem Studio („http://…:8750/#token=…“) direkt einfügen
+  const link = /^(https?:\/\/[^#\s]+?)\/?#token=([^&\s]+)/.exec(v.token.trim());
+  if (link) {
+    saveServer(link[1]);
+    saveToken(decodeURIComponent(link[2]));
+    return location.reload();
+  }
   if (needServer) saveServer(v.server);
   saveToken(v.token.trim());
   location.reload();
@@ -1186,6 +1193,7 @@ function bindStatic() {
   $('btn-mic').addEventListener('click', toggleMic);
   $('btn-listen').addEventListener('click', () => toggleListen());
   $('btn-audio').addEventListener('click', editAudio);
+  $('btn-android').addEventListener('click', androidApp);
   $('po-start').addEventListener('click', () => {
     if (S.auto) { S.auto = false; $('btn-auto').setAttribute('aria-pressed', 'false'); }
     if (S.streaming) toggleStream();
@@ -1314,6 +1322,35 @@ function showView(name) {
   $('sidebar').classList.remove('open');
   for (const id of ['studio', 'planning', 'recorder', 'lautfm', 'ai']) $(`view-${id}`).hidden = id !== name;
   if (name !== 'studio') views[name]?.show();
+}
+
+// ---------- Android-App ----------
+
+async function androidApp() {
+  if (isNativeApp()) return status('Du nutzt bereits die Android-App. Updates findest du unter „Updates“.');
+  const c = await run(() => api.get('/app/connect'));
+  if (!c) return;
+  const base = c.addresses[0] ?? location.origin;
+  const v = await formDialog('Android-App', [
+    { name: 'info', label: 'Offizielle AirDeck-App', type: 'info', value: 'Die App steuert diesen AirDeck per Touch und sendet mit MIC LIVE als Live-Quelle. Auf dem Handy im selben WLAN öffnen:' },
+    { name: 'dl', label: 'APK herunterladen (im Handy-Browser öffnen)', type: 'info', value: c.listening ? `${base}/download/AirDeck-Android.apk` : 'Erst „Im Netzwerk erreichbar“ einschalten und AirDeck neu starten' },
+    { name: 'lan', label: 'Im Netzwerk erreichbar (nötig für Handy und andere PCs)', type: 'checkbox', value: c.lan, hint: c.restartNeeded ? '⚠ Wird nach einem Neustart von AirDeck aktiv. Windows fragt einmalig nach der Firewall-Freigabe.' : c.listening ? `Erreichbar unter: ${c.addresses.join(' · ') || '–'}` : 'Zurzeit nur auf diesem PC erreichbar' },
+    { name: 'token', label: 'Zugang für ein Handy erstellen (Verbindungslink anzeigen)', type: 'checkbox', value: false },
+  ], 'Übernehmen');
+  if (!v) return;
+  if (v.lan !== c.lan) {
+    const r = await run(() => api.put('/app/network', { lan: v.lan }));
+    if (r?.restartNeeded) status('Netzwerk-Einstellung gespeichert – bitte AirDeck neu starten (Tray/Fenster schließen und neu öffnen)');
+  }
+  if (v.token) {
+    const t = await run(() => api.post('/tokens', { name: `Android ${new Date().toLocaleDateString('de-DE')}`, scopes: ['*'], roles: ['operator', 'dj'], stationIds: [S.station.id] }));
+    if (!t) return;
+    const link = `${base}/#token=${t.token}`;
+    await formDialog('Verbindungslink für die App', [
+      { name: 'link', label: 'In der App bei „Mit AirDeck verbinden“ einfügen', type: 'textarea', value: link, hint: 'Gilt für diesen Sender. Widerrufen jederzeit über die Token-Verwaltung der API.' },
+    ], 'Fertig');
+    try { await navigator.clipboard.writeText(link); status('Verbindungslink kopiert'); } catch {}
+  }
 }
 
 // ---------- Fenster & Layout ----------

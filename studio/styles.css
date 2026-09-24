@@ -50,8 +50,9 @@ button, select, input, textarea { font: inherit; color: inherit; }
 .logo { display: flex; align-items: center; gap: 10px; padding: 4px 8px 10px; font-weight: 800; letter-spacing: .22em; font-size: 16px; color: #fff; }
 .logo img { border-radius: 9px; filter: drop-shadow(0 0 10px rgba(47, 140, 255, .55)); }
 .nav { display: flex; flex-direction: column; gap: 2px; }
-.nav button { display: flex; align-items: center; gap: 10px; width: 100%; background: none; border: 1px solid transparent; border-radius: 9px; padding: 8px 10px; color: #b6c4de; cursor: pointer; text-align: left; }
-.nav button:hover { background: rgba(47, 140, 255, .08); color: #fff; }
+.nav button, .nav a.nav-link { text-decoration: none; }
+.nav button, .nav a.nav-link { display: flex; align-items: center; gap: 10px; width: 100%; background: none; border: 1px solid transparent; border-radius: 9px; padding: 8px 10px; color: #b6c4de; cursor: pointer; text-align: left; }
+.nav a.nav-link:hover, .nav button:hover { background: rgba(47, 140, 255, .08); color: #fff; }
 .nav button[aria-pressed="true"] { background: linear-gradient(90deg, rgba(47, 140, 255, .35), rgba(47, 140, 255, .12)); border-color: rgba(47, 140, 255, .45); color: #fff; box-shadow: 0 0 18px rgba(47, 140, 255, .18) inset; }
 .nav-badge { margin-left: auto; background: #ff3b5c; color: #fff; font-size: 10px; font-weight: 700; border-radius: 8px; padding: 1px 6px; text-transform: uppercase; }
 .side-foot { margin-top: auto; }

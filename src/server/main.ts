@@ -13,6 +13,7 @@ import { AirDeckApp } from './app.ts';
 import { SecretStore } from './secrets.ts';
 import { SyncManager } from './sync.ts';
 import { createHttpServer } from './http.ts';
+import { readJson } from './store.ts';
 
 declare global {
   // wird im gebündelten Windows-/Desktop-Build per Banner gesetzt (scripts/build.mjs)
@@ -26,9 +27,7 @@ const argv = process.argv.slice(2);
 const packaged = globalThis.__AIRDECK_PACKAGED === true;
 const root = process.env.AIRDECK_ROOT ?? globalThis.__AIRDECK_ROOT ?? resolve(fileURLToPath(import.meta.url), '../../..');
 const desktop = !argv.includes('--headless') && (argv.includes('--desktop') || packaged);
-const host = process.env.AIRDECK_HOST ?? '127.0.0.1';
 const port = Number(process.env.AIRDECK_PORT ?? 8750);
-const localHost = host === '0.0.0.0' ? '127.0.0.1' : host;
 
 function defaultDataDir(): string {
   if (!packaged) return join(root, 'data');
@@ -37,6 +36,9 @@ function defaultDataDir(): string {
   return join(homedir(), '.airdeck', 'data');
 }
 const dataDir = resolve(process.env.AIRDECK_DATA ?? defaultDataDir());
+// Im Netzwerk erreichbar (für Android-App/andere PCs): Einstellung im Studio, sonst nur dieser PC
+const host = process.env.AIRDECK_HOST ?? (readJson<{ lan?: boolean }>(join(dataDir, 'network.json'), {}).lan ? '0.0.0.0' : '127.0.0.1');
+const localHost = host === '0.0.0.0' ? '127.0.0.1' : host;
 
 /** Studio im App-Fenster öffnen (Edge/Chrome im App-Modus, sonst Standardbrowser). */
 function openStudio(url: string): void {
@@ -80,6 +82,8 @@ async function main(): Promise<void> {
     console.log(`Datenspeicher: ${sync.config.backend} – Abgleich: ${decision ?? 'nicht möglich'}${sync.status.lastError ? ` (${sync.status.lastError})` : ''}`);
   }
   const app = new AirDeckApp(dataDir, { appRoot: root, secrets, sync, build: globalThis.__AIRDECK_BUILD ?? 'dev', packaged, headless: !desktop });
+  app.listenHost = host;
+  app.listenPort = port;
   console.log(app.ffmpeg ? `ffmpeg: ${app.ffmpeg.version}` : 'ffmpeg nicht gefunden – Server-Playout (24/7) deaktiviert');
 
   if (argv.includes('--new-admin-token')) {

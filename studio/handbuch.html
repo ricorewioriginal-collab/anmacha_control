@@ -1,0 +1,334 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#07101f">
+<title>AirDeck Handbuch</title>
+<link rel="icon" href="icons/icon-32.png" type="image/png">
+<style>
+:root { --bg: #07101f; --panel: #0d1a30; --line: #1f2d4a; --text: #e6edf8; --muted: #8fa3c4; --accent: #2f8cff; --ok: #22c55e; --warn: #f59e0b; color-scheme: dark; }
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.6 'Segoe UI', system-ui, -apple-system, Roboto, sans-serif; }
+a { color: #7cb8ff; }
+header { position: sticky; top: 0; z-index: 5; display: flex; align-items: center; gap: 12px; padding: 10px 16px; background: rgba(7, 16, 31, .92); backdrop-filter: blur(8px); border-bottom: 1px solid var(--line); }
+header img { width: 32px; height: 32px; }
+header strong { letter-spacing: .12em; }
+header a.back { margin-left: auto; text-decoration: none; border: 1px solid var(--line); border-radius: 8px; padding: 6px 12px; color: var(--text); }
+.wrap { display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: 24px; max-width: 1200px; margin: 0 auto; padding: 16px; }
+nav.toc { position: sticky; top: 64px; align-self: start; max-height: calc(100vh - 80px); overflow: auto; font-size: 14px; }
+nav.toc a { display: block; padding: 5px 8px; border-radius: 6px; text-decoration: none; color: var(--muted); }
+nav.toc a:hover { background: rgba(47, 140, 255, .12); color: #fff; }
+nav.toc .grp { color: var(--muted); font-size: 11px; letter-spacing: .12em; text-transform: uppercase; margin: 12px 8px 4px; }
+main section { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px 20px; margin-bottom: 16px; scroll-margin-top: 70px; }
+h1 { font-size: 26px; margin: 8px 0 4px; }
+h2 { font-size: 20px; margin: 0 0 8px; }
+h3 { font-size: 16px; margin: 16px 0 6px; color: #cfe0ff; }
+.lead { color: var(--muted); margin-top: 0; }
+kbd { border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; padding: 0 5px; font-size: 12px; background: #0b1628; }
+code { background: #0b1628; border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; font-size: 13px; overflow-wrap: anywhere; }
+table { width: 100%; border-collapse: collapse; margin: 8px 0; font-size: 14px; }
+th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { color: var(--muted); font-weight: 600; }
+.tip, .warn, .todo { border-radius: 8px; padding: 8px 12px; margin: 10px 0; }
+.tip { background: rgba(34, 197, 94, .08); border-left: 3px solid var(--ok); }
+.warn { background: rgba(245, 158, 11, .08); border-left: 3px solid var(--warn); }
+.todo { background: rgba(143, 163, 196, .08); border-left: 3px solid var(--muted); color: var(--muted); }
+ol, ul { padding-left: 22px; }
+footer { text-align: center; color: var(--muted); font-size: 13px; padding: 24px 16px 40px; }
+@media (max-width: 860px) {
+  .wrap { grid-template-columns: minmax(0, 1fr); padding: 12px; }
+  nav.toc { position: static; max-height: none; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 8px; }
+  nav.toc a { padding: 9px 8px; }
+  main section { padding: 14px; }
+  table { display: block; overflow-x: auto; }
+}
+</style>
+</head>
+<body>
+<header>
+  <img src="icons/icon-192.png" alt="">
+  <strong>AIRDECK</strong><span style="color:var(--muted)">Handbuch</span>
+  <a class="back" href="./">← Zum Studio</a>
+</header>
+
+<div class="wrap">
+<nav class="toc" aria-label="Inhalt">
+  <div class="grp">Start</div>
+  <a href="#ueberblick">Überblick</a>
+  <a href="#installation">Installation</a>
+  <a href="#erste-schritte">Erste Schritte</a>
+  <a href="#oberflaeche">Oberfläche &amp; Fenster</a>
+  <div class="grp">Studio</div>
+  <a href="#bibliothek">Bibliothek &amp; Ordner</a>
+  <a href="#decks">Decks A–D &amp; Vorhören</a>
+  <a href="#queue">Queue, Sendeuhr &amp; Rotation</a>
+  <a href="#cardwall">Cardwall &amp; Schnelltrigger</a>
+  <a href="#live">Live senden &amp; Quellen</a>
+  <a href="#audio">Audio &amp; Geräte</a>
+  <div class="grp">Sendebetrieb</div>
+  <a href="#automation">Server-Automation 24/7</a>
+  <a href="#planung">Sendeplan &amp; Events</a>
+  <a href="#recorder">Recorder</a>
+  <a href="#encoder">Stream &amp; Encoder</a>
+  <a href="#laut">laut.fm</a>
+  <a href="#ki">KI-Automation</a>
+  <div class="grp">Einstellungen</div>
+  <a href="#sender">Mehrere Sender &amp; Branding</a>
+  <a href="#speicher">Datenspeicher &amp; Sync</a>
+  <a href="#benachrichtigungen">Benachrichtigungen</a>
+  <a href="#updates">Updates</a>
+  <a href="#android">Android-App</a>
+  <div class="grp">Praxis</div>
+  <a href="#rezepte">Rezepte</a>
+  <a href="#tasten">Tastenkürzel</a>
+  <a href="#hilfe">Fehlerbehebung</a>
+</nav>
+
+<main>
+<section id="ueberblick">
+  <h1>AirDeck – Radio-Automation &amp; Live-Broadcast</h1>
+  <p class="lead">Eigenständige Sendesoftware für Webradio: Automation rund um die Uhr, Live-Sendungen, Sendeplan, Recorder, laut.fm-Verwaltung und optional KI-Moderation. AirDeck läuft lokal als Windows-Programm, als Server oder gesteuert per Android-App.</p>
+  <h3>So hängt alles zusammen</h3>
+  <ol>
+    <li><b>Kern (AirDeck-Server/Windows-Programm)</b>: Bibliothek, Queue, Sendeuhr und Sendeplan liegen hier. Der Kern mischt das Programm selbst (ffmpeg) und schickt es an die Ausgänge. Das läuft auch, wenn kein Studio-Fenster offen ist.</li>
+    <li><b>Quellen mit Priorität</b>: Automation, Live-Studio, Remote-Studio und Android-Live senden auf denselben Sendeweg. Die Quelle mit der kleinsten Prioritätszahl hat Vorrang, zum Beispiel übernimmt Live (1) die Automation (10). Endet die Live-Sendung, springt die Automation automatisch wieder ein.</li>
+    <li><b>Ausgänge (Encoder)</b>: Icecast, SHOUTcast oder laut.fm bekommen immer nur die aktive Quelle.</li>
+    <li><b>Studio</b>: Die Oberfläche steuert den Kern. Sie läuft im Windows-Fenster, im Browser oder in der Android-App.</li>
+  </ol>
+</section>
+
+<section id="installation">
+  <h2>Installation</h2>
+  <h3>Windows</h3>
+  <ul>
+    <li><b>Installer</b> <code>AirDeck-Setup.exe</code>: installiert pro Benutzer ohne Adminrechte, legt Startmenü- und Desktop-Verknüpfung an und fragt nach dem Datenspeicher (nur lokal, MySQL/MariaDB oder Firebase).</li>
+    <li><b>Portable</b> <code>AirDeck-Windows-Portable.zip</code>: entpacken, <code>AirDeck.exe</code> starten, fertig.</li>
+    <li>ffmpeg ist enthalten (Encoder für MP3/LAME, AAC, Opus, Monitor-Wiedergabe). Ein eigener Server ist nicht nötig.</li>
+    <li>Beim ersten Start warnt SmartScreen eventuell, weil die Datei nicht signiert ist: „Weitere Informationen“ → „Trotzdem ausführen“.</li>
+  </ul>
+  <h3>Server (Linux, 24/7)</h3>
+  <p>Node.js ab 22.18 und ffmpeg installieren, dann <code>npm start</code>. Mit <code>--headless</code> startet AirDeck ohne Fenster. Das Admin-Token erzeugt <code>--new-admin-token</code>.</p>
+  <h3>Android</h3>
+  <p>Siehe <a href="#android">Android-App</a>. Die APK lässt sich direkt aus AirDeck laden.</p>
+</section>
+
+<section id="erste-schritte">
+  <h2>Erste Schritte (10 Minuten)</h2>
+  <ol>
+    <li><b>Sender einrichten:</b> „Sender &amp; Branding“ → Name, Slogan, Farben, eigenes Logo.</li>
+    <li><b>Musik laden:</b> Dateien oder ganze Ordner in die Bibliothek ziehen. Laufzeit und ID3-Tags werden automatisch gelesen.</li>
+    <li><b>Ausgang anlegen:</b> „Stream &amp; Encoder“ → ＋. Wähle Icecast, SHOUTcast oder laut.fm. Für laut.fm musst du vorher verbinden, siehe <a href="#laut">laut.fm</a>.</li>
+    <li><b>Automation starten:</b> In der Kachel „Server-Automation 24/7“ auf <b>Start</b> klicken oder oben auf <b>AUTO</b>. Die Sendeuhr füllt die Queue, der Kern sendet.</li>
+    <li><b>Mithören:</b> Kopfhörer-Knopf oben rechts. Unter „Audio &amp; Geräte“ legst du fest, auf welchem Gerät du mithörst.</li>
+  </ol>
+  <div class="tip">„Autostart“ ist nach dem ersten Start aktiv. Nach einem Neustart des PCs sendet AirDeck von selbst weiter.</div>
+</section>
+
+<section id="oberflaeche">
+  <h2>Oberfläche &amp; Fenster</h2>
+  <p>Die Seitenleiste ist in <b>Studio</b>, <b>Programm</b> und <b>Einstellungen</b> gegliedert. Oben siehst du den Sender (Auswahl per Dropdown), den ON-AIR-Status mit aktiver Quelle, AUTO/STREAM/MIC LIVE und Mithören.</p>
+  <h3>Fenster frei anordnen (ab 1100 px Breite)</h3>
+  <ul>
+    <li><b>Verschieben:</b> an der Titelleiste eines Fensters ziehen und auf ein anderes Fenster fallen lassen. Das gezogene Fenster rückt davor ein.</li>
+    <li><b>Größe ändern:</b> die Ecke unten rechts ziehen. Die Größe rastet im 12-Spalten-Raster ein.</li>
+    <li><b>Abdocken:</b> Mit dem Raster-Symbol in der Titelleiste schwebt das Fenster frei, zum Beispiel über einem zweiten Bildschirmbereich. Ein zweiter Klick dockt es wieder an.</li>
+    <li><b>Ausblenden:</b> × in der Titelleiste. Unter „Fenster &amp; Layout“ blendest du es wieder ein, sperrst das Layout oder setzt es zurück.</li>
+  </ul>
+  <p>Das Layout wird pro Gerät gespeichert. Auf dem Handy gilt automatisch das mobile Layout.</p>
+</section>
+
+<section id="bibliothek">
+  <h2>Bibliothek &amp; Ordner</h2>
+  <ul>
+    <li><b>Hochladen:</b> ＋ Titel, ＋ Ordner (übernimmt die Ordnerstruktur) oder Dateien aus dem Explorer irgendwo ins Fenster ziehen. Formate: MP3, OGG/Opus, WAV, FLAC, M4A/AAC, WebM.</li>
+    <li><b>Kategorie beim Upload</b>: nach der Auswahl im Kategorie-Filter, zum Beispiel Musik, Jingle, Station ID, Werbung, News oder Bett.</li>
+    <li><b>URL/Stream:</b> Externe Streams oder Dateien per Adresse einbinden, optional mit Dauer.</li>
+    <li><b>Bearbeiten (✎):</b> Titel, Interpret, Kategorie, Ordner, Cue-In/Out, Segue (Überblendpunkt), Intro, BPM, Gain.</li>
+    <li><b>In die Queue:</b> Doppelklick, ＋ oder ziehen. Auch aufs Deck oder auf ein Cart ziehen.</li>
+  </ul>
+</section>
+
+<section id="decks">
+  <h2>Decks A–D &amp; Vorhören</h2>
+  <p>A und B sind Musik-Decks, C ist für Jingles, D für Spezielles. Läuft die Server-Automation, <b>zeigen A/B an, was der Kern gerade sendet</b>, samt Pegel.</p>
+  <ul>
+    <li>▶/⏸ spielt ab, ⏭ lädt den nächsten Titel aus der Queue, ⏹ stoppt, ⏏ wirft aus. Der Regler setzt die Deck-Lautstärke.</li>
+    <li><b>CUE</b> hört den Titel vor, ohne dass er auf Sendung geht. Das Ausgabegerät für CUE wählst du unter <a href="#audio">Audio &amp; Geräte</a>.</li>
+  </ul>
+</section>
+
+<section id="queue">
+  <h2>Queue, Sendeuhr &amp; Rotation</h2>
+  <ul>
+    <li>Die <b>Queue</b> zeigt Startzeiten (Backtiming). Einträge lassen sich per Ziehen sortieren. „Uhr“ markiert Einträge der Sendeuhr, „ai“ Einträge der KI.</li>
+    <li><b>Sendeuhr</b>: Ist die Option aktiv, füllt AirDeck die Queue nach der Stundenuhr, zum Beispiel Station ID → Musik → Musik → Jingle.</li>
+    <li><b>Aus Ordner …</b> füllt gezielt aus einem Ordner oder einer Kategorie. <b>Mischen</b> mischt die Queue, <b>M3U</b> exportiert sie.</li>
+    <li><b>Rotation:</b> Gleicher Interpret bzw. Titel erst nach einem Mindestabstand. Die Regeln werden gelockert, bevor die Automation stehen bleibt.</li>
+  </ul>
+</section>
+
+<section id="cardwall">
+  <h2>Cardwall &amp; Schnelltrigger</h2>
+  <p>12 Carts mit Gruppen (Jingles, Sweeper, IDs, Drops, News, Werbung …). Titel aufs Cart ziehen, ⋯ zum Bearbeiten. Ein Klick feuert das Cart: Im Server-Betrieb geht es über den Kern auf Sendung, sonst über den Browser. Mit <b>Ducking</b> wird die Musik währenddessen leiser. Die <b>Schnelltrigger</b> spielen sofort einen passenden Titel der Kategorie, zum Beispiel News oder Werbung.</p>
+</section>
+
+<section id="live">
+  <h2>Live senden &amp; Quellen</h2>
+  <h3>Mikrofon am AirDeck-PC</h3>
+  <p>Unter „Audio &amp; Geräte“ Mikrofon oder Line-In wählen, dann in der Server-Automation auf <b>Mic</b>. Die Stimme wird über die laufende Musik gemischt, die Musik wird abgesenkt.</p>
+  <h3>MIC LIVE (Browser/App)</h3>
+  <p>Oben auf <b>MIC LIVE</b> klicken. Das Studio sendet dein Mikrofon als Live-Quelle. Nach der Prioritätsregel übernimmt es die Automation (2 s Anti-Flapping). Beim Beenden kehrt die Automation zurück.</p>
+  <h3>Externe Live-Quellen (z. B. BUTT, Mixxx, OBS)</h3>
+  <p>In „Quellen · Priorität“ ein Passwort für die Quelle setzen und im Programm eintragen: Server = AirDeck-Adresse, Mount <code>/ingest/&lt;sender&gt;/live</code>, Benutzer = Quellen-ID bzw. <code>source</code>. Icecast-kompatibel (PUT/SOURCE).</p>
+  <div class="tip">Die kleinere Zahl gewinnt: Live-Studio 1, Remote 2, Android 3, Automation 10. „Freigeben“ gibt eine Übernahme wieder ab.</div>
+</section>
+
+<section id="audio">
+  <h2>Audio &amp; Geräte</h2>
+  <ul>
+    <li><b>Sendesignal mithören auf</b>: Lautsprecher oder Kopfhörer für den Kopfhörer-Knopf.</li>
+    <li><b>Vorhören (CUE/PFL) auf</b>: ein anderes Gerät, zum Beispiel USB-Kopfhörer.</li>
+    <li><b>Beim Start automatisch mithören</b>: Mithören startet mit dem Programm und verbindet sich nach Quellenwechseln neu.</li>
+    <li><b>Mikrofon / Line-In am AirDeck-PC</b>: Eingang für die Server-Automation.</li>
+  </ul>
+  <div class="warn">Gerätenamen erscheinen erst, wenn du einmal den Mikrofonzugriff erlaubst.</div>
+</section>
+
+<section id="automation">
+  <h2>Server-Automation 24/7</h2>
+  <ul>
+    <li><b>Start/Weiter/Stop:</b> Der Kern spielt Queue → Sendeuhr → Sendeplan und als letzte Reserve den <b>Notfall-Ordner</b>.</li>
+    <li><b>Einstellungen (⋯):</b> Format MP3 (LAME), AAC oder Opus, Bitrate, Crossfade, Ein-/Ausblenden, Stilleerkennung, Monitor-Wiedergabe, Notfall-Ordner, Autostart.</li>
+    <li><b>Sound-Processing:</b> 10-Band-EQ, Kompressor und Limiter in der Encoder-Kette.</li>
+    <li><b>Stille:</b> Bei zu langer Stille gilt die Quelle als gestört. Die nächste Quelle übernimmt, ein Alarm geht an die Benachrichtigungen.</li>
+  </ul>
+</section>
+
+<section id="planung">
+  <h2>Sendeplan &amp; Events</h2>
+  <ul>
+    <li><b>Programmpläne:</b> Zeitfenster (Wochentage + Uhrzeit) → Playlist, gemischt oder der Reihe nach.</li>
+    <li><b>Events:</b> Minütlich, stündlich oder an Tagen, zum Beispiel News zur vollen Stunde oder Werbung um :30.</li>
+    <li><b>Einzel-Jobs:</b> einmalige oder wiederholte Aktionen.</li>
+    <li><b>Aufnahmepläne:</b> Sendungen automatisch mitschneiden.</li>
+  </ul>
+</section>
+
+<section id="recorder">
+  <h2>Recorder</h2>
+  <p>Nimmt das Sendesignal auf, per Klick oder per Plan. Die Mitschnitte kannst du anhören, herunterladen und löschen, zum Beispiel für Replays und Podcasts.</p>
+</section>
+
+<section id="encoder">
+  <h2>Stream &amp; Encoder</h2>
+  <table>
+    <tr><th>Typ</th><th>Hinweise</th></tr>
+    <tr><td>Icecast</td><td>HTTP PUT, Mount, Benutzer <code>source</code>. Optional <code>?prio=</code> (z. B. laut.fm).</td></tr>
+    <tr><td>SHOUTcast v1/v2</td><td>Nur MP3/AAC. v2 mit Stream-ID.</td></tr>
+    <tr><td>laut.fm</td><td>Server, Mount und Passwort holt AirDeck aus dem Radioadmin (Ausgang anlegen → Typ „laut.fm“).</td></tr>
+  </table>
+  <p>Hörerzahlen werden alle 30 s vom Server gelesen. Status, Fehler und Durchsatz stehen in der Kachel.</p>
+</section>
+
+<section id="laut">
+  <h2>laut.fm</h2>
+  <h3>Verbinden</h3>
+  <ol>
+    <li>laut.fm → „Token bei laut.fm holen“ (öffnet <code>radioadmin.laut.fm/login?callback_url=airdeck</code>), anmelden und den Zugriff bestätigen.</li>
+    <li>Token kopieren → „Token eingeben“ → Station wählen.</li>
+  </ol>
+  <div class="warn">Das Token gehört zur callback_url. AirDeck schickt denselben Wert als Origin-Header (Standard <code>airdeck</code>). Wurde das Token mit einer anderen callback_url erzeugt, trag genau diese unter „Callback / Origin“ ein. Deine Tokens siehst du unter radioadmin.laut.fm/tokens.</div>
+  <h3>Bereiche</h3>
+  <ul>
+    <li><b>Übersicht:</b> Station, Streaming-Status, aktuelle Playlist, Hörer, Radioadmin-Status, zuletzt gespielt, nächste Interpreten.</li>
+    <li><b>Playlists:</b> anlegen, bearbeiten, Titel hinzufügen/entfernen, Algorithmus zuweisen.</li>
+    <li><b>Titel:</b> suchen, vorhören, MP3 hochladen, Uploads in Verarbeitung, <b>Tags</b> (#) bearbeiten.</li>
+    <li><b>Algorithmen:</b> 16 Vorlagen (z. B. Gewichteter Zufall, Artist-Trenner, Tageszeit-Mix, Rotation A/B/C) oder eigene Funktion. laut.fm führt sie beim Mischen der Playlist aus.</li>
+    <li><b>Sendeplan:</b> Wochenraster Stunde × Tag → Playlist.</li>
+    <li><b>Statistik</b> und <b>Werbe-Log</b>: Werbe-Trigger aus den Track-Statistiken (inkl. Live), als CSV für Werbekunden.</li>
+    <li><b>Benutzer</b>, <b>Station</b>, <b>Live</b> (Zugangsdaten, Live-Ausgang anlegen).</li>
+  </ul>
+</section>
+
+<section id="ki">
+  <h2>KI-Automation</h2>
+  <ol>
+    <li><b>Anbieter &amp; Keys:</b> Text (OpenAI, Anthropic, Gemini oder lokal über Ollama/LM Studio) und Sprache (OpenAI TTS, ElevenLabs, Kokoro, Piper offline). Keys werden verschlüsselt gespeichert.</li>
+    <li><b>Director → Einstellungen:</b> Modell und Fallback, Stimme, Persona und Stil, Moderation alle n Titel, Nachrichten zur vollen Stunde, Quellen (RSS/JSON, z. B. Open-Meteo für Wetter), KI-Musikplanung.</li>
+    <li>Optional <b>Freigabe</b>: Moderationen erst prüfen (▶ Anhören → Freigeben/Verwerfen).</li>
+  </ol>
+  <p>Nachrichten und Wetter kommen nur aus deinen Quellen. Scheitert die KI, läuft die Sendeuhr weiter. Unter <b>Kosten &amp; Budget</b> trägst du Preise ein und setzt Monatsgrenzen. Die <b>Werkzeuge</b> schreiben Spots und Station-IDs und vertonen sie direkt in die Bibliothek.</p>
+</section>
+
+<section id="sender">
+  <h2>Mehrere Sender &amp; Branding</h2>
+  <p>Oben im Sender-Dropdown „＋ Neuen Sender anlegen“. Jeder Sender hat eigene Bibliothek, Queue, Quellen, Ausgänge, Sendeplan und laut.fm-Verbindung. Unter „Sender &amp; Branding“ stellst du Name, Slogan, Farben und Logo ein (PNG/JPG/WebP/GIF, max. 2 MB). Dort kannst du den Sender auch löschen, nur mit Bestätigung durch den Namen.</p>
+</section>
+
+<section id="speicher">
+  <h2>Datenspeicher &amp; Sync</h2>
+  <p>Standard ist lokal. Optional gleicht AirDeck mit <b>MySQL/MariaDB</b> oder <b>Firebase Firestore</b> ab, etwa für mehrere Standorte. Beim ersten Verbinden wählst du, ob der Stand aus der Datenbank übernommen oder dieser PC als Quelle genutzt wird. Bei Konflikten gewinnt der lokale Stand. Der entfernte Stand wird gesichert.</p>
+</section>
+
+<section id="benachrichtigungen">
+  <h2>Benachrichtigungen</h2>
+  <p>Signierte Webhooks (<code>X-AirDeck-Signature</code>, HMAC-SHA256), Telegram-Alarme (OFF AIR, Stille, Encoder-/Stream-Fehler) und Now Playing als Text- und JSON-Datei, zum Beispiel für OBS oder die Website.</p>
+</section>
+
+<section id="updates">
+  <h2>Updates</h2>
+  <p>Unter „Updates“ siehst du die installierte und die neueste Version. Das Windows-Programm installiert Updates per Klick und startet danach neu. Die Android-App lädt die neue APK über den verbundenen AirDeck. Bei privatem Repository ist ein Lese-Token nötig.</p>
+</section>
+
+<section id="android">
+  <h2>Android-App</h2>
+  <ol>
+    <li>Im Studio am PC: <b>Android-App</b> → „Im Netzwerk erreichbar“ einschalten und AirDeck einmal neu starten. Windows fragt dann einmalig nach der Firewall-Freigabe, bitte zulassen.</li>
+    <li>Den angezeigten Download-Link (<code>http://&lt;PC-Adresse&gt;:8750/download/AirDeck-Android.apk</code>) im Browser des Handys öffnen. Das Handy muss im selben WLAN sein. Beim ersten Mal „Unbekannte Apps installieren“ erlauben.</li>
+    <li>Im Studio „Zugang für ein Handy erstellen“ wählen. Den Verbindungslink in der App bei „Mit AirDeck verbinden“ einfügen, fertig.</li>
+  </ol>
+  <div class="warn">Die offizielle, signierte APK entsteht, sobald im GitHub-Repository der Signaturschlüssel hinterlegt ist (Secrets <code>ANDROID_KEYSTORE_B64</code>, <code>ANDROID_KEYSTORE_PASSWORD</code>, <code>ANDROID_KEY_ALIAS</code>, <code>ANDROID_KEY_PASSWORD</code>). Ohne Schlüssel entsteht eine Test-APK. Wechselst du von der Test- zur offiziellen APK, musst du die App einmal neu installieren.</div>
+  <p>Die App bietet das komplette Studio mit Touch-Bedienung und MIC LIVE als Live-Quelle (Priorität 3).</p>
+  <div class="todo">In Arbeit: direktes Senden aus der App an Icecast/laut.fm ohne AirDeck-Server (Standalone-Live).</div>
+</section>
+
+<section id="rezepte">
+  <h2>Rezepte</h2>
+  <h3>1 · Eigener Webradio-Stream rund um die Uhr</h3>
+  <ol><li>Musik, Jingles und Station IDs laden.</li><li>Sendeuhr prüfen.</li><li>Icecast-Ausgang anlegen.</li><li>Server-Automation starten (Autostart bleibt an).</li><li>Notfall-Ordner setzen.</li></ol>
+  <h3>2 · Live-Sendung auf einem laut.fm-Sender</h3>
+  <ol><li>laut.fm verbinden.</li><li>Ausgang → Typ „laut.fm“.</li><li>Automation läuft als Grundlage.</li><li>Zur Sendung MIC LIVE oder BUTT auf die Live-Quelle.</li><li>Nach der Sendung übernimmt die Automation.</li></ol>
+  <h3>3 · Moderierter Sender ohne Moderator</h3>
+  <ol><li>KI-Anbieter anlegen.</li><li>Director: Moderation alle 3 Titel, Persona, Wetter-Quelle.</li><li>Optional Nachrichten zur vollen Stunde aus einem RSS-Feed.</li><li>Freigabe anfangs einschalten, später aus.</li></ol>
+  <h3>4 · Replays</h3>
+  <ol><li>Aufnahmeplan für die Sendung anlegen.</li><li>Mitschnitt herunterladen und wieder in die Bibliothek hochladen (Ordner „Replays“).</li><li>Per Programmplan wiederholen.</li></ol>
+</section>
+
+<section id="tasten">
+  <h2>Tastenkürzel</h2>
+  <table>
+    <tr><td><kbd>F1</kbd>–<kbd>F4</kbd></td><td>Deck A–D Play/Pause</td></tr>
+    <tr><td><kbd>Alt</kbd>+<kbd>1</kbd>…<kbd>5</kbd></td><td>Dashboard, Sendeplan, Recorder, laut.fm, KI</td></tr>
+    <tr><td><kbd>Enter</kbd>/<kbd>Leertaste</kbd> auf einem Cart</td><td>Cart abfeuern</td></tr>
+    <tr><td>Doppelklick in der Bibliothek</td><td>Titel in die Queue</td></tr>
+  </table>
+</section>
+
+<section id="hilfe">
+  <h2>Fehlerbehebung</h2>
+  <table>
+    <tr><th>Problem</th><th>Lösung</th></tr>
+    <tr><td>Kein Ton beim Mithören</td><td>Läuft eine Quelle (ON AIR)? Unter „Audio &amp; Geräte“ das Gerät prüfen. Einmal auf den Kopfhörer-Knopf klicken, weil Browser Ton erst nach einer Aktion erlauben.</td></tr>
+    <tr><td>laut.fm: „Token ungültig“</td><td>Token neu holen. Callback/Origin muss zur callback_url des Tokens passen.</td></tr>
+    <tr><td>Ausgang „error“</td><td>Host, Port, Mount und Passwort prüfen. Bei laut.fm den Ausgang neu über „laut.fm“ anlegen.</td></tr>
+    <tr><td>Automation startet nicht</td><td>ffmpeg fehlt (nur Server-Installation): installieren oder <code>AIRDECK_FFMPEG</code> setzen.</td></tr>
+    <tr><td>KI moderiert nicht</td><td>Protokoll im Bereich KI ansehen. Häufig fehlt ein Key, das Budget ist erreicht oder das Modell passt nicht.</td></tr>
+  </table>
+</section>
+</main>
+</div>
+<footer>Powered by AnMaCha · Unter Entwicklung von RicoReWi · Haftung ausgeschlossen</footer>
+</body>
+</html>

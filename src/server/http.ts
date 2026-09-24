@@ -324,6 +324,10 @@ export function createHttpServer(app: AirDeckApp, studioDir: string): Server {
     return STREAMED;
   });
 
+  // --- Android-App / Netzwerk ---
+  add('GET', '/api/v1/app/connect', null, (c) => (globalAdmin(c), app.appConnect()));
+  add('PUT', '/api/v1/app/network', null, async (c) => (globalAdmin(c), app.setNetwork((await c.body()).lan === true)));
+
   // --- KI-Automation ---
   const aiErr = (err: unknown) => (err instanceof AppError ? err : new AppError(err instanceof AiError && err.code === 'not_found' ? 404 : err instanceof AiError && ['invalid', 'unknown_provider'].includes(err.code) ? 400 : 502, 'ai_error', (err as Error).message));
   const aiCall = async <T>(fn: () => T | Promise<T>): Promise<T> => {
@@ -422,6 +426,23 @@ export function createHttpServer(app: AirDeckApp, studioDir: string): Server {
 
     if (path.startsWith('/ingest/')) return handleIngest(app, req, res, path);
     if (path === '/api/v1/health') return json(res, 200, { ok: true, name: 'AirDeck', version: '0.4.0' });
+    // Offizielle Android-App: mitgelieferte APK (Windows-Paket) oder aus dem Release – öffentlich, damit das Handy sie direkt laden kann
+    if (path === '/download/AirDeck-Android.apk' && req.method === 'GET') {
+      const local = app.localApk();
+      if (local) {
+        res.writeHead(200, { 'Content-Type': 'application/vnd.android.package-archive', 'Content-Disposition': 'attachment; filename="AirDeck-Android.apk"', 'Content-Length': statSync(local).size });
+        return void createReadStream(local).pipe(res);
+      }
+      try {
+        const info = (await app.checkUpdate()) as { assets: { apk?: import('./update.ts').UpdateAsset }; error?: string };
+        if (!info.assets.apk) return json(res, 404, { error: 'no_apk', message: info.error ?? 'Keine APK verfügbar' });
+        const r = await app.updater.open(info.assets.apk, app.secrets.get('update:token'));
+        res.writeHead(200, { 'Content-Type': 'application/vnd.android.package-archive', 'Content-Disposition': 'attachment; filename="AirDeck-Android.apk"', ...(info.assets.apk.size ? { 'Content-Length': info.assets.apk.size } : {}) });
+        return void Readable.fromWeb(r.body as never).pipe(res);
+      } catch (err) {
+        return json(res, 502, { error: 'apk_unavailable', message: (err as Error).message });
+      }
+    }
     // Senderlogo ist Branding und öffentlich (Studio, Widgets, Android-App)
     const logo = /^\/api\/v1\/stations\/([a-z0-9-]{1,40})\/logo$/.exec(path);
     if (logo && req.method === 'GET') {

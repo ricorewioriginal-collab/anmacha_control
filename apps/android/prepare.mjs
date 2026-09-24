@@ -26,6 +26,26 @@ for (const perm of ['android.permission.RECORD_AUDIO', 'android.permission.MODIF
 if (!xml.includes('usesCleartextTraffic')) xml = xml.replace('<application', '<application android:usesCleartextTraffic="true"');
 writeFileSync(manifest, xml);
 
+// Versionsnummer: steigt mit jedem CI-Lauf, damit Updates über die installierte App gehen
+const gradleFile = join(here, 'android/app/build.gradle');
+let gradle = readFileSync(gradleFile, 'utf8');
+const versionCode = Number(process.env.GITHUB_RUN_NUMBER || 1);
+gradle = gradle.replace(/versionCode \d+/, `versionCode ${versionCode}`).replace(/versionName "[^"]*"/, `versionName "${version}-${build}"`);
+// Offizielle Signatur (Release): Keystore über Umgebungsvariablen, nie im Repository
+const ks = process.env.ANDROID_KEYSTORE;
+if (ks && !gradle.includes('signingConfigs {')) {
+  gradle = gradle.replace(/android \{/, `android {
+    signingConfigs {
+        release {
+            storeFile file(System.getenv("ANDROID_KEYSTORE"))
+            storePassword System.getenv("ANDROID_KEYSTORE_PASSWORD")
+            keyAlias System.getenv("ANDROID_KEY_ALIAS")
+            keyPassword System.getenv("ANDROID_KEY_PASSWORD")
+        }
+    }`).replace(/buildTypes \{\s*release \{/, (m) => `${m}\n            signingConfig signingConfigs.release`);
+}
+writeFileSync(gradleFile, gradle);
+
 // AirDeck-App-Icons (Launcher, rund, Adaptive-Icon-Vordergrund) übernehmen
 cpSync(join(here, 'res'), join(here, 'android/app/src/main/res'), { recursive: true });
 
