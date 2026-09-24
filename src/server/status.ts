@@ -16,7 +16,7 @@ export interface IceSource {
   artist?: string;
   stream_start_iso8601?: string | null;
   /** Herkunft dieses Mounts */
-  kind: 'icecast' | 'shoutcast' | 'laut.fm' | 'airdeck';
+  kind: 'icecast' | 'shoutcast' | 'laut.fm' | 'airdeck' | 'azuracast' | 'extern';
 }
 
 export interface NowPlayingInfo {

@@ -9,6 +9,7 @@ import { mountPlanning, mountRecorder } from './planning.js';
 import { mountLautfm } from './lautfm.js';
 import { mountAi } from './ai.js';
 import { mountNextcloud } from './nextcloud.js';
+import { mountBridges } from './bridges.js';
 import { mountUpdates } from './updates.js';
 import { JUMP_TO_WIN, mountLayout } from './layout.js';
 
@@ -152,6 +153,7 @@ async function loadStation() {
     lautfm: mountLautfm($('view-lautfm'), ctx),
     ai: mountAi($('view-ai'), ctx),
     nextcloud: mountNextcloud($('view-nextcloud'), ctx),
+    bridges: mountBridges($('view-bridges'), ctx),
   };
   if (currentView !== 'studio') views[currentView]?.show();
 }
@@ -1354,7 +1356,7 @@ function showView(name) {
   currentView = name;
   for (const b of document.querySelectorAll('#view-tabs button, #bottom-nav button')) b.setAttribute('aria-pressed', String(/** @type {HTMLElement} */ (b).dataset.view === name));
   $('sidebar').classList.remove('open');
-  for (const id of ['studio', 'planning', 'recorder', 'lautfm', 'ai', 'nextcloud']) $(`view-${id}`).hidden = id !== name;
+  for (const id of ['studio', 'planning', 'recorder', 'lautfm', 'ai', 'nextcloud', 'bridges']) $(`view-${id}`).hidden = id !== name;
   if (name !== 'studio') views[name]?.show();
 }
 
