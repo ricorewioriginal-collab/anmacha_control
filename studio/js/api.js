@@ -2,8 +2,31 @@
 // Schlanker API-Client für AirDeck REST v1 + Server-Sent Events.
 
 const TOKEN_KEY = 'airdeck.token';
+const SERVER_KEY = 'airdeck.server';
+
+/** Läuft das Studio in der Android-/Desktop-Hülle (Capacitor) statt vom AirDeck-Server geladen? */
+export const isNativeApp = () => !!(/** @type {any} */ (window).Capacitor?.isNativePlatform?.());
+
+/** Basis-URL des AirDeck-Servers ('' = gleicher Ursprung). */
+export function serverBase() {
+  try {
+    return (localStorage.getItem(SERVER_KEY) ?? '').replace(/\/+$/, '');
+  } catch {
+    return '';
+  }
+}
+
+export function saveServer(/** @type {string} */ url) {
+  const clean = url.trim().replace(/\/+$/, '');
+  try {
+    if (clean) localStorage.setItem(SERVER_KEY, clean);
+    else localStorage.removeItem(SERVER_KEY);
+  } catch {}
+}
 
 export function readToken() {
+  const srv = /[#&]server=([^&]+)/.exec(location.hash);
+  if (srv) saveServer(decodeURIComponent(srv[1]));
   const m = /[#&]token=([^&]+)/.exec(location.hash);
   if (m) {
     const t = decodeURIComponent(m[1]);
@@ -40,12 +63,13 @@ export class Api {
   /** @param {string} token */
   constructor(token) {
     this.token = token;
+    this.base = serverBase();
   }
 
   /** @param {string} method @param {string} path @param {any} [body] @param {Record<string,string>} [headers] */
   async req(method, path, body, headers = {}) {
     const isRaw = body instanceof Blob || body instanceof ArrayBuffer;
-    const r = await fetch(`/api/v1${path}`, {
+    const r = await fetch(`${this.base}/api/v1${path}`, {
       method,
       headers: {
         Authorization: `Bearer ${this.token}`,
@@ -68,16 +92,21 @@ export class Api {
 
   /** @param {string} stationId @param {string} mediaId */
   mediaUrl(stationId, mediaId) {
-    return `/api/v1/stations/${encodeURIComponent(stationId)}/media/${encodeURIComponent(mediaId)}/file?token=${encodeURIComponent(this.token)}`;
+    return `${this.base}/api/v1/stations/${encodeURIComponent(stationId)}/media/${encodeURIComponent(mediaId)}/file?token=${encodeURIComponent(this.token)}`;
+  }
+
+  /** Mithör-URL der aktiven Quelle eines Targets. @param {string} stationId @param {string} target */
+  listenUrl(stationId, target) {
+    return `${this.base}/listen/${encodeURIComponent(stationId)}${target}?token=${encodeURIComponent(this.token)}`;
   }
 
   /** @param {string} stationId @param {(type: string, data: any) => void} onEvent @param {(ok: boolean) => void} onState */
   events(stationId, onEvent, onState) {
-    const es = new EventSource(`/api/v1/events?station=${encodeURIComponent(stationId)}&token=${encodeURIComponent(this.token)}`);
+    const es = new EventSource(`${this.base}/api/v1/events?station=${encodeURIComponent(stationId)}&token=${encodeURIComponent(this.token)}`);
     const types = [
       'sources.changed', 'queue.changed', 'now_playing.changed', 'deck.state_changed', 'library.changed',
       'cardwall.changed', 'cardwall.triggered', 'stream.state_changed', 'station.changed', 'automation.state_changed',
-      'source.takeover_completed', 'source.takeover_rejected', 'source.off_air', 'source.fallback_completed', 'source.source_failed',
+      'playout.state', 'playout.log', 'source.takeover_completed', 'source.takeover_rejected', 'source.off_air', 'source.fallback_completed', 'source.source_failed',
     ];
     for (const t of types) es.addEventListener(t, (e) => onEvent(t, JSON.parse(/** @type {MessageEvent} */ (e).data)));
     es.onopen = () => onState(true);

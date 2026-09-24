@@ -25,6 +25,8 @@
     <div class="top-actions">
       <button class="toggle" id="btn-auto" aria-pressed="false" title="Automation: Queue automatisch abspielen">AUTO</button>
       <button class="toggle" id="btn-stream" aria-pressed="false" title="Studio-Summe als Automation-Quelle senden">STREAM</button>
+      <button class="toggle" id="btn-mic" aria-pressed="false" title="Mikrofon live senden (z. B. Android Live, Priority 3)">MIC LIVE</button>
+      <button class="toggle" id="btn-listen" aria-pressed="false" title="Sendesignal mithören">🎧</button>
       <label class="chk" title="Musik absenken, während Carts laufen"><input type="checkbox" id="chk-duck" checked> Ducking</label>
       <button class="icon-btn" id="btn-station" title="Sender-Einstellungen">⚙</button>
     </div>
@@ -88,6 +90,18 @@
       </section>
 
       <section class="panel">
+        <div class="panel-head"><h2>Server-Automation 24/7</h2><span class="pill" id="po-state">–</span></div>
+        <div class="po-title" id="po-title">–</div>
+        <div class="po-meta muted" id="po-meta"></div>
+        <div class="po-actions">
+          <button class="btn small primary" id="po-start">Start</button>
+          <button class="btn small" id="po-skip">Weiter ⏭</button>
+          <button class="btn small danger" id="po-stop">Stop</button>
+          <button class="btn small" id="po-settings" title="Format, Bitrate, Überblendung">⋯</button>
+        </div>
+      </section>
+
+      <section class="panel">
         <div class="panel-head"><h2>Quellen · Priorität</h2><button class="btn small" id="btn-add-source">＋</button></div>
         <p class="hint">Kleinere Zahl = höhere Priorität</p>
         <ul class="sources" id="sources"></ul>
@@ -110,7 +124,7 @@
 
   <footer class="status">
     <span id="status-text">Bereit.</span>
-    <span class="muted">AirDeck 0.1 · local-first</span>
+    <span class="muted">AirDeck 0.2 · local-first</span>
   </footer>
 
   <dialog id="dialog"><form method="dialog" id="dialog-form"></form></dialog>

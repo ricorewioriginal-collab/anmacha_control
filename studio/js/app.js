@@ -2,8 +2,8 @@
 // AirDeck Studio – Oberfläche: 4 Decks, Cardwall, Archiv, Queue, Quellen, Ausgänge, Automation.
 // Sämtlicher Nutzerinhalt wird per textContent gesetzt (kein innerHTML) → kein XSS.
 
-import { Api, ApiError, readToken, saveToken } from './api.js';
-import { AudioEngine, DECKS, SilenceDetector } from './audio.js';
+import { Api, ApiError, isNativeApp, readToken, saveServer, saveToken, serverBase } from './api.js';
+import { AudioEngine, DECKS, SilenceDetector, openMic, recordStream } from './audio.js';
 
 const CATEGORY_LABEL = /** @type {Record<string,string>} */ ({
   music: 'Musik', jingle: 'Jingle', sweeper: 'Sweeper', station_id: 'Station ID', drop: 'Drop', news: 'News',
@@ -47,7 +47,11 @@ const S = {
   streaming: false,
   busyNext: false,
   /** @type {string|null} */ lastAutoDeck: null,
+  /** @type {any} */ playout: null,
+  /** @type {{ rec: MediaRecorder, stream: MediaStream, sourceId: string }|null} */ mic: null,
+  /** @type {HTMLAudioElement|null} */ listen: null,
 };
+const serverMode = () => !!S.playout?.status?.running;
 const silence = new SilenceDetector(-50, 10_000);
 
 // ---------- DOM-Helfer ----------
@@ -158,13 +162,16 @@ function formDialog(title, fields, submitLabel = 'Speichern') {
 
 async function boot() {
   const token = readToken();
-  if (!token) return askToken();
+  if (!token || (isNativeApp() && !serverBase())) return askToken();
   api = new Api(token);
   try {
     await api.get('/me');
   } catch (e) {
     if (e instanceof ApiError && e.status === 401) return askToken('Token ungültig.');
     status('Server nicht erreichbar – neuer Versuch in 3 s', true);
+    if (isNativeApp()) {
+      $('status-text').append(' ', h('button', { class: 'btn small', onclick: () => askToken('Server nicht erreichbar – Adresse prüfen.') }, 'Server ändern'));
+    }
     setTimeout(boot, 3000);
     return;
   }
@@ -183,10 +190,13 @@ async function boot() {
 
 /** @param {string} [msg] */
 async function askToken(msg) {
-  const v = await formDialog('AirDeck anmelden', [
+  const needServer = isNativeApp() || !!serverBase();
+  const v = await formDialog('Mit AirDeck verbinden', [
+    ...(needServer ? [{ name: 'server', label: 'Server-Adresse', value: serverBase() || 'http://192.168.', required: true, hint: 'z. B. http://192.168.1.20:8750 (AirDeck auf dem PC/Server, AIRDECK_HOST=0.0.0.0)' }] : []),
     { name: 'token', label: 'API-Token', type: 'password', required: true, hint: msg ?? 'Das Token wird beim ersten Serverstart in der Konsole angezeigt.' },
-  ], 'Anmelden');
+  ], 'Verbinden');
   if (!v?.token) return;
+  if (needServer) saveServer(v.server);
   saveToken(v.token.trim());
   location.reload();
 }
@@ -197,10 +207,11 @@ let es = null;
 async function loadStation() {
   localStorage.setItem('airdeck.station', S.station.id);
   applyBranding();
-  const [library, queue, carts, sources, outputs, np] = await Promise.all([
+  const [library, queue, carts, sources, outputs, np, playout] = await Promise.all([
     api.get(url('/media')), api.get(url('/queue')), api.get(url('/cardwall')),
-    api.get(url('/sources')), api.get(url('/outputs')), api.get(url('/now-playing')),
+    api.get(url('/sources')), api.get(url('/outputs')), api.get(url('/now-playing')), api.get(url('/playout')),
   ]);
+  S.playout = playout;
   setLibrary(library);
   S.queue = queue;
   S.carts = carts;
@@ -256,7 +267,12 @@ function onEvent(type, data) {
     case 'now_playing.changed': S.nowPlaying = { ...S.nowPlaying, ...data }; renderNowPlaying(); break;
     case 'library.changed': run(async () => { setLibrary(await api.get(url('/media'))); renderLibrary(); renderCarts(); }); break;
     case 'cardwall.changed': S.carts = data; renderCarts(); break;
-    case 'cardwall.triggered': playCart(data); break; // Fernauslösung (z. B. Android/API)
+    case 'cardwall.triggered': if (!data.server) playCart(data); break; // Fernauslösung ohne Server-Playout: lokal spielen
+    case 'playout.state': if (S.playout) { S.playout.status = data; renderPlayout(); } break;
+    case 'playout.log':
+      if (['encoder_crashed', 'silence_detected', 'decode_failed', 'autostart_failed'].includes(data.event)) status(`Server-Playout: ${data.event}${data.mediaId ? ` (${data.mediaId})` : ''}`, true);
+      if (['playout_started', 'playout_stopped'].includes(data.event)) run(async () => { S.playout = await api.get(url('/playout')); renderPlayout(); });
+      break;
     case 'stream.state_changed': {
       const o = S.outputs.find((x) => x.id === data.id);
       if (o) { o.state = data; renderOutputs(); }
@@ -287,6 +303,7 @@ function renderStationSelect() {
 }
 
 function renderAll() {
+  renderPlayout();
   renderLibrary();
   renderQueue();
   renderCarts();
@@ -420,6 +437,105 @@ async function toggleStream() {
   status(`Studio-Stream aktiv als „${src.name}“ (Priority ${src.priority})`);
 }
 
+// ---------- Server-Playout ----------
+
+function renderPlayout() {
+  const p = S.playout;
+  const st = p?.status;
+  const pill = $('po-state');
+  const state = !p?.supported ? 'unsupported' : st?.running ? (st.encoder === 'restarting' ? 'restarting' : 'running') : 'stopped';
+  pill.className = `pill ${state}`;
+  pill.textContent = { unsupported: 'kein ffmpeg', running: st?.silent ? 'stille!' : 'sendet', restarting: 'encoder…', stopped: 'aus' }[state];
+  $('po-title').textContent = st?.current ? mediaTitle(st.current) : p?.supported ? '–' : 'ffmpeg auf dem Server installieren';
+  $('po-meta').textContent = st?.running
+    ? `${fmt(st.current?.positionMs)} / ${fmt(st.current?.durationMs)} · ${st.format.toUpperCase()} ${st.bitrateKbps} kbit/s${p.config.autostart ? ' · Autostart' : ''}`
+    : p?.config ? `${p.config.format.toUpperCase()} ${p.config.bitrateKbps} kbit/s · Überblendung ${p.config.crossfadeMs / 1000}s` : '';
+  /** @type {HTMLButtonElement} */ ($('po-start')).disabled = !p?.supported || !!st?.running;
+  /** @type {HTMLButtonElement} */ ($('po-stop')).disabled = !st?.running;
+  /** @type {HTMLButtonElement} */ ($('po-skip')).disabled = !st?.running;
+  $('btn-auto').toggleAttribute('disabled', !!st?.running && !S.auto);
+}
+
+async function editPlayout() {
+  const c = S.playout?.config ?? {};
+  const enc = S.playout?.ffmpeg?.encoders ?? { mp3: true, opus: true };
+  const v = await formDialog('Server-Automation 24/7', [
+    { name: 'format', label: 'Format', value: c.format ?? 'mp3', options: [['mp3', `MP3${enc.mp3 ? '' : ' (nicht verfügbar)'}`], ['opus', `Ogg/Opus${enc.opus ? '' : ' (nicht verfügbar)'}`]] },
+    { name: 'bitrateKbps', label: 'Bitrate (kbit/s)', type: 'number', value: c.bitrateKbps ?? 128 },
+    { name: 'crossfadeMs', label: 'Überblendung Musik (ms)', type: 'number', value: c.crossfadeMs ?? 3000 },
+    { name: 'duckDb', label: 'Ducking bei Carts (dB)', type: 'number', value: c.duckDb ?? -10 },
+    { name: 'silenceMs', label: 'Stille-Alarm nach (ms)', type: 'number', value: c.silenceMs ?? 10000 },
+    { name: 'sourceId', label: 'Sendet als Quelle', value: c.sourceId ?? '', options: [['', 'Automation (Standard)'], ...S.sources.map((s) => /** @type {[string,string]} */ ([s.id, `P${s.priority} · ${s.name}`]))] },
+    { name: 'autostart', label: 'Nach Neustart automatisch senden', type: 'checkbox', value: c.autostart ?? true },
+  ]);
+  if (!v) return;
+  const saved = await run(() => api.patch(url('/playout'), v));
+  if (!saved) return;
+  S.playout = saved;
+  // Laufendes Playout mit neuen Einstellungen neu starten (kurzer Fallback auf nächste Quelle)
+  if (serverMode() && confirm('Playout jetzt mit neuen Einstellungen neu starten?')) {
+    await run(() => api.post(url('/playout/stop')));
+    S.playout = (await run(() => api.post(url('/playout/start'), { autostart: v.autostart }))) ?? S.playout;
+  }
+  renderPlayout();
+}
+
+// ---------- Mikrofon live / Mithören ----------
+
+async function toggleMic() {
+  const btn = $('btn-mic');
+  if (S.mic) {
+    S.mic.rec.stop();
+    for (const t of S.mic.stream.getTracks()) t.stop();
+    const id = S.mic.sourceId;
+    S.mic = null;
+    btn.setAttribute('aria-pressed', 'false');
+    await run(() => api.post(url(`/sources/${encodeURIComponent(id)}/release`)));
+    return status('Mikrofon-Sendung beendet – Automation übernimmt wieder');
+  }
+  const live = S.sources.filter((s) => ['mobile', 'live_studio', 'remote_studio'].includes(s.type));
+  if (!live.length) return status('Keine Live-Quelle konfiguriert', true);
+  const preferred = live.find((s) => s.type === (isNativeApp() ? 'mobile' : 'live_studio')) ?? live[0];
+  const v = await formDialog('Mikrofon live senden', [
+    { name: 'sourceId', label: 'Als Quelle', value: preferred.id, options: live.map((s) => /** @type {[string,string]} */ ([s.id, `P${s.priority} · ${s.name}`])) },
+  ], 'ON AIR');
+  if (!v) return;
+  let stream;
+  try {
+    stream = await openMic();
+  } catch (e) {
+    return status(`Mikrofon nicht verfügbar: ${e instanceof Error ? e.message : e}`, true);
+  }
+  const sourceId = v.sourceId;
+  try {
+    const rec = recordStream(stream, async (blob, first, type) => {
+      await api.req('POST', url(`/sources/${encodeURIComponent(sourceId)}/chunks${first ? '?start=1' : ''}`), blob, { 'Content-Type': type });
+    });
+    S.mic = { rec, stream, sourceId };
+  } catch (e) {
+    for (const t of stream.getTracks()) t.stop();
+    return status(e instanceof Error ? e.message : String(e), true);
+  }
+  btn.setAttribute('aria-pressed', 'true');
+  status(`Mikrofon sendet als „${sourceName(sourceId)}“ – Übernahme nach Priorität (Anti-Flapping 2 s)`);
+}
+
+function toggleListen() {
+  const btn = $('btn-listen');
+  if (S.listen) {
+    S.listen.pause();
+    S.listen.removeAttribute('src');
+    S.listen = null;
+    btn.setAttribute('aria-pressed', 'false');
+    return;
+  }
+  const el = new Audio(api.listenUrl(S.station.id, '/live'));
+  el.play().catch(() => status('Mithören nicht möglich – ist eine Quelle auf Sendung?', true));
+  el.addEventListener('error', () => { status('Mithör-Stream beendet (Quellenwechsel?) – erneut klicken', true); btn.setAttribute('aria-pressed', 'false'); S.listen = null; }, { once: true });
+  S.listen = el;
+  btn.setAttribute('aria-pressed', 'true');
+}
+
 // ---------- Render: Decks ----------
 
 /** @type {Record<string, Record<string, HTMLElement>>} */
@@ -524,8 +640,8 @@ function renderCarts() {
       class: `cart${m ? '' : ' empty'}`, style: m ? `--c:${c.color}` : '', role: 'button', tabindex: '0', 'data-cart': c.id,
       draggable: m ? 'true' : null,
       title: m ? `${mediaTitle(m)} (${fmt(m.durationMs)})` : 'Titel hierher ziehen',
-      onclick: () => (m ? playCart(c) : undefined),
-      onkeydown: (/** @type {KeyboardEvent} */ e) => { if (m && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); playCart(c); } },
+      onclick: () => (m ? fireCart(c) : undefined),
+      onkeydown: (/** @type {KeyboardEvent} */ e) => { if (m && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); fireCart(c); } },
       ondragstart: (/** @type {DragEvent} */ e) => m && e.dataTransfer?.setData(MIME.MEDIA, m.id),
     },
       h('span', { class: 'cart-label' }, c.label),
@@ -538,6 +654,12 @@ function renderCarts() {
     });
     return el;
   }));
+}
+
+/** Im Server-Modus spielt das Server-Playout den Cart (geht auf Sendung), sonst der Browser. @param {any} c */
+function fireCart(c) {
+  if (serverMode()) run(() => api.post(url(`/cardwall/${encodeURIComponent(c.id)}/trigger`)));
+  else playCart(c);
 }
 
 /** @param {any} c */
@@ -775,6 +897,7 @@ function bindStatic() {
   $('btn-clear').addEventListener('click', () => confirm('Queue leeren?') && run(() => api.post(url('/queue/clear'))));
   $('chk-autofill').addEventListener('change', (e) => run(() => api.patch(url('/automation'), { autoFill: /** @type {HTMLInputElement} */ (e.target).checked })));
   $('btn-auto').addEventListener('click', async () => {
+    if (!S.auto && serverMode()) return status('Server-Playout (24/7) läuft – Browser-Automation ist dann aus', true);
     S.auto = !S.auto;
     $('btn-auto').setAttribute('aria-pressed', String(S.auto));
     status(S.auto ? 'Automation EIN' : 'Automation AUS');
@@ -784,6 +907,16 @@ function bindStatic() {
     }
   });
   $('btn-stream').addEventListener('click', toggleStream);
+  $('btn-mic').addEventListener('click', toggleMic);
+  $('btn-listen').addEventListener('click', toggleListen);
+  $('po-start').addEventListener('click', () => {
+    if (S.auto) { S.auto = false; $('btn-auto').setAttribute('aria-pressed', 'false'); }
+    if (S.streaming) toggleStream();
+    run(async () => { S.playout = await api.post(url('/playout/start'), {}); renderPlayout(); });
+  });
+  $('po-stop').addEventListener('click', () => confirm('Server-Playout stoppen? Der Sender fällt auf die nächste Quelle zurück.') && run(async () => { S.playout = await api.post(url('/playout/stop')); renderPlayout(); }));
+  $('po-skip').addEventListener('click', () => run(() => api.post(url('/playout/skip'))));
+  $('po-settings').addEventListener('click', editPlayout);
   $('btn-add-source').addEventListener('click', () => editSource());
   $('btn-add-output').addEventListener('click', () => editOutput());
   $('btn-station').addEventListener('click', editStation);
