@@ -20,11 +20,36 @@ export interface DspOptions {
   eq: number[];
   compressor: boolean;
   limiter: boolean;
+  /** Trittschall-/Rumpelfilter unter 60 Hz */
+  highpass?: boolean;
+  /** 5-Band-Multiband-Kompressor (dichter „Radio-Sound“) */
+  multiband?: boolean;
+  /** Automatische Lautheitsregelung des Summensignals (EBU R128, loudnorm) */
+  agc?: boolean;
+  /** Ziel-Lautheit der AGC in LUFS */
+  targetLufs?: number;
+  /** Gewähltes Profil (nur Anzeige) */
+  preset?: string;
 }
+
+/** Klangprofile für die Master-Kette (Startpunkte, danach frei anpassbar). */
+export const DSP_PRESETS: Record<string, { label: string; dsp: Omit<DspOptions, 'preset'> }> = {
+  neutral: { label: 'Neutral (nur Limiter)', dsp: { eq: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], compressor: false, limiter: true, highpass: false, multiband: false, agc: false } },
+  music: { label: 'Musik ausgewogen', dsp: { eq: [1, 0, 0, 0, 0, 0, 1, 1, 0, 0], compressor: true, limiter: true, highpass: true, multiband: false, agc: true, targetLufs: -16 } },
+  pop: { label: 'Pop/Dance – laut & dicht', dsp: { eq: [2, 1, 0, 0, 0, 1, 1, 2, 1, 0], compressor: false, limiter: true, highpass: true, multiband: true, agc: true, targetLufs: -14 } },
+  talk: { label: 'Wort & Moderation', dsp: { eq: [-2, -1, 0, 0, 1, 2, 1, 0, 0, 0], compressor: true, limiter: true, highpass: true, multiband: false, agc: true, targetLufs: -16 } },
+  classic: { label: 'Klassik/Jazz – dynamisch', dsp: { eq: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], compressor: false, limiter: true, highpass: false, multiband: false, agc: false } },
+};
 
 export interface PlayoutOptions {
   format: StreamFormat;
   bitrateKbps: number;
+  /** MP3 (LAME): konstante oder variable Bitrate */
+  mp3Mode?: 'cbr' | 'vbr';
+  /** LAME-VBR-Qualität 0 (beste) … 9 */
+  mp3Quality?: number;
+  /** Lautheitsangleich pro Titel anhand der Analyse (wie ReplayGain) */
+  loudness?: { auto: boolean; targetLufs: number };
   /** Einblendzeit neuer Titel in ms (0 = sofort voll) */
   fadeInMs: number;
   dsp: DspOptions;
@@ -44,7 +69,20 @@ export interface PlayoutOptions {
 export const DEFAULT_PLAYOUT: PlayoutOptions = {
   format: 'mp3', bitrateKbps: 128, crossfadeMs: 3000, duckDb: -10, silenceThresholdDb: -50, silenceMs: 10_000,
   fadeInMs: 0, dsp: { eq: EQ_BANDS.map(() => 0), compressor: false, limiter: true }, monitor: false, inputDevice: '', micGainDb: 0,
+  mp3Mode: 'cbr', mp3Quality: 2, loudness: { auto: true, targetLufs: -16 },
 };
+
+/**
+ * Verstärkung eines Titels in dB: manueller Gain hat Vorrang; sonst Lautheitsangleich auf das Ziel,
+ * begrenzt auf ±12 dB und so, dass der Spitzenpegel nicht über −1 dBTP steigt (mit Limiter +3 dB Reserve).
+ */
+export function trackGainDb(m: MediaItem, loud: PlayoutOptions['loudness'], limiter: boolean): number {
+  if (m.gainDb != null) return m.gainDb;
+  if (!loud?.auto || m.lufs == null || m.category !== 'music' && m.category !== 'jingle' && m.category !== 'station_id' && m.category !== 'sweeper' && m.category !== 'ad') return 0;
+  let g = Math.max(-12, Math.min(12, loud.targetLufs - m.lufs));
+  if (m.truePeakDb != null) g = Math.min(g, -1 - m.truePeakDb + (limiter ? 3 : 0));
+  return Math.round(g * 10) / 10;
+}
 
 /** ffmpeg-Filterkette für die Master-DSP. */
 export function dspFilter(d: DspOptions): string | null {
@@ -53,7 +91,12 @@ export function dspFilter(d: DspOptions): string | null {
     const g = Math.max(-12, Math.min(12, Number(d.eq?.[i]) || 0));
     if (g !== 0) parts.push(`equalizer=f=${f}:t=o:w=1:g=${g}`);
   });
+  if (d.highpass) parts.unshift('highpass=f=60:p=2');
+  // 5 Bänder (Beispiel aus der ffmpeg-Doku, angepasst): Bass bis 100 Hz … Höhen bis 22 kHz
+  if (d.multiband) parts.push("mcompand=args='0.005,0.1 6 -47/-40,-34/-34,-17/-33 100 | 0.003,0.05 6 -47/-40,-34/-34,-17/-33 400 | 0.000625,0.0125 6 -47/-40,-34/-34,-15/-33 1600 | 0.0001,0.025 6 -47/-40,-34/-34,-31/-31,-0/-30 6400 | 0,0.025 6 -38/-31,-28/-28,-0/-25 22000'");
   if (d.compressor) parts.push('acompressor=threshold=0.125:ratio=3:attack=20:release=250:makeup=2');
+  // loudnorm arbeitet intern mit 192 kHz – danach zurück auf die Sendefrequenz
+  if (d.agc) parts.push(`loudnorm=I=${Math.max(-30, Math.min(-8, Number(d.targetLufs) || -16))}:TP=-1.5:LRA=11,aresample=${SAMPLE_RATE}`);
   if (d.limiter) parts.push('alimiter=limit=0.95:level=disabled');
   return parts.length ? parts.join(',') : null;
 }
@@ -96,11 +139,11 @@ class Voice {
   fadeFramesLeft = 0;
   segueFired = false;
 
-  constructor(media: MediaItem, kind: 'track' | 'cart', duck: boolean) {
+  constructor(media: MediaItem, kind: 'track' | 'cart', duck: boolean, gainDb = media.gainDb ?? 0) {
     this.media = media;
     this.kind = kind;
     this.duck = duck;
-    this.gain = dbToGain(media.gainDb ?? 0);
+    this.gain = dbToGain(gainDb);
     const end = media.cueOutMs ?? media.durationMs;
     this.totalFrames = end != null ? Math.max(0, msToFrames(end - (media.cueInMs ?? 0))) : null;
   }
@@ -248,7 +291,7 @@ export class Playout {
 
   playCart(media: MediaItem, duck: boolean): void {
     if (!this.running) return;
-    this.startVoice(new Voice(media, 'cart', duck));
+    this.startVoice(new Voice(media, 'cart', duck, trackGainDb(media, this.opts.loudness, this.opts.dsp.limiter)));
   }
 
   status(): PlayoutStatus {
@@ -296,7 +339,9 @@ export class Playout {
     const codec =
       this.opts.format === 'opus' ? ['-c:a', 'libopus', '-b:a', br, '-f', 'ogg', '-page_duration', '200000']
       : this.opts.format === 'aac' ? ['-c:a', 'aac', '-b:a', br, '-f', 'adts']
-      : ['-c:a', 'libmp3lame', '-b:a', br, '-f', 'mp3'];
+      : this.opts.mp3Mode === 'vbr'
+        ? ['-c:a', 'libmp3lame', '-q:a', String(Math.max(0, Math.min(9, this.opts.mp3Quality ?? 2))), '-f', 'mp3']
+        : ['-c:a', 'libmp3lame', '-b:a', br, '-compression_level', String(Math.max(0, Math.min(9, this.opts.mp3Quality ?? 2))), '-f', 'mp3'];
     const af = dspFilter(this.opts.dsp);
     const enc = spawn(
       this.ffmpeg,
@@ -386,7 +431,7 @@ export class Playout {
   private startNextTrack(): boolean {
     const m = this.hooks.nextTrack();
     if (!m) return false;
-    const v = new Voice(m, 'track', false);
+    const v = new Voice(m, 'track', false, trackGainDb(m, this.opts.loudness, this.opts.dsp.limiter));
     this.deckOf.set(v, this.trackCounter++ % 2 === 0 ? 'A' : 'B');
     if (this.opts.fadeInMs > 0) {
       const target = v.gain;

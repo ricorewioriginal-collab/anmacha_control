@@ -444,16 +444,28 @@ async function editPlayout() {
   const enc = S.playout?.ffmpeg?.encoders ?? { mp3: true, opus: true };
   const dev = /** @type {any} */ (await run(() => api.get('/audio-devices'))) ?? { devices: [], eqBands: [] };
   const eq = c.dsp?.eq ?? [];
+  const presets = /** @type {Record<string, any>} */ ((await run(() => api.get('/dsp/presets'))) ?? {});
+  const loud = /** @type {any} */ (await run(() => api.get(url('/media/loudness')))) ?? { total: 0, measured: 0, pending: 0 };
   const v = await formDialog('Server-Automation 24/7', [
     { name: 'format', label: 'Format', value: c.format ?? 'mp3', options: [['mp3', `MP3${enc.mp3 ? '' : ' (nicht verfügbar)'}`], ['aac', 'AAC (ADTS)'], ['opus', `Ogg/Opus${enc.opus ? '' : ' (nicht verfügbar)'}`]] },
     { name: 'bitrateKbps', label: 'Bitrate (kbit/s)', type: 'number', value: c.bitrateKbps ?? 128 },
+    { name: 'mp3Mode', label: 'MP3 (LAME): Modus', value: c.mp3Mode ?? 'cbr', options: [['cbr', 'Konstante Bitrate (empfohlen für Streams)'], ['vbr', 'Variable Bitrate (VBR)']] },
+    { name: 'mp3Quality', label: 'MP3 (LAME): Qualität 0 (beste) … 9 (schnellste)', type: 'number', value: c.mp3Quality ?? 2 },
+    { name: 'preset', label: 'Klangprofil', value: c.dsp?.preset ?? '', options: [['', 'Eigene Einstellungen (unten)'], ...Object.entries(presets).map(([k, p]) => /** @type {[string,string]} */ ([k, p.label]))], hint: 'Ein neu gewähltes Profil überschreibt EQ und Dynamik – danach frei anpassbar' },
+    { name: 'loudAuto', label: `Lautheit automatisch angleichen (EBU R128, gemessen: ${loud.measured}/${loud.total}${loud.pending ? `, ${loud.pending} in Arbeit` : ''})`, type: 'checkbox', value: c.loudness?.auto ?? true },
+    { name: 'loudTarget', label: 'Ziel-Lautheit pro Titel (LUFS, üblich −16 … −14)', type: 'number', value: c.loudness?.targetLufs ?? -16 },
+    { name: 'analyze', label: 'Bibliothek jetzt (neu) messen', type: 'checkbox', value: false, hint: 'Läuft im Hintergrund, ein Titel nach dem anderen' },
     { name: 'crossfadeMs', label: 'Überblendung Musik (ms)', type: 'number', value: c.crossfadeMs ?? 3000 },
     { name: 'fadeInMs', label: 'Einblenden neuer Titel (ms)', type: 'number', value: c.fadeInMs ?? 0 },
     { name: 'monitor', label: `Programm über die Lautsprecher dieses PCs mithören${dev.monitor ? '' : ' (ffplay fehlt)'}`, type: 'checkbox', value: !!c.monitor },
     { name: 'inputDevice', label: 'Mikrofon / Line-In (am PC)', value: c.inputDevice ?? '', options: [['', '– kein Eingang –'], ...(dev.devices ?? []).map((/** @type {any} */ d) => /** @type {[string,string]} */ ([d.id, d.name]))] },
     { name: 'micGainDb', label: 'Mikrofon-Pegel (dB)', type: 'number', value: c.micGainDb ?? 0 },
     ...(dev.eqBands ?? []).map((/** @type {number} */ f, /** @type {number} */ i) => ({ name: `eq${i}`, label: `EQ ${f >= 1000 ? f / 1000 + ' kHz' : f + ' Hz'} (dB, −12…+12)`, type: 'number', value: eq[i] ?? 0 })),
+    { name: 'highpass', label: 'Rumpelfilter (unter 60 Hz)', type: 'checkbox', value: !!c.dsp?.highpass },
+    { name: 'multiband', label: 'Multiband-Kompressor (5 Bänder, dichter Radio-Sound)', type: 'checkbox', value: !!c.dsp?.multiband },
     { name: 'compressor', label: 'Kompressor', type: 'checkbox', value: !!c.dsp?.compressor },
+    { name: 'agc', label: 'Automatische Lautheitsregelung der Summe (AGC, EBU R128)', type: 'checkbox', value: !!c.dsp?.agc },
+    { name: 'targetLufs', label: 'AGC-Ziel (LUFS)', type: 'number', value: c.dsp?.targetLufs ?? -16 },
     { name: 'limiter', label: 'Limiter', type: 'checkbox', value: c.dsp?.limiter ?? true },
     { name: 'duckDb', label: 'Ducking bei Carts (dB)', type: 'number', value: c.duckDb ?? -10 },
     { name: 'silenceMs', label: 'Stille-Alarm nach (ms)', type: 'number', value: c.silenceMs ?? 10000 },
@@ -461,7 +473,15 @@ async function editPlayout() {
     { name: 'autostart', label: 'Nach Neustart automatisch senden', type: 'checkbox', value: c.autostart ?? true },
   ]);
   if (!v) return;
-  const body = { ...v, dsp: { eq: (dev.eqBands ?? []).map((/** @type {number} */ _, /** @type {number} */ i) => v[`eq${i}`] ?? 0), compressor: v.compressor, limiter: v.limiter } };
+  const chosen = v.preset && v.preset !== (c.dsp?.preset ?? '') ? presets[v.preset]?.dsp : null;
+  const dsp = chosen
+    ? { ...chosen, preset: v.preset }
+    : { eq: (dev.eqBands ?? []).map((/** @type {number} */ _, /** @type {number} */ i) => v[`eq${i}`] ?? 0), compressor: v.compressor, limiter: v.limiter, highpass: v.highpass, multiband: v.multiband, agc: v.agc, targetLufs: v.targetLufs ?? -16, preset: v.preset };
+  const body = { ...v, dsp, loudness: { auto: v.loudAuto, targetLufs: v.loudTarget ?? -16 } };
+  if (v.analyze) {
+    const a = await run(() => api.post(url('/media/loudness'), { force: true }));
+    if (a) status(`${a.queued} Titel werden im Hintergrund gemessen`);
+  }
   const saved = await run(() => api.patch(url('/playout'), body));
   if (!saved) return;
   S.playout = saved;
@@ -1218,6 +1238,7 @@ function bindStatic() {
   $('po-settings').addEventListener('click', editPlayout);
   $('btn-add-source').addEventListener('click', () => editSource());
   $('btn-add-output').addEventListener('click', () => editOutput());
+  $('btn-liq').addEventListener('click', liquidsoapDialog);
   $('btn-station').addEventListener('click', editStation);
   $('station-select').addEventListener('change', async (e) => {
     const id = /** @type {HTMLSelectElement} */ (e.target).value;
@@ -1334,6 +1355,24 @@ function showView(name) {
   $('sidebar').classList.remove('open');
   for (const id of ['studio', 'planning', 'recorder', 'lautfm', 'ai', 'nextcloud']) $(`view-${id}`).hidden = id !== name;
   if (name !== 'studio') views[name]?.show();
+}
+
+// ---------- Liquidsoap ----------
+
+async function liquidsoapDialog() {
+  const v = await formDialog('Liquidsoap als Sendeweg', [
+    { name: 'info', label: 'Wofür?', type: 'info', value: 'Optional: AirDeck sendet an Liquidsoap, Liquidsoap verteilt an alle Ausgänge, zum Beispiel auf einem Server mit stabiler Anbindung, mit zusätzlicher Dynamik oder mehreren Zielen. Das Skript wird aus deinen Ausgängen erzeugt. Passwörter stehen nicht darin, sie kommen aus Umgebungsvariablen.' },
+    { name: 'port', label: 'Harbor-Port (Eingang von AirDeck)', type: 'number', value: 8005 },
+    { name: 'mount', label: 'Harbor-Mount', value: 'airdeck' },
+    { name: 'processing', label: 'Zusätzliche Liquidsoap-Dynamik (nrj)', type: 'checkbox', value: false, hint: 'Meist nicht nötig, weil die AirDeck-DSP schon verarbeitet' },
+  ], 'Skript herunterladen');
+  if (!v) return;
+  const q = `port=${v.port ?? 8005}&mount=${encodeURIComponent(v.mount)}&processing=${v.processing ? 1 : 0}`;
+  const blob = await run(() => api.blob(url(`/liquidsoap?${q}`)));
+  if (!blob) return;
+  download(blob, `airdeck-${S.station.id}.liq`);
+  const info = await run(() => api.get(url(`/liquidsoap?${q}&format=json`)));
+  status(`Skript gespeichert. Umgebungsvariablen setzen: ${info?.env.join(', ') ?? ''} – dann in AirDeck einen Icecast-Ausgang auf Port ${v.port ?? 8005}, Mount /${v.mount} anlegen.`);
 }
 
 // ---------- Android-App ----------

@@ -10,6 +10,7 @@ import { AirDeckApp, AppError, canSee, newId, type Principal } from './app.ts';
 import { AiError } from './ai/providers.ts';
 import { MEDIA_CATEGORIES, parseFileName, type MediaCategory } from '../core/automation.ts';
 import { OUTPUT_CAPABILITIES } from './icecast.ts';
+import { DSP_PRESETS } from './playout.ts';
 import { PUBLIC_API, RADIOADMIN, allowedPublicPath, allowedRadioadminPath, forward } from './lautfm.ts';
 
 type Params = Record<string, string>;
@@ -323,6 +324,21 @@ export function createHttpServer(app: AirDeckApp, studioDir: string): Server {
     await pipeline(Readable.fromWeb(r.body as never), c.res);
     return STREAMED;
   });
+
+  // --- Liquidsoap-Skript (ohne Passwörter) ---
+  add('GET', '/api/v1/stations/:sid/liquidsoap', 'outputs:read', (c) => {
+    const q = c.url.searchParams;
+    const r = app.liquidsoap(sid(c), { port: q.get('port') ? Number(q.get('port')) : undefined, mount: q.get('mount') ?? undefined, processing: q.get('processing') !== '0' });
+    if (q.get('format') === 'json') return r;
+    c.res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8', 'Content-Disposition': `attachment; filename="airdeck-${sid(c)}.liq"` });
+    c.res.end(r.script);
+    return STREAMED;
+  });
+
+  // --- Lautheitsanalyse & Klangprofile ---
+  add('GET', '/api/v1/dsp/presets', 'automation:read', () => DSP_PRESETS);
+  add('GET', '/api/v1/stations/:sid/media/loudness', 'media:read', (c) => app.loudnessStatus(sid(c)));
+  add('POST', '/api/v1/stations/:sid/media/loudness', 'media:write', async (c) => app.analyzeLibrary(sid(c), (await c.body()).force === true));
 
   // --- Nextcloud-Brücke ---
   add('GET', '/api/v1/nextcloud', null, (c) => (globalAdmin(c), app.nextcloudConfig()));

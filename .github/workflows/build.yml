@@ -183,6 +183,15 @@ jobs:
           docker logs airdeck | tee log.txt
           grep -q "ffmpeg version" log.txt || (echo "ffmpeg fehlt im Container" && exit 1)
           grep -q "Admin-Token" log.txt || (echo "Admin-Token wird nicht ausgegeben" && exit 1)
+          # Liquidsoap-Skript aus der laufenden Instanz erzeugen und mit echtem Liquidsoap prüfen
+          TOKEN=$(grep -A1 "Admin-Token" log.txt | tail -1 | tr -d ' \r')
+          curl -fs -X POST -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+            -d '{"name":"Test","type":"icecast","host":"127.0.0.1","port":8000,"mount":"/stream","username":"source","password":"x-geheim-1","priority":5}' \
+            http://127.0.0.1:8750/api/v1/stations/main/outputs > /dev/null
+          curl -fs -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8750/api/v1/stations/main/liquidsoap -o airdeck.liq
+          cat airdeck.liq
+          ! grep -q "x-geheim-1" airdeck.liq || (echo "Passwort im Skript!" && exit 1)
+          docker run --rm -v "$PWD:/s" --entrypoint liquidsoap savonet/liquidsoap:v2.2.5 --check /s/airdeck.liq
           docker stop -t 10 airdeck
           test "$(docker inspect -f '{{.State.ExitCode}}' airdeck)" = "0" || (echo "Container wurde nicht sauber beendet" && exit 1)
 

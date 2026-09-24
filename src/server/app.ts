@@ -41,8 +41,8 @@ import { IcecastOutput, type BroadcastOutput, type OutputConfig, type OutputStat
 import { ShoutcastOutput } from './shoutcast.ts';
 import { fetchListeners } from './stats.ts';
 import { RelayTarget } from './relay.ts';
-import { detectFfmpeg, inputDeviceArgs, listInputDevices, probeMedia, type FfmpegInfo } from './ffmpeg.ts';
-import { DEFAULT_PLAYOUT, EQ_BANDS, Playout, type PlayoutOptions } from './playout.ts';
+import { analyzeLoudness, detectFfmpeg, inputDeviceArgs, listInputDevices, probeMedia, type FfmpegInfo } from './ffmpeg.ts';
+import { DEFAULT_PLAYOUT, DSP_PRESETS, EQ_BANDS, Playout, type PlayoutOptions } from './playout.ts';
 import {
   activeWindow, clockDue, dueJobs, nextOccurrence, parseM3U, toM3U, validateClock, validateWindow,
   type ClockEvent, type JobTarget, type ProgramPlan, type RecordingPlan, type Repeat, type ScheduledJob,
@@ -56,6 +56,7 @@ import { AiService } from './ai/service.ts';
 import { AiDirector, DEFAULT_AI, type AiStationConfig, type AiSource } from './ai/director.ts';
 import { AiError } from './ai/providers.ts';
 import { Nextcloud, NextcloudError, cleanPath, type NextcloudConfig } from './nextcloud.ts';
+import { liquidsoapScript } from './liquidsoap.ts';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { NOTIFY_EVENTS, Notifier, validateExportPath, validateWebhookUrl, type IntegrationsConfig, type NotifyEvent } from './notify.ts';
 
@@ -847,7 +848,56 @@ export class AirDeckApp {
         if (Object.keys(patch).length || tags.album || tags.genre || tags.year) this.updateMedia(stationId, item.id, patch);
       });
     }
+    if (!item.url && item.lufs == null) this.queueLoudness(stationId, item.id);
     return item;
+  }
+
+  // ---------- Lautheitsanalyse (EBU R128) – nacheinander, damit der Sendebetrieb nicht leidet ----------
+
+  private readonly loudQueue: { stationId: string; id: string }[] = [];
+  private loudBusy = false;
+
+  queueLoudness(stationId: string, id: string): void {
+    if (!this.ffmpeg || this.loudQueue.some((x) => x.stationId === stationId && x.id === id)) return;
+    this.loudQueue.push({ stationId, id });
+    void this.runLoudness();
+  }
+
+  /** Alle noch nicht gemessenen Titel eines Senders einreihen. */
+  analyzeLibrary(stationId: string, force = false): { queued: number } {
+    if (!this.ffmpeg) throw new AppError(501, 'unsupported', 'Lautheitsanalyse benötigt ffmpeg');
+    let queued = 0;
+    for (const m of this.rt(stationId).data.library) {
+      if (m.url || (!force && m.lufs != null)) continue;
+      this.queueLoudness(stationId, m.id);
+      queued++;
+    }
+    return { queued };
+  }
+
+  loudnessStatus(stationId: string): unknown {
+    const lib = this.rt(stationId).data.library.filter((m) => !m.url);
+    return { total: lib.length, measured: lib.filter((m) => m.lufs != null).length, pending: this.loudQueue.filter((x) => x.stationId === stationId).length, running: this.loudBusy };
+  }
+
+  private async runLoudness(): Promise<void> {
+    if (this.loudBusy || !this.ffmpeg) return;
+    this.loudBusy = true;
+    try {
+      for (let job = this.loudQueue.shift(); job; job = this.loudQueue.shift()) {
+        const rt = this.stations.get(job.stationId);
+        const m = rt?.data.library.find((x) => x.id === job!.id);
+        if (!m || m.url) continue;
+        const r = await analyzeLoudness(this.ffmpeg.ffmpeg, this.mediaPath(job.stationId, m));
+        if (!r || !rt!.data.library.includes(m)) continue;
+        m.lufs = r.lufs;
+        m.truePeakDb = r.truePeakDb;
+        this.publish('library.changed', job.stationId, { updated: m });
+        this.changed();
+      }
+    } finally {
+      this.loudBusy = false;
+    }
   }
 
   updateMedia(stationId: string, id: string, patch: Record<string, unknown>): MediaItem {
@@ -1182,6 +1232,15 @@ export class AirDeckApp {
       if (Array.isArray(input.dsp.eq)) cur.dsp.eq = EQ_BANDS.map((_, i) => Math.max(-12, Math.min(12, Number(input.dsp!.eq[i]) || 0)));
       if (typeof input.dsp.compressor === 'boolean') cur.dsp.compressor = input.dsp.compressor;
       if (typeof input.dsp.limiter === 'boolean') cur.dsp.limiter = input.dsp.limiter;
+      for (const k of ['highpass', 'multiband', 'agc'] as const) if (typeof input.dsp[k] === 'boolean') cur.dsp[k] = input.dsp[k];
+      if (typeof input.dsp.targetLufs === 'number' && Number.isFinite(input.dsp.targetLufs)) cur.dsp.targetLufs = Math.max(-30, Math.min(-8, input.dsp.targetLufs));
+      if (typeof input.dsp.preset === 'string') cur.dsp.preset = input.dsp.preset in DSP_PRESETS ? input.dsp.preset : undefined;
+    }
+    if (input.mp3Mode === 'cbr' || input.mp3Mode === 'vbr') cur.mp3Mode = input.mp3Mode;
+    if (typeof input.mp3Quality === 'number' && input.mp3Quality >= 0 && input.mp3Quality <= 9) cur.mp3Quality = Math.round(input.mp3Quality);
+    if (input.loudness && typeof input.loudness === 'object') {
+      const t = Number(input.loudness.targetLufs);
+      cur.loudness = { auto: input.loudness.auto !== false, targetLufs: Number.isFinite(t) ? Math.max(-30, Math.min(-8, t)) : cur.loudness?.targetLufs ?? -16 };
     }
     if (typeof input.monitor === 'boolean') cur.monitor = input.monitor;
     if (typeof input.inputDevice === 'string') cur.inputDevice = input.inputDevice.slice(0, 200);
@@ -1806,6 +1865,18 @@ export class AirDeckApp {
     this.updater.runWindowsSetup(file, this.headless);
     setTimeout(exit, 1500).unref();
     return { installing: true, to: info.latest };
+  }
+
+  // ---------- Liquidsoap ----------
+
+  liquidsoap(stationId: string, opts: { port?: number; mount?: string; processing?: boolean }): { script: string; env: string[] } {
+    const rt = this.rt(stationId);
+    const outputs = [...this.outputs.values()].filter((o) => o.cfg.stationId === stationId).map((o) => o.cfg);
+    const port = Number.isInteger(opts.port) && opts.port! > 1023 && opts.port! < 65536 ? opts.port! : 8005;
+    return liquidsoapScript(outputs, {
+      stationName: rt.station.name, harborPort: port, harborMount: String(opts.mount ?? 'airdeck').replace(/[^\w/-]/g, '').slice(0, 40) || 'airdeck',
+      bitrateKbps: rt.data.playout?.bitrateKbps ?? 128, processing: opts.processing !== false,
+    });
   }
 
   // ---------- Nextcloud-Brücke ----------

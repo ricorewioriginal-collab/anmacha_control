@@ -113,3 +113,28 @@ export function inputDeviceArgs(id: string): string[] {
   if (process.platform === 'darwin') return ['-f', 'avfoundation', '-i', `:${id}`];
   return ['-f', 'pulse', '-i', id || 'default'];
 }
+
+/** Lautheit eines Titels messen (EBU R128): integrierte Lautheit (LUFS) und True-Peak (dBTP). */
+export function analyzeLoudness(ffmpeg: string, file: string, timeoutMs = 180_000): Promise<{ lufs: number; truePeakDb: number } | null> {
+  return new Promise((resolve) => {
+    const p = spawn(ffmpeg, ['-hide_banner', '-nostats', '-nostdin', '-i', file, '-vn', '-af', 'ebur128=peak=true:framelog=quiet', '-f', 'null', '-'], { stdio: ['ignore', 'ignore', 'pipe'], windowsHide: true });
+    let err = '';
+    const timer = setTimeout(() => p.kill('SIGKILL'), timeoutMs);
+    p.stderr!.on('data', (d: Buffer) => (err = (err + d.toString()).slice(-4000)));
+    p.on('error', () => {
+      clearTimeout(timer);
+      resolve(null);
+    });
+    p.on('close', (code) => {
+      clearTimeout(timer);
+      const summary = err.slice(err.lastIndexOf('Summary:'));
+      const i = /I:\s+(-?\d+(?:\.\d+)?)\s+LUFS/.exec(summary);
+      const tp = /True peak:\s+Peak:\s+(-?\d+(?:\.\d+)?|-inf)\s+dBFS/.exec(summary);
+      if (code !== 0 || !i) return resolve(null);
+      const lufs = Number(i[1]);
+      // Stille/zu kurz: ebur128 meldet −70 LUFS – dann keine Anpassung
+      if (!Number.isFinite(lufs) || lufs <= -69) return resolve(null);
+      resolve({ lufs, truePeakDb: tp && tp[1] !== '-inf' ? Number(tp[1]) : -90 });
+    });
+  });
+}

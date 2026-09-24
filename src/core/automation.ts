@@ -45,6 +45,10 @@ export interface MediaItem {
   year?: number;
   /** Von der KI erzeugt (Moderation/Nachrichten) – wird automatisch aufgeräumt */
   generatedBy?: 'ai';
+  /** Gemessene integrierte Lautheit (EBU R128, LUFS) */
+  lufs?: number;
+  /** Gemessener True-Peak in dBTP */
+  truePeakDb?: number;
   /** Herkunft, z. B. "nextcloud:/Radio/Hits/x.mp3" (verhindert doppelte Übernahme) */
   source?: string;
 }
