@@ -2,7 +2,7 @@
 // Keine Abhängigkeit zu AnMaCha oder anderen externen Diensten.
 
 import { createHash, randomBytes } from 'node:crypto';
-import { mkdirSync, rmSync } from 'node:fs';
+import { createWriteStream, mkdirSync, rmSync, type WriteStream } from 'node:fs';
 import { join } from 'node:path';
 import {
   SourcePriorityEngine,
@@ -27,11 +27,23 @@ import {
   type QueueEntry,
   type RotationRules,
   DECK_IDS,
+  MEDIA_CATEGORIES,
 } from '../core/automation.ts';
 import { AuditLog, DebouncedJson, readJson, writeFileAtomic } from './store.ts';
 import { SecretStore } from './secrets.ts';
-import { IcecastOutput, type OutputConfig, type OutputState } from './icecast.ts';
+import { IcecastOutput, type BroadcastOutput, type OutputConfig, type OutputState } from './icecast.ts';
+import { ShoutcastOutput } from './shoutcast.ts';
+import { fetchListeners } from './stats.ts';
 import { RelayTarget } from './relay.ts';
+import { detectFfmpeg, inputDeviceArgs, listInputDevices, probeMedia, type FfmpegInfo } from './ffmpeg.ts';
+import { DEFAULT_PLAYOUT, EQ_BANDS, Playout, type PlayoutOptions } from './playout.ts';
+import {
+  activeWindow, clockDue, dueJobs, nextOccurrence, parseM3U, toM3U, validateClock, validateWindow,
+  type ClockEvent, type JobTarget, type ProgramPlan, type RecordingPlan, type Repeat, type ScheduledJob,
+} from '../core/scheduler.ts';
+import { pickNext as pickFromPool } from '../core/automation.ts';
+import type { RelayTap } from './relay.ts';
+import { RADIOADMIN, type LautfmConfig } from './lautfm.ts';
 
 export interface Station {
   id: string;
@@ -51,6 +63,56 @@ interface StationData {
   clockCursor: number;
   autoFill: boolean;
   minQueue: number;
+  playout?: PlayoutConfig;
+  playlists?: Playlist[];
+  jobs?: ScheduledJob[];
+  clockEvents?: ClockEvent[];
+  plans?: ProgramPlan[];
+  recPlans?: RecordingPlan[];
+  recordings?: Recording[];
+  playLog?: PlayLogEntry[];
+  planCursor?: Record<string, number>;
+  lautfm?: LautfmConfig;
+}
+
+export interface Playlist {
+  id: string;
+  name: string;
+  color: string;
+  items: string[];
+}
+
+export interface Recording {
+  id: string;
+  label: string;
+  startedAt: number;
+  endedAt?: number;
+  bytes: number;
+  contentType: string;
+  file: string;
+  planId?: string;
+}
+
+export interface PlayLogEntry {
+  at: number;
+  mediaId: string;
+  title: string;
+  artist: string;
+  category: string;
+}
+
+interface ActiveRecording {
+  rec: Recording;
+  stream: WriteStream | null;
+  tap: RelayTap;
+  target: string;
+}
+
+export interface PlayoutConfig extends PlayoutOptions {
+  /** Nach Serverstart automatisch wieder senden (24/7) */
+  autostart: boolean;
+  /** Quelle, als die das Playout sendet (Standard: Automation-Quelle des Senders) */
+  sourceId?: string;
 }
 
 interface PersistedState {
@@ -106,6 +168,7 @@ export const ALL_SCOPES = [
   'now_playing:read', 'schedule:read', 'stream:read', 'branding:read', 'queue:read', 'queue:write',
   'cardwall:read', 'cardwall:trigger', 'sources:read', 'sources:write', 'automation:read', 'automation:write',
   'media:read', 'media:write', 'stations:write', 'outputs:read', 'outputs:write', 'audit:read', 'tokens:write',
+  'lautfm:read', 'lautfm:write',
 ] as const;
 
 const SLUG = /^[a-z0-9][a-z0-9-]{0,39}$/;
@@ -125,16 +188,23 @@ export class AirDeckApp {
   readonly secrets: SecretStore;
   readonly audit: AuditLog;
   private readonly stations = new Map<string, StationRuntime>();
-  private readonly outputs = new Map<string, IcecastOutput>();
+  private readonly outputs = new Map<string, BroadcastOutput>();
   private readonly relays = new Map<string, RelayTarget>();
+  private readonly playouts = new Map<string, { playout: Playout; source: SourceConfig }>();
+  readonly ffmpeg: FfmpegInfo | null;
+  private tickCount = 0;
+  private lastSchedAt = Date.now();
+  private readonly activePlanId = new Map<string, string | null>();
+  private readonly recorders = new Map<string, ActiveRecording>();
   private readonly subscribers = new Set<(e: HubEvent) => void>();
   private readonly persist: DebouncedJson<PersistedState>;
   private tokens: ApiToken[];
   private readonly tokensFile: string;
   private tickTimer: NodeJS.Timeout | null = null;
 
-  constructor(dataDir: string, opts: { stableMs?: number; cooldownMs?: number } = {}) {
+  constructor(dataDir: string, opts: { stableMs?: number; cooldownMs?: number; appRoot?: string; ffmpeg?: FfmpegInfo | null } = {}) {
     this.dataDir = dataDir;
+    this.ffmpeg = opts.ffmpeg !== undefined ? opts.ffmpeg : detectFfmpeg(opts.appRoot ?? process.cwd());
     this.mediaDir = join(dataDir, 'media');
     mkdirSync(this.mediaDir, { recursive: true });
     this.secrets = new SecretStore(dataDir);
@@ -160,10 +230,22 @@ export class AirDeckApp {
   start(): void {
     this.tickTimer = setInterval(() => this.tick(), 500);
     this.tickTimer.unref();
+    // 24/7: Playouts, die vor dem Neustart liefen, automatisch wieder starten
+    for (const [id, rt] of this.stations) {
+      if (!rt.data.playout?.autostart) continue;
+      try {
+        this.startPlayout(SYSTEM_PRINCIPAL, id, {});
+      } catch (err) {
+        this.audit.write({ kind: 'playout', event: 'autostart_failed', stationId: id, message: (err as Error).message });
+      }
+    }
   }
 
   shutdown(): void {
     if (this.tickTimer) clearInterval(this.tickTimer);
+    for (const { playout } of this.playouts.values()) playout.stop();
+    this.playouts.clear();
+    for (const id of [...this.recorders.keys()]) this.stopRecording(id);
     for (const o of this.outputs.values()) o.stop();
     this.persist.flush();
   }
@@ -190,6 +272,18 @@ export class AirDeckApp {
     writeFileAtomic(this.tokensFile, JSON.stringify(this.tokens, null, 1), 0o600);
     const { hash: _hash, ...info } = rec;
     return { token, info };
+  }
+
+  /**
+   * Token für das lokale Desktop-Programm (Windows): verschlüsselt im Secret Store,
+   * damit das Studio-Fenster ohne Eingabe startet. Wird bei Widerruf neu erzeugt.
+   */
+  desktopToken(): string {
+    const saved = this.secrets.get('desktop:token');
+    if (saved && this.authenticate(saved)) return saved;
+    const { token } = this.createToken({ name: 'desktop', scopes: ['*'], roles: ['admin'], stationIds: ['*'] });
+    this.secrets.set('desktop:token', token);
+    return token;
   }
 
   listTokens(): Omit<ApiToken, 'hash'>[] {
@@ -245,6 +339,25 @@ export class AirDeckApp {
 
   private tick(): void {
     this.engine.tick();
+    try {
+      this.processSchedules();
+    } catch (err) {
+      this.audit.write({ kind: 'schedule', event: 'error', message: (err as Error).message });
+    }
+    // Hörerzahlen alle 30 s von den verbundenen Ausgängen
+    if (this.tickCount % 60 === 0) {
+      for (const o of this.outputs.values()) {
+        if (o.state.status !== 'connected') continue;
+        fetchListeners(o.cfg).then((n) => {
+          if (o.state.listeners === n) return;
+          o.state.listeners = n;
+          this.publish('stream.state_changed', o.cfg.stationId, { id: o.cfg.id, ...o.state });
+        });
+      }
+    }
+    if (++this.tickCount % 2 === 0) {
+      for (const [id, { playout }] of this.playouts) this.publish('playout.state', id, playout.status());
+    }
     // Transportebene: Quelle ohne Daten > 5 s gilt als getrennt (Netzwerkabbruch).
     for (const [key, relay] of this.relays) {
       for (const id of relay.staleSessions(5000)) {
@@ -266,9 +379,18 @@ export class AirDeckApp {
       clock: data?.clock ?? DEFAULT_CLOCK,
       rotation: data?.rotation ?? DEFAULT_ROTATION,
       history: data?.history ?? [],
+      playlists: data?.playlists ?? [],
+      jobs: data?.jobs ?? [],
+      clockEvents: data?.clockEvents ?? [],
+      plans: data?.plans ?? [],
+      recPlans: data?.recPlans ?? [],
+      recordings: data?.recordings ?? [],
+      playLog: data?.playLog ?? [],
+      planCursor: data?.planCursor ?? {},
       clockCursor: data?.clockCursor ?? 0,
       autoFill: data?.autoFill ?? true,
       minQueue: data?.minQueue ?? 8,
+      playout: data?.playout,
     };
     const decks = Object.fromEntries(DECK_IDS.map((id) => [id, { id, mediaId: null, status: 'empty' }])) as Record<DeckId, DeckState>;
     const rt: StationRuntime = { station, data: d, queue: new PlayQueue(d.queue), decks, nowPlaying: { mediaId: null, deck: null, startedAt: null } };
@@ -445,6 +567,9 @@ export class AirDeckApp {
     if (!p.roles.includes('admin') && !src.allowedRoles.some((r) => p.roles.includes(r))) {
       throw new AppError(403, 'forbidden', 'Nicht autorisiert für diese Quelle');
     }
+    if ([...this.playouts.values()].some((x) => x.source.id === id)) {
+      throw new AppError(409, 'source_busy', 'Diese Quelle wird bereits vom Server-Playout (24/7) verwendet');
+    }
     const relay = this.relayFor(stationId, src.target);
     if (start || !relay.hasSession(id)) {
       // Neuer Stream (neuer Container-Header): Sitzung komplett neu aufbauen.
@@ -475,9 +600,10 @@ export class AirDeckApp {
 
   // ---------- Ausgänge ----------
 
-  private mountOutput(cfg: OutputConfig): IcecastOutput {
+  private mountOutput(cfg: OutputConfig): BroadcastOutput {
     this.outputs.get(cfg.id)?.stop();
-    const o = new IcecastOutput(cfg, () => this.secrets.get(cfg.passwordRef), (s: OutputState) => this.publish('stream.state_changed', cfg.stationId, { id: cfg.id, ...s }));
+    const Cls = cfg.type === 'shoutcast' ? ShoutcastOutput : IcecastOutput;
+    const o = new Cls(cfg, () => this.secrets.get(cfg.passwordRef), (s: OutputState) => this.publish('stream.state_changed', cfg.stationId, { id: cfg.id, ...s }));
     this.outputs.set(cfg.id, o);
     return o;
   }
@@ -514,6 +640,8 @@ export class AirDeckApp {
       tls: Boolean(input.tls ?? prev?.tls ?? false),
       sourceTarget: normalizeMount(String(input.sourceTarget ?? prev?.sourceTarget ?? '/live')),
       priority: priority as number | undefined,
+      streamId: type === 'shoutcast' ? posInt('streamId' in input ? input.streamId : prev?.streamId) : undefined,
+      bitrateKbps: posInt('bitrateKbps' in input ? input.bitrateKbps : prev?.bitrateKbps),
       enabled: Boolean(input.enabled ?? prev?.enabled ?? true),
     };
     if (typeof input.password === 'string' && input.password) this.secrets.set(cfg.passwordRef, input.password);
@@ -546,6 +674,7 @@ export class AirDeckApp {
   }
 
   mediaPath(stationId: string, m: MediaItem): string {
+    if (m.url) return m.url;
     return join(this.mediaDir, stationId, m.file);
   }
 
@@ -554,6 +683,22 @@ export class AirDeckApp {
     rt.data.library.push(item);
     this.publish('library.changed', stationId, { added: item });
     this.changed();
+    // Laufzeit und ID3-Tags serverseitig lesen (wichtig für Crossfade/Backtiming im Headless-Betrieb)
+    const ffprobe = this.ffmpeg?.ffprobe;
+    if (ffprobe && !item.url) {
+      probeMedia(ffprobe, this.mediaPath(stationId, item)).then(({ durationMs, tags }) => {
+        if (!rt.data.library.includes(item)) return;
+        const patch: Record<string, unknown> = {};
+        if (durationMs && item.durationMs == null) patch.durationMs = durationMs;
+        if (tags.title) patch.title = tags.title;
+        if (tags.artist) patch.artist = tags.artist;
+        if (tags.bpm && item.bpm == null) patch.bpm = tags.bpm;
+        if (tags.album) item.album = tags.album;
+        if (tags.genre) item.genre = tags.genre;
+        if (tags.year) item.year = tags.year;
+        if (Object.keys(patch).length || tags.album || tags.genre || tags.year) this.updateMedia(stationId, item.id, patch);
+      });
+    }
     return item;
   }
 
@@ -561,7 +706,8 @@ export class AirDeckApp {
     const m = this.media(stationId, id);
     if (typeof patch.title === 'string') m.title = patch.title.slice(0, 200);
     if (typeof patch.artist === 'string') m.artist = patch.artist.slice(0, 200);
-    if (typeof patch.category === 'string') m.category = patch.category as MediaItem['category'];
+    if (typeof patch.category === 'string' && (MEDIA_CATEGORIES as readonly string[]).includes(patch.category)) m.category = patch.category as MediaItem['category'];
+    if (typeof patch.folder === 'string') m.folder = patch.folder.trim().slice(0, 80) || undefined;
     for (const k of ['durationMs', 'cueInMs', 'cueOutMs', 'segueMs', 'introMs', 'bpm', 'gainDb'] as const) {
       const v = patch[k];
       if (v === null && k !== 'durationMs') delete m[k];
@@ -578,7 +724,8 @@ export class AirDeckApp {
     rt.data.library = rt.data.library.filter((x) => x.id !== id);
     rt.queue.prune((mid) => mid !== id);
     for (const c of rt.data.cardwall) if (c.mediaId === id) c.mediaId = null;
-    rmSync(this.mediaPath(stationId, m), { force: true });
+    for (const pl of rt.data.playlists ?? []) pl.items = pl.items.filter((x) => x !== id);
+    if (!m.url) rmSync(this.mediaPath(stationId, m), { force: true });
     this.publish('library.changed', stationId, { removed: id });
     this.publishQueue(stationId);
     this.changed();
@@ -662,6 +809,9 @@ export class AirDeckApp {
       rt.data.history.unshift(mediaId);
       rt.data.history.length = Math.min(rt.data.history.length, 200);
     }
+    const log = (rt.data.playLog ??= []);
+    log.unshift({ at: Date.now(), mediaId, title: m.title, artist: m.artist, category: m.category });
+    if (log.length > 1000) log.length = 1000;
     const song = m.artist ? `${m.artist} - ${m.title}` : m.title;
     for (const o of this.outputs.values()) if (o.cfg.stationId === stationId) o.updateMetadata(song);
     this.publish('now_playing.changed', stationId, { ...rt.nowPlaying, media: m });
@@ -698,6 +848,663 @@ export class AirDeckApp {
     return Object.values(this.rt(stationId).decks);
   }
 
+  // ---------- Server-Playout (24/7) ----------
+
+  playoutView(stationId: string): unknown {
+    const rt = this.rt(stationId);
+    const cfg = { ...DEFAULT_PLAYOUT, autostart: false, ...rt.data.playout };
+    return {
+      supported: !!this.ffmpeg,
+      ffmpeg: this.ffmpeg ? { version: this.ffmpeg.version, encoders: this.ffmpeg.encoders, probe: !!this.ffmpeg.ffprobe } : null,
+      config: cfg,
+      status: this.playouts.get(stationId)?.playout.status() ?? null,
+    };
+  }
+
+  startPlayout(p: Principal, stationId: string, input: Partial<PlayoutConfig>): unknown {
+    const rt = this.rt(stationId);
+    if (!this.ffmpeg) throw new AppError(501, 'unsupported', 'Server-Playout benötigt ffmpeg (AIRDECK_FFMPEG, ./ffmpeg/ oder PATH)');
+    const cfg = this.savePlayoutConfig(stationId, input);
+    if (cfg.format === 'opus' && !this.ffmpeg.encoders.opus) throw new AppError(501, 'unsupported', 'ffmpeg ohne libopus');
+    if (cfg.format === 'mp3' && !this.ffmpeg.encoders.mp3) throw new AppError(501, 'unsupported', 'ffmpeg ohne libmp3lame');
+    if (this.playouts.has(stationId)) return this.playoutView(stationId);
+    const sources = this.engine.list(stationId);
+    const source = (cfg.sourceId && sources.find((s) => s.id === cfg.sourceId)) || sources.find((s) => s.type === 'automation');
+    if (!source) throw new AppError(409, 'no_source', 'Keine Automation-Quelle für das Playout vorhanden');
+    // Browser-Stream derselben Quelle beenden, bevor das Server-Playout übernimmt
+    this.relayFor(stationId, source.target).close(source.id);
+    if (this.engine.get(source.id)?.state !== 'disconnected') this.engine.disconnect(source.id);
+
+    const playout = new Playout(this.ffmpeg.ffmpeg, {
+      nextTrack: () => this.queueNext(stationId) ?? this.emergencyPick(stationId),
+      mediaPath: (m) => this.mediaPath(stationId, m),
+      onNowPlaying: (m) => this.setNowPlaying(stationId, m.id, 'A'),
+      onStreamStart: (type) => {
+        try {
+          this.relayFor(stationId, source.target).close(source.id);
+          this.ingestOpen(source, type);
+        } catch (err) {
+          this.audit.write({ kind: 'playout', event: 'source_rejected', stationId, message: (err as Error).message });
+        }
+      },
+      onStreamData: (chunk) => this.ingestData(source, chunk),
+      onStreamStop: () => this.ingestClose(source),
+      onSilence: (silent) => {
+        // Stille → Quelle ungesund → Fallback nach Priorität; bei Erholung wieder anmelden
+        this.engine.setHealth(source.id, !silent, silent ? 'silence' : undefined);
+        if (!silent && this.engine.get(source.id)?.state === 'disconnected' && this.relayFor(stationId, source.target).hasSession(source.id)) {
+          try {
+            this.engine.connect(source.id);
+          } catch {
+            // gesperrt o. ä. – bleibt getrennt
+          }
+        }
+      },
+      log: (event, data) => {
+        this.audit.write({ kind: 'playout', event, stationId, ...data });
+        this.publish('playout.log', stationId, { event, ...data });
+      },
+    }, cfg, { ffplay: this.ffmpeg.ffplay, inputArgs: inputDeviceArgs });
+    this.playouts.set(stationId, { playout, source });
+    playout.start();
+    rt.data.playout = { ...cfg, autostart: input.autostart ?? true };
+    this.audit.write({ kind: 'playout', event: 'start', actor: p.id, stationId, sourceId: source.id });
+    this.changed();
+    return this.playoutView(stationId);
+  }
+
+  stopPlayout(p: Principal, stationId: string): unknown {
+    const rt = this.rt(stationId);
+    const po = this.playouts.get(stationId);
+    if (po) {
+      this.playouts.delete(stationId);
+      po.playout.stop();
+      this.engine.setHealth(po.source.id, true);
+    }
+    // Bewusst gestoppt → nach Neustart nicht automatisch wieder senden
+    if (rt.data.playout) rt.data.playout.autostart = false;
+    this.audit.write({ kind: 'playout', event: 'stop', actor: p.id, stationId });
+    this.changed();
+    return this.playoutView(stationId);
+  }
+
+  setMic(stationId: string, on: boolean): void {
+    const po = this.playouts.get(stationId);
+    if (!po) throw new AppError(409, 'not_running', 'Server-Playout läuft nicht');
+    try {
+      po.playout.setMic(on);
+    } catch (err) {
+      throw new AppError(409, 'no_input', (err as Error).message);
+    }
+    this.publish('playout.state', stationId, po.playout.status());
+  }
+
+  inputDevices(): unknown {
+    if (!this.ffmpeg) return { supported: false, devices: [] };
+    return { supported: true, devices: listInputDevices(this.ffmpeg.ffmpeg), monitor: !!this.ffmpeg.ffplay, eqBands: EQ_BANDS };
+  }
+
+  shuffleQueue(stationId: string): void {
+    this.rt(stationId).queue.shuffle();
+    this.publishQueue(stationId);
+  }
+
+  skipPlayout(stationId: string): void {
+    const po = this.playouts.get(stationId);
+    if (!po) throw new AppError(409, 'not_running', 'Server-Playout läuft nicht');
+    po.playout.skip();
+  }
+
+  savePlayoutConfig(stationId: string, input: Partial<PlayoutConfig>): PlayoutConfig {
+    const rt = this.rt(stationId);
+    const cur: PlayoutConfig = { ...DEFAULT_PLAYOUT, autostart: false, ...rt.data.playout };
+    if (input.format === 'mp3' || input.format === 'opus' || input.format === 'aac') cur.format = input.format;
+    cur.dsp = { ...DEFAULT_PLAYOUT.dsp, ...cur.dsp };
+    if (input.dsp && typeof input.dsp === 'object') {
+      if (Array.isArray(input.dsp.eq)) cur.dsp.eq = EQ_BANDS.map((_, i) => Math.max(-12, Math.min(12, Number(input.dsp!.eq[i]) || 0)));
+      if (typeof input.dsp.compressor === 'boolean') cur.dsp.compressor = input.dsp.compressor;
+      if (typeof input.dsp.limiter === 'boolean') cur.dsp.limiter = input.dsp.limiter;
+    }
+    if (typeof input.monitor === 'boolean') cur.monitor = input.monitor;
+    if (typeof input.inputDevice === 'string') cur.inputDevice = input.inputDevice.slice(0, 200);
+    const num = (v: unknown, min: number, max: number) => (typeof v === 'number' && Number.isFinite(v) && v >= min && v <= max ? v : undefined);
+    cur.bitrateKbps = num(input.bitrateKbps, 32, 320) ?? cur.bitrateKbps;
+    cur.crossfadeMs = num(input.crossfadeMs, 0, 15000) ?? cur.crossfadeMs;
+    cur.fadeInMs = num(input.fadeInMs, 0, 10000) ?? cur.fadeInMs ?? 0;
+    cur.micGainDb = num(input.micGainDb, -20, 20) ?? cur.micGainDb ?? 0;
+    cur.duckDb = num(input.duckDb, -40, 0) ?? cur.duckDb;
+    cur.silenceThresholdDb = num(input.silenceThresholdDb, -90, -10) ?? cur.silenceThresholdDb;
+    cur.silenceMs = num(input.silenceMs, 2000, 120000) ?? cur.silenceMs;
+    if (typeof input.sourceId === 'string') cur.sourceId = input.sourceId || undefined;
+    if (typeof input.autostart === 'boolean') cur.autostart = input.autostart;
+    rt.data.playout = cur;
+    this.changed();
+    return cur;
+  }
+
+  /** Notfall-Auswahl, wenn Queue und Sendeuhr nichts liefern: beliebiger Musiktitel, sonst irgendein Titel. */
+  private emergencyPick(stationId: string): MediaItem | null {
+    const lib = this.rt(stationId).data.library;
+    const pool = lib.filter((m) => m.category === 'music');
+    const list = pool.length ? pool : lib;
+    return list.length ? list[Math.floor(Math.random() * list.length)]! : null;
+  }
+
+  // ---------- Ordner, URL-Streams, M3U, Titelanzeige, Verlauf ----------
+
+  folders(stationId: string): string[] {
+    return [...new Set(this.rt(stationId).data.library.map((m) => m.folder ?? '').filter(Boolean))].sort((a, b) => a.localeCompare(b, 'de'));
+  }
+
+  addUrlMedia(stationId: string, input: { url: string; title?: string; artist?: string; durationMs?: number; folder?: string }): MediaItem {
+    const url = String(input.url ?? '').trim();
+    if (!/^https?:\/\/[^\s]+$/i.test(url)) throw new AppError(400, 'invalid_url', 'Nur http(s)-URLs sind erlaubt');
+    const existing = this.rt(stationId).data.library.find((m) => m.url === url);
+    if (existing) return existing;
+    const dur = typeof input.durationMs === 'number' && input.durationMs > 0 ? Math.round(input.durationMs) : null;
+    return this.addMedia(stationId, {
+      id: newId('m'), title: String(input.title || url).slice(0, 200), artist: String(input.artist ?? '').slice(0, 200),
+      category: 'stream', file: '', url, durationMs: dur, cueOutMs: dur ?? undefined, addedAt: Date.now(), folder: input.folder,
+    });
+  }
+
+  /** Füllt die Queue mit n Titeln aus Ordner oder Kategorie (mit Rotationsregeln). */
+  queueFillFrom(stationId: string, input: { folder?: string; category?: string; count?: number }): number {
+    const rt = this.rt(stationId);
+    const count = Math.max(1, Math.min(100, Number(input.count) || 10));
+    const pool = rt.data.library.filter((m) => (input.folder !== undefined ? (m.folder ?? '') === input.folder : m.category === input.category));
+    if (!pool.length) throw new AppError(404, 'empty', 'Keine Titel in dieser Auswahl');
+    const recent = [...rt.queue.list().map((q) => q.mediaId).reverse(), ...rt.data.history];
+    let added = 0;
+    for (let i = 0; i < count; i++) {
+      const m = pickFromPool(pool.map((x) => ({ ...x, category: 'music' as const })), 'music', recent, rt.data.rotation);
+      if (!m) break;
+      rt.queue.add(m.id, 'manual');
+      recent.unshift(m.id);
+      added++;
+    }
+    this.publishQueue(stationId);
+    return added;
+  }
+
+  exportQueueM3U(stationId: string): string {
+    const rt = this.rt(stationId);
+    const lib = new Map(rt.data.library.map((m) => [m.id, m]));
+    return toM3U(rt.queue.list().map((q) => lib.get(q.mediaId)).filter((m): m is MediaItem => !!m).map((m) => ({
+      title: m.title, artist: m.artist, durationMs: m.durationMs, path: m.url ?? m.originalName ?? m.file,
+    })));
+  }
+
+  /** M3U importieren: Einträge werden über Dateiname, "Interpret - Titel" oder URL der Bibliothek zugeordnet. */
+  importM3U(stationId: string, text: string, target: { playlistName?: string }): { matched: number; missing: string[]; playlistId?: string } {
+    const rt = this.rt(stationId);
+    const norm = (x: string) => x.toLowerCase().replace(/\.[a-z0-9]{2,5}$/, '').replace(/\s+/g, ' ').trim();
+    const byName = new Map<string, MediaItem>();
+    for (const m of rt.data.library) {
+      if (m.originalName) byName.set(norm(m.originalName), m);
+      byName.set(norm(m.artist ? `${m.artist} - ${m.title}` : m.title), m);
+      if (m.url) byName.set(m.url.toLowerCase(), m);
+    }
+    const ids: string[] = [];
+    const missing: string[] = [];
+    for (const e of parseM3U(text).slice(0, 5000)) {
+      const base = e.path.replace(/^.*[\\/]/, '');
+      let m = byName.get(e.path.toLowerCase()) ?? byName.get(norm(base)) ?? (e.title ? byName.get(norm(e.title)) : undefined);
+      if (!m && /^https?:\/\//i.test(e.path)) m = this.addUrlMedia(stationId, { url: e.path, title: e.title, durationMs: e.durationMs });
+      if (m) ids.push(m.id);
+      else missing.push(e.title ?? base);
+    }
+    if (target.playlistName) {
+      const pl = this.savePlaylist(stationId, null, { name: target.playlistName, items: ids });
+      return { matched: ids.length, missing, playlistId: pl.id };
+    }
+    for (const id of ids) rt.queue.add(id, 'manual');
+    this.publishQueue(stationId);
+    return { matched: ids.length, missing };
+  }
+
+  /** Titelanzeige manuell senden (z. B. bei Live-Moderation). */
+  sendMetadata(stationId: string, artist: string, title: string): void {
+    const song = (artist ? `${artist} - ${title}` : title).slice(0, 250);
+    if (!song.trim()) throw new AppError(400, 'empty', 'Titel angeben');
+    for (const o of this.outputs.values()) if (o.cfg.stationId === stationId) o.updateMetadata(song);
+    this.publish('metadata.sent', stationId, { artist, title });
+  }
+
+  history(stationId: string, limit = 200): PlayLogEntry[] {
+    return (this.rt(stationId).data.playLog ?? []).slice(0, Math.min(1000, Math.max(1, limit)));
+  }
+
+  // ---------- Playlists ----------
+
+  playlists(stationId: string): Playlist[] {
+    return this.rt(stationId).data.playlists ?? [];
+  }
+
+  savePlaylist(stationId: string, id: string | null, input: { name?: string; color?: string; items?: unknown }): Playlist {
+    const rt = this.rt(stationId);
+    const list = (rt.data.playlists ??= []);
+    let pl = id ? list.find((p) => p.id === id) : undefined;
+    if (id && !pl) throw new AppError(404, 'not_found', 'Playlist nicht gefunden');
+    if (!pl) {
+      pl = { id: newId('pl'), name: 'Neue Playlist', color: '#19c3e6', items: [] };
+      list.push(pl);
+    }
+    if (typeof input.name === 'string' && input.name.trim()) pl.name = input.name.trim().slice(0, 80);
+    if (input.color !== undefined) pl.color = safeColor(input.color, pl.color);
+    if (Array.isArray(input.items)) {
+      const valid = new Set(rt.data.library.map((m) => m.id));
+      pl.items = input.items.map(String).filter((x) => valid.has(x)).slice(0, 5000);
+    }
+    this.publish('playlists.changed', stationId, list);
+    this.changed();
+    return pl;
+  }
+
+  deletePlaylist(stationId: string, id: string): void {
+    const rt = this.rt(stationId);
+    if (rt.data.plans?.some((p) => p.playlistId === id)) throw new AppError(409, 'in_use', 'Playlist wird im Sendeplan verwendet');
+    rt.data.playlists = (rt.data.playlists ?? []).filter((p) => p.id !== id);
+    this.publish('playlists.changed', stationId, rt.data.playlists);
+    this.changed();
+  }
+
+  saveQueueAsPlaylist(stationId: string, name: string): Playlist {
+    return this.savePlaylist(stationId, null, { name, items: this.rt(stationId).queue.list().map((q) => q.mediaId) });
+  }
+
+  /** Playlist abspielen: ersetzt die Queue und schaltet per Crossfade weiter. */
+  playPlaylist(stationId: string, id: string): void {
+    const rt = this.rt(stationId);
+    const pl = rt.data.playlists?.find((p) => p.id === id);
+    if (!pl || !pl.items.length) throw new AppError(404, 'empty', 'Playlist ist leer oder existiert nicht');
+    rt.queue.clear();
+    for (const mid of pl.items) rt.queue.add(mid, 'manual');
+    this.publishQueue(stationId);
+    this.advance(stationId);
+  }
+
+  // ---------- Zeitplan, Stunden-Uhr, Sendeplan ----------
+
+  planning(stationId: string): unknown {
+    const d = this.rt(stationId).data;
+    const now = new Date();
+    return {
+      jobs: [...(d.jobs ?? [])].sort((a, b) => a.at - b.at), clockEvents: d.clockEvents ?? [], plans: d.plans ?? [],
+      recPlans: d.recPlans ?? [], activePlanId: activeWindow(d.plans ?? [], now)?.id ?? null,
+    };
+  }
+
+  saveJob(stationId: string, input: Record<string, unknown>): ScheduledJob {
+    const rt = this.rt(stationId);
+    const at = typeof input.at === 'string' || typeof input.at === 'number' ? new Date(input.at).getTime() : NaN;
+    if (!Number.isFinite(at)) throw new AppError(400, 'invalid_time', 'Ungültiger Zeitpunkt');
+    const repeat = (['none', 'hourly', 'daily', 'weekdays', 'weekly'] as Repeat[]).includes(input.repeat as Repeat) ? (input.repeat as Repeat) : 'none';
+    const job: ScheduledJob = { id: newId('job'), at, repeat, ...this.jobTarget(stationId, input) };
+    (rt.data.jobs ??= []).push(job);
+    this.planningChanged(stationId);
+    return job;
+  }
+
+  deleteJob(stationId: string, id: string): void {
+    const rt = this.rt(stationId);
+    rt.data.jobs = (rt.data.jobs ?? []).filter((j) => j.id !== id);
+    this.planningChanged(stationId);
+  }
+
+  saveClockEvent(stationId: string, id: string | null, input: Record<string, unknown>): ClockEvent {
+    const rt = this.rt(stationId);
+    const list = (rt.data.clockEvents ??= []);
+    const ints = (v: unknown) => (Array.isArray(v) ? [...new Set(v.map(Number))].sort((a, b) => a - b) : []);
+    const ev: ClockEvent = {
+      id: id ?? newId('clk'), enabled: input.enabled !== false, minutes: ints(input.minutes), hours: ints(input.hours), days: ints(input.days),
+      ...this.jobTarget(stationId, input),
+    };
+    try {
+      validateClock(ev);
+    } catch (err) {
+      throw new AppError(400, 'invalid_clock', (err as Error).message);
+    }
+    const i = list.findIndex((e) => e.id === ev.id);
+    if (id && i === -1) throw new AppError(404, 'not_found', 'Uhr-Event nicht gefunden');
+    if (i === -1) list.push(ev);
+    else list[i] = ev;
+    this.planningChanged(stationId);
+    return ev;
+  }
+
+  deleteClockEvent(stationId: string, id: string): void {
+    const rt = this.rt(stationId);
+    rt.data.clockEvents = (rt.data.clockEvents ?? []).filter((e) => e.id !== id);
+    this.planningChanged(stationId);
+  }
+
+  /** Uhr-Event sofort auslösen (Test). */
+  fireClockEvent(stationId: string, id: string): void {
+    const ev = this.rt(stationId).data.clockEvents?.find((e) => e.id === id);
+    if (!ev) throw new AppError(404, 'not_found', 'Uhr-Event nicht gefunden');
+    this.executeTarget(stationId, ev, 'manual');
+  }
+
+  savePlan(stationId: string, id: string | null, input: Record<string, unknown>): ProgramPlan {
+    const rt = this.rt(stationId);
+    const list = (rt.data.plans ??= []);
+    const plan: ProgramPlan = {
+      id: id ?? newId('plan'), label: String(input.label ?? 'Sendung').slice(0, 80), days: Array.isArray(input.days) ? input.days.map(Number) : [],
+      from: String(input.from ?? ''), to: String(input.to ?? ''), playlistId: String(input.playlistId ?? ''), shuffle: input.shuffle === true,
+    };
+    try {
+      validateWindow(plan);
+    } catch (err) {
+      throw new AppError(400, 'invalid_window', (err as Error).message);
+    }
+    if (!rt.data.playlists?.some((p) => p.id === plan.playlistId)) throw new AppError(400, 'invalid_playlist', 'Playlist wählen');
+    const i = list.findIndex((p) => p.id === plan.id);
+    if (id && i === -1) throw new AppError(404, 'not_found', 'Sendeplan-Eintrag nicht gefunden');
+    if (i === -1) list.push(plan);
+    else list[i] = plan;
+    this.planningChanged(stationId);
+    return plan;
+  }
+
+  deletePlan(stationId: string, id: string): void {
+    const rt = this.rt(stationId);
+    rt.data.plans = (rt.data.plans ?? []).filter((p) => p.id !== id);
+    this.planningChanged(stationId);
+  }
+
+  private jobTarget(stationId: string, input: Record<string, unknown>): JobTarget {
+    const kind = input.kind as JobTarget['kind'];
+    const mode = (['now', 'track', 'fx'] as const).includes(input.mode as never) ? (input.mode as JobTarget['mode']) : 'track';
+    const label = typeof input.label === 'string' ? input.label.slice(0, 80) : undefined;
+    const rt = this.rt(stationId);
+    switch (kind) {
+      case 'media':
+        this.media(stationId, String(input.mediaId ?? ''));
+        return { kind, mediaId: String(input.mediaId), mode, label };
+      case 'folder':
+        if (!rt.data.library.some((m) => (m.folder ?? '') === String(input.folder ?? ''))) throw new AppError(400, 'empty_folder', 'Ordner ist leer');
+        return { kind, folder: String(input.folder ?? ''), mode, label };
+      case 'url': {
+        const m = this.addUrlMedia(stationId, { url: String(input.url ?? ''), title: label, durationMs: Number(input.durationMs) || undefined });
+        return { kind: 'media', mediaId: m.id, mode, label: label ?? m.title };
+      }
+      case 'playlist':
+        if (!rt.data.playlists?.some((p) => p.id === input.playlistId)) throw new AppError(400, 'invalid_playlist', 'Playlist wählen');
+        return { kind, playlistId: String(input.playlistId), mode: 'now', label };
+      default:
+        throw new AppError(400, 'invalid_kind', 'Art: media, folder, url oder playlist');
+    }
+  }
+
+  private planningChanged(stationId: string): void {
+    this.publish('planning.changed', stationId, this.planning(stationId));
+    this.changed();
+  }
+
+  /** Nächsten Titel starten – im Server-Playout direkt, sonst übernimmt das Studio (Event). */
+  private advance(stationId: string): void {
+    const po = this.playouts.get(stationId);
+    if (po) po.playout.skip();
+    else this.publish('automation.command', stationId, { action: 'next' });
+  }
+
+  private executeTarget(stationId: string, t: JobTarget, origin: string): void {
+    const rt = this.rt(stationId);
+    if (t.kind === 'playlist') {
+      this.playPlaylist(stationId, t.playlistId!);
+    } else {
+      let m: MediaItem | undefined;
+      if (t.kind === 'media') m = rt.data.library.find((x) => x.id === t.mediaId);
+      else {
+        const pool = rt.data.library.filter((x) => (x.folder ?? '') === t.folder);
+        const picked = pickFromPool(pool.map((x) => ({ ...x, category: 'music' as const })), 'music', rt.data.history, rt.data.rotation);
+        m = picked ? rt.data.library.find((x) => x.id === picked.id) : undefined;
+      }
+      if (!m) {
+        this.audit.write({ kind: 'schedule', event: 'target_missing', stationId, label: t.label });
+        return;
+      }
+      if (t.mode === 'fx') {
+        const po = this.playouts.get(stationId);
+        if (po) po.playout.playCart(m, true);
+        else this.publish('automation.command', stationId, { action: 'fx', mediaId: m.id });
+      } else {
+        rt.queue.add(m.id, 'schedule', 0);
+        this.publishQueue(stationId);
+        if (t.mode === 'now') this.advance(stationId);
+      }
+    }
+    this.audit.write({ kind: 'schedule', event: 'fired', stationId, origin, label: t.label, mode: t.mode });
+    this.publish('schedule.fired', stationId, { label: t.label, kind: t.kind, mode: t.mode, origin });
+  }
+
+  private processSchedules(): void {
+    const now = Date.now();
+    const from = this.lastSchedAt;
+    this.lastSchedAt = now;
+    const minuteChanged = Math.floor(from / 60000) !== Math.floor(now / 60000);
+    for (const [stationId, rt] of this.stations) {
+      // Zeitplan-Jobs
+      const jobs = rt.data.jobs ?? [];
+      const due = dueJobs(jobs, from, now);
+      for (const j of due) {
+        this.executeTarget(stationId, j, 'job');
+        const next = nextOccurrence(j, now);
+        if (next === null) rt.data.jobs = (rt.data.jobs ?? []).filter((x) => x.id !== j.id);
+        else j.at = next;
+      }
+      // Verpasste einmalige Jobs (PC war aus) nicht nachholen, sondern aufräumen/weiterschieben
+      for (const j of rt.data.jobs ?? []) {
+        if (j.at < now - 60_000) {
+          const next = nextOccurrence(j, now);
+          if (next === null) rt.data.jobs = (rt.data.jobs ?? []).filter((x) => x.id !== j.id);
+          else j.at = next;
+        }
+      }
+      if (due.length) this.planningChanged(stationId);
+      if (!minuteChanged) continue;
+      const d = new Date(now);
+      for (const ev of clockDue(rt.data.clockEvents ?? [], d)) this.executeTarget(stationId, ev, 'clock');
+      // Sendeplan-Wechsel: automatisch gefüllte Einträge verwerfen, damit das neue Programm sofort greift
+      const planId = activeWindow(rt.data.plans ?? [], d)?.id ?? null;
+      if (this.activePlanId.has(stationId) && this.activePlanId.get(stationId) !== planId) {
+        rt.queue.pruneOrigins(['clock', 'plan']);
+        this.autoFill(rt);
+        this.publishQueue(stationId);
+        this.publish('planning.changed', stationId, this.planning(stationId));
+      }
+      this.activePlanId.set(stationId, planId);
+      // Aufnahme-Zeitfenster
+      const recPlan = activeWindow(rt.data.recPlans ?? [], d);
+      const active = this.recorders.get(stationId);
+      if (recPlan && !active) this.startRecording(stationId, recPlan.label, recPlan.id);
+      if (!recPlan && active?.rec.planId) this.stopRecording(stationId);
+    }
+  }
+
+  // ---------- Recorder / Replays ----------
+
+  recordings(stationId: string): unknown {
+    const rt = this.rt(stationId);
+    const active = this.recorders.get(stationId);
+    return { recordings: [...(rt.data.recordings ?? [])].reverse(), recording: active ? active.rec : null, recPlans: rt.data.recPlans ?? [] };
+  }
+
+  startRecording(stationId: string, label?: string, planId?: string, target = '/live'): Recording {
+    const rt = this.rt(stationId);
+    if (this.recorders.has(stationId)) throw new AppError(409, 'busy', 'Es läuft bereits eine Aufnahme');
+    const dir = join(this.dataDir, 'recordings', stationId);
+    mkdirSync(dir, { recursive: true });
+    const baseLabel = (label?.trim() || `Mitschnitt ${new Date().toLocaleString('de-DE')}`).slice(0, 80);
+    let part = 0;
+    const active: ActiveRecording = {
+      rec: { id: '', label: baseLabel, startedAt: Date.now(), bytes: 0, contentType: '', file: '', planId },
+      stream: null,
+      target,
+      tap: {
+        onStart: (type, init) => {
+          part++;
+          const ext = type.includes('mpeg') ? 'mp3' : type.includes('ogg') ? 'ogg' : type.includes('webm') ? 'webm' : type.includes('aac') ? 'aac' : 'bin';
+          const rec: Recording = { id: newId('rec'), label: part > 1 ? `${baseLabel} (Teil ${part})` : baseLabel, startedAt: Date.now(), bytes: 0, contentType: type, file: '', planId };
+          rec.file = `${rec.id}.${ext}`;
+          active.rec = rec;
+          active.stream = createWriteStream(join(dir, rec.file));
+          (rt.data.recordings ??= []).push(rec);
+          if (init) this.recWrite(active, init);
+          this.publish('recorder.changed', stationId, this.recordings(stationId));
+          this.changed();
+        },
+        onData: (chunk) => this.recWrite(active, chunk),
+        onStop: () => {
+          active.stream?.end();
+          active.stream = null;
+          active.rec.endedAt = Date.now();
+          this.changed();
+        },
+      },
+    };
+    this.recorders.set(stationId, active);
+    this.relayFor(stationId, target).addTap(active.tap);
+    this.audit.write({ kind: 'recorder', event: 'start', stationId, planId });
+    this.publish('recorder.changed', stationId, this.recordings(stationId));
+    return active.rec;
+  }
+
+  stopRecording(stationId: string): void {
+    const active = this.recorders.get(stationId);
+    if (!active) return;
+    this.recorders.delete(stationId);
+    this.relayFor(stationId, active.target).removeTap(active.tap);
+    this.audit.write({ kind: 'recorder', event: 'stop', stationId });
+    this.publish('recorder.changed', stationId, this.recordings(stationId));
+    this.changed();
+  }
+
+  private recWrite(active: ActiveRecording, chunk: Buffer): void {
+    if (!active.stream) return;
+    // Platte zu langsam: lieber Lücke als Speicher volllaufen lassen
+    if (active.stream.writableLength > 8 * 1024 * 1024) return;
+    active.stream.write(chunk);
+    active.rec.bytes += chunk.length;
+  }
+
+  recordingFile(stationId: string, id: string): { path: string; rec: Recording } {
+    const rec = this.rt(stationId).data.recordings?.find((r) => r.id === id);
+    if (!rec) throw new AppError(404, 'not_found', 'Aufnahme nicht gefunden');
+    return { path: join(this.dataDir, 'recordings', stationId, rec.file), rec };
+  }
+
+  deleteRecording(stationId: string, id: string): void {
+    const rt = this.rt(stationId);
+    const { path, rec } = this.recordingFile(stationId, id);
+    if (this.recorders.get(stationId)?.rec.id === rec.id) throw new AppError(409, 'busy', 'Aufnahme läuft noch');
+    rmSync(path, { force: true });
+    rt.data.recordings = (rt.data.recordings ?? []).filter((r) => r.id !== id);
+    this.publish('recorder.changed', stationId, this.recordings(stationId));
+    this.changed();
+  }
+
+  saveRecPlan(stationId: string, id: string | null, input: Record<string, unknown>): RecordingPlan {
+    const rt = this.rt(stationId);
+    const list = (rt.data.recPlans ??= []);
+    const plan: RecordingPlan = {
+      id: id ?? newId('rp'), label: String(input.label ?? 'Aufnahme').slice(0, 80), days: Array.isArray(input.days) ? input.days.map(Number) : [],
+      from: String(input.from ?? ''), to: String(input.to ?? ''),
+    };
+    try {
+      validateWindow(plan);
+    } catch (err) {
+      throw new AppError(400, 'invalid_window', (err as Error).message);
+    }
+    const i = list.findIndex((p) => p.id === plan.id);
+    if (i === -1) list.push(plan);
+    else list[i] = plan;
+    this.publish('recorder.changed', stationId, this.recordings(stationId));
+    this.changed();
+    return plan;
+  }
+
+  deleteRecPlan(stationId: string, id: string): void {
+    const rt = this.rt(stationId);
+    rt.data.recPlans = (rt.data.recPlans ?? []).filter((p) => p.id !== id);
+    this.publish('recorder.changed', stationId, this.recordings(stationId));
+    this.changed();
+  }
+
+  // ---------- laut.fm ----------
+
+  lautfmConfig(stationId: string): LautfmConfig & { hasToken: boolean } {
+    const cfg = this.rt(stationId).data.lautfm ?? {};
+    return { ...cfg, hasToken: this.secrets.has(`lautfm:${stationId}`) };
+  }
+
+  lautfmToken(stationId: string): string | undefined {
+    return this.secrets.get(`lautfm:${stationId}`);
+  }
+
+  setLautfmConfig(p: Principal, stationId: string, input: Record<string, unknown>): unknown {
+    const rt = this.rt(stationId);
+    const cfg: LautfmConfig = { ...rt.data.lautfm };
+    if (input.stationId !== undefined) {
+      const n = Number(input.stationId);
+      cfg.stationId = input.stationId === null || input.stationId === '' ? undefined : Number.isSafeInteger(n) && n > 0 ? n : cfg.stationId;
+    }
+    if (typeof input.stationName === 'string') cfg.stationName = input.stationName.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '') || undefined;
+    if (typeof input.token === 'string') {
+      if (input.token) this.secrets.set(`lautfm:${stationId}`, input.token.trim());
+      else this.secrets.delete(`lautfm:${stationId}`);
+    }
+    rt.data.lautfm = cfg;
+    this.audit.write({ kind: 'lautfm', event: 'config', actor: p.id, stationId, token: typeof input.token === 'string' ? (input.token ? 'set' : 'removed') : 'unchanged' });
+    this.changed();
+    return this.lautfmConfig(stationId);
+  }
+
+  /** Radioadmin-Anfrage mit gespeichertem Token (serverseitig). */
+  async radioadmin(stationId: string, method: string, path: string, body?: unknown): Promise<{ status: number; data: unknown }> {
+    const token = this.lautfmToken(stationId);
+    if (!token) throw new AppError(409, 'no_token', 'Kein laut.fm-Radioadmin-Token hinterlegt');
+    const r = await fetch(RADIOADMIN + path, {
+      method,
+      headers: { Authorization: `Bearer ${token}`, Accept: 'application/json', ...(body ? { 'Content-Type': 'application/json' } : {}) },
+      body: body ? JSON.stringify(body) : undefined,
+      signal: AbortSignal.timeout(20_000),
+    }).catch(() => {
+      throw new AppError(502, 'upstream_unreachable', 'laut.fm nicht erreichbar');
+    });
+    const text = await r.text();
+    let data: unknown = text;
+    try {
+      data = JSON.parse(text);
+    } catch {
+      // Text-Antwort (z. B. Passwort)
+    }
+    return { status: r.status, data };
+  }
+
+  /**
+   * Live-Zugang der laut.fm-Station als AirDeck-Ausgang übernehmen (Icecast-Source mit optionalem ?prio=).
+   * Nutzt GET /stations/{id}/live und ggf. /live/password aus der Radioadmin-API.
+   */
+  async lautfmCreateOutput(p: Principal, stationId: string, priority?: number): Promise<unknown> {
+    const cfg = this.lautfmConfig(stationId);
+    if (!cfg.stationId) throw new AppError(409, 'no_station', 'Zuerst die laut.fm-Station wählen');
+    const live = await this.radioadmin(stationId, 'GET', `/stations/${cfg.stationId}/live`);
+    if (live.status !== 200 || typeof live.data !== 'object' || !live.data) throw new AppError(live.status === 403 ? 403 : 502, 'lautfm_error', `laut.fm antwortete ${live.status}`);
+    const d = live.data as { protocol?: string; server?: string; port?: number; mountpoint?: string; user?: string; password?: string; bitrate?: number };
+    let password = d.password;
+    if (!password) {
+      const pw = await this.radioadmin(stationId, 'GET', `/stations/${cfg.stationId}/live/password`);
+      if (pw.status === 200 && typeof pw.data === 'string') password = pw.data;
+    }
+    if (!d.server || !d.mountpoint || !password) throw new AppError(502, 'lautfm_incomplete', 'laut.fm lieferte keine vollständigen Live-Zugangsdaten');
+    return this.saveOutput(p, stationId, null, {
+      name: `laut.fm ${cfg.stationName ?? cfg.stationId}`, type: 'icecast', host: d.server, port: d.port ?? (d.protocol === 'https' ? 443 : 80),
+      tls: d.protocol === 'https', mount: d.mountpoint, username: d.user ?? 'source', password, priority, sourceTarget: '/live',
+    });
+  }
+
   // ---------- Cardwall ----------
 
   cardwall(stationId: string): CartSlot[] {
@@ -723,7 +1530,12 @@ export class AirDeckApp {
     const slot = this.rt(stationId).data.cardwall.find((c) => c.id === slotId);
     if (!slot) throw new AppError(404, 'not_found', 'Cart nicht gefunden');
     if (!slot.mediaId) throw new AppError(409, 'empty_cart', 'Cart ist leer');
-    this.publish('cardwall.triggered', stationId, slot);
+    const po = this.playouts.get(stationId);
+    if (po) {
+      const m = this.media(stationId, slot.mediaId);
+      po.playout.playCart(m, ['voice_track', 'tts', 'news', 'ad'].includes(m.category));
+    }
+    this.publish('cardwall.triggered', stationId, { ...slot, server: !!po });
     return slot;
   }
 
@@ -731,6 +1543,27 @@ export class AirDeckApp {
 
   private autoFill(rt: StationRuntime, force = false): void {
     if (!rt.data.autoFill && !force) return;
+    // Sendeplan: im aktiven Zeitfenster kommt die Musik aus der zugeordneten Playlist
+    const plan = activeWindow(rt.data.plans ?? [], new Date());
+    const pl = plan ? rt.data.playlists?.find((x) => x.id === plan.playlistId) : undefined;
+    const items = pl?.items.filter((id) => rt.data.library.some((m) => m.id === id)) ?? [];
+    if (plan && items.length) {
+      const cursors = (rt.data.planCursor ??= {});
+      let guard = rt.data.minQueue * 2;
+      while (rt.queue.length < rt.data.minQueue && guard-- > 0) {
+        let next: string;
+        if (plan.shuffle) {
+          const lib = rt.data.library.filter((m) => items.includes(m.id));
+          next = (pickFromPool(lib.map((m) => ({ ...m, category: 'music' as const })), 'music', [...rt.queue.list().map((q) => q.mediaId).reverse(), ...rt.data.history], rt.data.rotation) ?? lib[0]!).id;
+        } else {
+          const c = (cursors[plan.id] ?? 0) % items.length;
+          next = items[c]!;
+          cursors[plan.id] = c + 1;
+        }
+        rt.queue.add(next, 'plan');
+      }
+      return;
+    }
     rt.data.clockCursor = fillFromClock(rt.queue, rt.data.library, rt.data.clock, rt.data.history, rt.data.clockCursor, rt.data.minQueue, rt.data.rotation);
   }
 
@@ -767,7 +1600,7 @@ export class AirDeckApp {
     return s;
   }
 
-  private outputOf(stationId: string, id: string): IcecastOutput {
+  private outputOf(stationId: string, id: string): BroadcastOutput {
     const o = this.outputs.get(id);
     if (!o || o.cfg.stationId !== stationId) throw new AppError(404, 'not_found', 'Ausgang nicht gefunden');
     return o;
@@ -775,6 +1608,8 @@ export class AirDeckApp {
 }
 
 // ---------- Hilfsfunktionen ----------
+
+const SYSTEM_PRINCIPAL: Principal = { id: 'system', tokenId: 'system', roles: ['admin'], stationIds: ['*'], scopes: ['*'] };
 
 export function canSee(p: Principal, stationId: string): boolean {
   return p.stationIds.includes('*') || p.stationIds.includes(stationId);
@@ -791,6 +1626,11 @@ export function normalizeMount(m: unknown): string {
     throw new AppError(400, 'invalid_mount', 'Ungültiger Mountpoint/Target');
   }
   return withSlash;
+}
+
+function posInt(v: unknown): number | undefined {
+  const n = Number(v);
+  return v !== null && v !== '' && Number.isFinite(n) && n > 0 ? Math.floor(n) : undefined;
 }
 
 function safeColor(v: unknown, fallback: string): string {
@@ -822,7 +1662,7 @@ function publicSource<T extends SourceConfig>(s: T, secrets: SecretStore): Omit<
   return { ...rest, hasPassword: !!credentialRef && secrets.has(credentialRef) };
 }
 
-function publicOutput(o: IcecastOutput, secrets: SecretStore): Record<string, unknown> {
+function publicOutput(o: BroadcastOutput, secrets: SecretStore): Record<string, unknown> {
   const { passwordRef, ...cfg } = o.cfg;
   return { ...cfg, hasPassword: secrets.has(passwordRef), state: { ...o.state } };
 }

@@ -8,6 +8,7 @@ import { pipeline } from 'node:stream/promises';
 import { AirDeckApp, AppError, canSee, newId, type Principal } from './app.ts';
 import { MEDIA_CATEGORIES, parseFileName, type MediaCategory } from '../core/automation.ts';
 import { OUTPUT_CAPABILITIES } from './icecast.ts';
+import { PUBLIC_API, RADIOADMIN, allowedPublicPath, allowedRadioadminPath, forward } from './lautfm.ts';
 
 type Params = Record<string, string>;
 interface Ctx {
@@ -38,6 +39,27 @@ const STATIC_TYPES: Record<string, string> = {
 const MAX_UPLOAD = 300 * 1024 * 1024;
 const MAX_JSON = 1024 * 1024;
 const MAX_CHUNK = 2 * 1024 * 1024;
+
+/**
+ * Erlaubte Fremd-Origins (Android-App, eigene Frontends). Standard: Capacitor-WebView.
+ * Erweiterbar über AIRDECK_CORS_ORIGINS (kommagetrennt).
+ */
+const CORS_ORIGINS = new Set([
+  'https://localhost', 'http://localhost', 'capacitor://localhost',
+  ...String(process.env.AIRDECK_CORS_ORIGINS ?? '').split(',').map((s) => s.trim()).filter(Boolean),
+]);
+
+function applyCors(req: IncomingMessage, res: ServerResponse): boolean {
+  const origin = req.headers.origin;
+  if (!origin || !CORS_ORIGINS.has(origin)) return false;
+  res.setHeader('Access-Control-Allow-Origin', origin);
+  res.setHeader('Vary', 'Origin');
+  res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type, Range');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
+  res.setHeader('Access-Control-Expose-Headers', 'Content-Range, Content-Length');
+  res.setHeader('Access-Control-Max-Age', '600');
+  return true;
+}
 
 export function createHttpServer(app: AirDeckApp, studioDir: string): Server {
   const routes: Route[] = [];
@@ -123,13 +145,19 @@ export function createHttpServer(app: AirDeckApp, studioDir: string): Server {
       throw new AppError(413, 'upload_failed', 'Upload abgebrochen oder zu groß');
     }
     const meta = parseFileName(name);
-    return app.addMedia(s, { id, title: meta.title || name, artist: meta.artist, category, file, durationMs: null, addedAt: Date.now() });
+    const folder = (c.url.searchParams.get('folder') ?? '').trim().slice(0, 80) || undefined;
+    return app.addMedia(s, { id, title: meta.title || name, artist: meta.artist, category, file, durationMs: null, addedAt: Date.now(), folder, originalName: name.replace(/^.*[\\/]/, '') });
   });
   add('PATCH', '/api/v1/stations/:sid/media/:id', 'media:write', async (c) => app.updateMedia(sid(c), c.params.id!, await c.body()));
   add('DELETE', '/api/v1/stations/:sid/media/:id', 'media:write', (c) => app.removeMedia(sid(c), c.params.id!));
   add('GET', '/api/v1/stations/:sid/media/:id/file', 'media:read', (c) => {
     const s = sid(c);
     const m = app.media(s, c.params.id!);
+    if (m.url) {
+      c.res.writeHead(302, { Location: m.url });
+      c.res.end();
+      return STREAMED;
+    }
     sendFile(c.req, c.res, app.mediaPath(s, m), AUDIO_EXT[extname(m.file)] ?? 'application/octet-stream');
     return STREAMED;
   });
@@ -154,6 +182,84 @@ export function createHttpServer(app: AirDeckApp, studioDir: string): Server {
   });
   add('GET', '/api/v1/stations/:sid/decks', 'automation:read', (c) => app.decks(sid(c)));
   add('PUT', '/api/v1/stations/:sid/decks/:deck', 'automation:write', async (c) => app.setDeck(sid(c), c.params.deck!, (await c.body()) as never));
+
+  // --- Server-Playout (24/7) ---
+  add('GET', '/api/v1/stations/:sid/playout', 'automation:read', (c) => app.playoutView(sid(c)));
+  add('PATCH', '/api/v1/stations/:sid/playout', 'automation:write', async (c) => {
+    app.savePlayoutConfig(sid(c), (await c.body()) as never);
+    return app.playoutView(sid(c));
+  });
+  add('POST', '/api/v1/stations/:sid/playout/start', 'automation:write', async (c) => app.startPlayout(c.p, sid(c), (await c.body()) as never));
+  add('POST', '/api/v1/stations/:sid/playout/stop', 'automation:write', (c) => app.stopPlayout(c.p, sid(c)));
+  add('POST', '/api/v1/stations/:sid/playout/mic', 'automation:write', async (c) => app.setMic(sid(c), (await c.body()).on === true));
+  add('GET', '/api/v1/audio-devices', 'automation:read', () => app.inputDevices());
+  add('POST', '/api/v1/stations/:sid/queue/shuffle', 'queue:write', (c) => app.shuffleQueue(sid(c)));
+  add('POST', '/api/v1/stations/:sid/playout/skip', 'automation:write', (c) => app.skipPlayout(sid(c)));
+
+  // --- Ordner, URL-Streams, M3U, Titelanzeige, Verlauf ---
+  add('GET', '/api/v1/stations/:sid/folders', 'media:read', (c) => app.folders(sid(c)));
+  add('POST', '/api/v1/stations/:sid/media/url', 'media:write', async (c) => app.addUrlMedia(sid(c), (await c.body()) as never));
+  add('POST', '/api/v1/stations/:sid/queue/fill-from', 'queue:write', async (c) => ({ added: app.queueFillFrom(sid(c), (await c.body()) as never) }));
+  add('GET', '/api/v1/stations/:sid/queue.m3u', 'queue:read', (c) => {
+    const text = app.exportQueueM3U(sid(c));
+    c.res.writeHead(200, { 'Content-Type': 'audio/x-mpegurl; charset=utf-8', 'Content-Disposition': 'attachment; filename="airdeck-queue.m3u"' });
+    c.res.end(text);
+    return STREAMED;
+  });
+  add('POST', '/api/v1/stations/:sid/m3u/import', 'queue:write', async (c) => {
+    const b = await c.body();
+    return app.importM3U(sid(c), String(b.text ?? ''), { playlistName: typeof b.playlistName === 'string' && b.playlistName ? b.playlistName : undefined });
+  });
+  add('POST', '/api/v1/stations/:sid/metadata', 'automation:write', async (c) => {
+    const b = await c.body();
+    app.sendMetadata(sid(c), String(b.artist ?? ''), String(b.title ?? ''));
+  });
+  add('GET', '/api/v1/stations/:sid/history', 'now_playing:read', (c) => app.history(sid(c), Number(c.url.searchParams.get('limit') ?? 200)));
+
+  // --- Playlists ---
+  add('GET', '/api/v1/stations/:sid/playlists', 'queue:read', (c) => app.playlists(sid(c)));
+  add('POST', '/api/v1/stations/:sid/playlists', 'queue:write', async (c) => {
+    const b = await c.body();
+    return b.fromQueue === true ? app.saveQueueAsPlaylist(sid(c), String(b.name ?? 'Playlist')) : app.savePlaylist(sid(c), null, b);
+  });
+  add('PATCH', '/api/v1/stations/:sid/playlists/:id', 'queue:write', async (c) => app.savePlaylist(sid(c), c.params.id!, await c.body()));
+  add('DELETE', '/api/v1/stations/:sid/playlists/:id', 'queue:write', (c) => app.deletePlaylist(sid(c), c.params.id!));
+  add('POST', '/api/v1/stations/:sid/playlists/:id/play', 'automation:write', (c) => app.playPlaylist(sid(c), c.params.id!));
+
+  // --- Planung: Zeitplan, Stunden-Uhr, Sendeplan ---
+  add('GET', '/api/v1/stations/:sid/planning', 'schedule:read', (c) => app.planning(sid(c)));
+  add('POST', '/api/v1/stations/:sid/jobs', 'automation:write', async (c) => app.saveJob(sid(c), await c.body()));
+  add('DELETE', '/api/v1/stations/:sid/jobs/:id', 'automation:write', (c) => app.deleteJob(sid(c), c.params.id!));
+  add('POST', '/api/v1/stations/:sid/clock-events', 'automation:write', async (c) => app.saveClockEvent(sid(c), null, await c.body()));
+  add('PATCH', '/api/v1/stations/:sid/clock-events/:id', 'automation:write', async (c) => app.saveClockEvent(sid(c), c.params.id!, await c.body()));
+  add('DELETE', '/api/v1/stations/:sid/clock-events/:id', 'automation:write', (c) => app.deleteClockEvent(sid(c), c.params.id!));
+  add('POST', '/api/v1/stations/:sid/clock-events/:id/fire', 'automation:write', (c) => app.fireClockEvent(sid(c), c.params.id!));
+  add('POST', '/api/v1/stations/:sid/plans', 'automation:write', async (c) => app.savePlan(sid(c), null, await c.body()));
+  add('PATCH', '/api/v1/stations/:sid/plans/:id', 'automation:write', async (c) => app.savePlan(sid(c), c.params.id!, await c.body()));
+  add('DELETE', '/api/v1/stations/:sid/plans/:id', 'automation:write', (c) => app.deletePlan(sid(c), c.params.id!));
+
+  // --- Recorder / Replays ---
+  add('GET', '/api/v1/stations/:sid/recordings', 'automation:read', (c) => app.recordings(sid(c)));
+  add('POST', '/api/v1/stations/:sid/recorder/start', 'automation:write', async (c) => app.startRecording(sid(c), str((await c.body()).label)));
+  add('POST', '/api/v1/stations/:sid/recorder/stop', 'automation:write', (c) => app.stopRecording(sid(c)));
+  add('GET', '/api/v1/stations/:sid/recordings/:id/file', 'automation:read', (c) => {
+    const { path, rec } = app.recordingFile(sid(c), c.params.id!);
+    c.res.setHeader('Content-Disposition', `attachment; filename="${rec.label.replace(/[^\w .()-]/g, '_')}.${rec.file.split('.').pop()}"`);
+    sendFile(c.req, c.res, path, rec.contentType || 'application/octet-stream');
+    return STREAMED;
+  });
+  add('DELETE', '/api/v1/stations/:sid/recordings/:id', 'automation:write', (c) => app.deleteRecording(sid(c), c.params.id!));
+  add('POST', '/api/v1/stations/:sid/rec-plans', 'automation:write', async (c) => app.saveRecPlan(sid(c), null, await c.body()));
+  add('DELETE', '/api/v1/stations/:sid/rec-plans/:id', 'automation:write', (c) => app.deleteRecPlan(sid(c), c.params.id!));
+
+  // --- laut.fm ---
+  add('GET', '/api/v1/stations/:sid/lautfm', 'lautfm:read', (c) => app.lautfmConfig(sid(c)));
+  add('PUT', '/api/v1/stations/:sid/lautfm', 'lautfm:write', async (c) => app.setLautfmConfig(c.p, sid(c), await c.body()));
+  add('POST', '/api/v1/stations/:sid/lautfm/live-output', 'outputs:write', async (c) => {
+    const b = await c.body();
+    const prio = b.priority === undefined || b.priority === null || b.priority === '' ? undefined : Number(b.priority);
+    return app.lautfmCreateOutput(c.p, sid(c), prio);
+  });
 
   // --- Cardwall ---
   add('GET', '/api/v1/stations/:sid/cardwall', 'cardwall:read', (c) => app.cardwall(sid(c)));
@@ -196,9 +302,14 @@ export function createHttpServer(app: AirDeckApp, studioDir: string): Server {
     const url = new URL(req.url ?? '/', 'http://localhost');
     const path = url.pathname;
     setSecurityHeaders(res);
+    const cors = applyCors(req, res);
+    if (req.method === 'OPTIONS') {
+      res.writeHead(cors ? 204 : 403);
+      return void res.end();
+    }
 
     if (path.startsWith('/ingest/')) return handleIngest(app, req, res, path);
-    if (path === '/api/v1/health') return json(res, 200, { ok: true, name: 'AirDeck', version: '0.1.0' });
+    if (path === '/api/v1/health') return json(res, 200, { ok: true, name: 'AirDeck', version: '0.3.0' });
 
     if (path.startsWith('/listen/')) {
       const p = auth(app, req, url);
@@ -214,6 +325,32 @@ export function createHttpServer(app: AirDeckApp, studioDir: string): Server {
     }
 
     if (!path.startsWith('/api/')) return serveStatic(req, res, studioDir, path);
+
+    // laut.fm-Weiterleitung (Radioadmin mit gespeichertem Token bzw. öffentliche API)
+    const ra = /^\/api\/v1\/stations\/([^/]+)\/lautfm\/ra(\/.*)$/.exec(path);
+    const pub = /^\/api\/v1\/lautfm\/public(\/.*)$/.exec(path);
+    if (ra || pub) {
+      const p = auth(app, req, url);
+      if (!p) return json(res, 401, { error: 'unauthorized' });
+      if (!allow(p.tokenId)) return json(res, 429, { error: 'rate_limited' });
+      if (pub) {
+        if (req.method !== 'GET' || !allowedPublicPath(pub[1]!)) return json(res, 403, { error: 'forbidden_path' });
+        return forward(req, res, PUBLIC_API + pub[1] + url.search, undefined, 15_000);
+      }
+      const station = decodeURIComponent(ra![1]!);
+      const scope = req.method === 'GET' ? 'lautfm:read' : 'lautfm:write';
+      if (!AirDeckApp.hasScope(p, scope)) return json(res, 403, { error: 'insufficient_scope', scope });
+      if (!canSee(p, station)) return json(res, 403, { error: 'forbidden' });
+      try {
+        const cfg = app.lautfmConfig(station);
+        if (!allowedRadioadminPath(ra![2]!, cfg.stationId)) return json(res, 403, { error: 'forbidden_path', message: 'Pfad nicht erlaubt oder laut.fm-Station nicht gewählt' });
+        const token = app.lautfmToken(station);
+        if (!token) return json(res, 409, { error: 'no_token', message: 'Kein laut.fm-Radioadmin-Token hinterlegt' });
+        return forward(req, res, RADIOADMIN + ra![2] + url.search, token, 300_000);
+      } catch (err) {
+        return sendError(res, err);
+      }
+    }
 
     const route = routes.find((r) => r.method === req.method && r.re.test(path));
     if (!route) {
@@ -375,7 +512,7 @@ function serveStatic(req: IncomingMessage, res: ServerResponse, root: string, pa
   if (!existsSync(file) || !statSync(file).isFile()) return json(res, 404, { error: 'not_found' });
   res.setHeader(
     'Content-Security-Policy',
-    "default-src 'self'; media-src 'self' blob:; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'",
+    "default-src 'self'; media-src 'self' blob:; img-src 'self' data: blob: https:; style-src 'self' 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'",
   );
   res.writeHead(200, { 'Content-Type': STATIC_TYPES[extname(file)] ?? 'application/octet-stream', 'Cache-Control': 'no-cache' });
   if (req.method === 'HEAD') return void res.end();

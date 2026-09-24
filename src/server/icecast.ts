@@ -22,7 +22,21 @@ export interface OutputConfig {
   sourceTarget: string;
   /** Optional: Priorität per Query-Parameter "?prio=" */
   priority?: number;
+  /** SHOUTcast v2: Stream-ID (sid); leer = SHOUTcast v1 */
+  streamId?: number;
+  /** Angezeigte Bitrate (icy-br) */
+  bitrateKbps?: number;
   enabled: boolean;
+}
+
+/** Gemeinsame Schnittstelle aller Sende-Ausgänge. */
+export interface BroadcastOutput {
+  readonly cfg: OutputConfig;
+  readonly state: OutputState;
+  start(contentType: string, init?: Buffer): void;
+  stop(): void;
+  write(chunk: Buffer): void;
+  updateMetadata(song: string): void;
 }
 
 export type OutputStatus = 'idle' | 'connecting' | 'connected' | 'error' | 'unsupported';
@@ -35,11 +49,13 @@ export interface OutputState {
   droppedChunks: number;
   connectedAt?: number;
   contentType?: string;
+  /** Hörerzahl laut Server-Statistik (null = unbekannt) */
+  listeners?: number | null;
 }
 
 export const OUTPUT_CAPABILITIES: Record<OutputType, { streaming: boolean; metadata: boolean; note: string }> = {
   icecast: { streaming: true, metadata: true, note: 'HTTP PUT Source-Protokoll (Icecast 2.4+), optional ?prio=' },
-  shoutcast: { streaming: false, metadata: false, note: 'noch nicht implementiert – als unsupported markiert' },
+  shoutcast: { streaming: true, metadata: true, note: 'Legacy-Source-Protokoll (Port+1), v1 und v2 (mit Stream-ID); nur MP3/AAC' },
 };
 
 export function buildMountPath(cfg: Pick<OutputConfig, 'mount' | 'priority'>): string {
@@ -51,7 +67,7 @@ export function buildMountPath(cfg: Pick<OutputConfig, 'mount' | 'priority'>): s
 
 const MAX_BUFFERED = 512 * 1024;
 
-export class IcecastOutput {
+export class IcecastOutput implements BroadcastOutput {
   readonly cfg: OutputConfig;
   readonly state: OutputState = { status: 'idle', bytesSent: 0, droppedChunks: 0 };
   private req: ClientRequest | null = null;
@@ -65,12 +81,11 @@ export class IcecastOutput {
     this.cfg = cfg;
     this.password = password;
     this.onChange = onChange;
-    if (cfg.type !== 'icecast') this.set({ status: 'unsupported', error: OUTPUT_CAPABILITIES[cfg.type].note, errorCategory: 'unsupported' });
   }
 
   /** Startet (oder startet neu) mit neuem Format, z. B. nach einem Source-Takeover. */
   start(contentType: string, init?: Buffer): void {
-    if (this.state.status === 'unsupported' || !this.cfg.enabled) return;
+    if (!this.cfg.enabled) return;
     this.wanted = { contentType, init };
     this.retryDelay = 2000;
     this.open();
@@ -81,7 +96,7 @@ export class IcecastOutput {
     if (this.retryTimer) clearTimeout(this.retryTimer);
     this.retryTimer = null;
     this.close();
-    if (this.state.status !== 'unsupported') this.set({ status: 'idle', error: undefined, errorCategory: undefined });
+    this.set({ status: 'idle', error: undefined, errorCategory: undefined });
   }
 
   write(chunk: Buffer): void {
@@ -137,7 +152,7 @@ export class IcecastOutput {
         'Content-Type': wanted.contentType,
         'Ice-Public': '0',
         'Ice-Name': this.cfg.name,
-        'User-Agent': 'AirDeck/0.1',
+        'User-Agent': 'AirDeck/0.3',
       },
     });
     this.req = req;

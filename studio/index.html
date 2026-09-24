@@ -19,12 +19,20 @@
       </div>
     </div>
     <select id="station-select" aria-label="Sender"></select>
+    <nav class="views tabs" id="view-tabs" aria-label="Bereiche">
+      <button data-view="studio" aria-pressed="true">Studio</button>
+      <button data-view="planning" aria-pressed="false">Planung</button>
+      <button data-view="recorder" aria-pressed="false">Recorder</button>
+      <button data-view="lautfm" aria-pressed="false">laut.fm</button>
+    </nav>
     <div class="onair" id="onair" data-state="off">
       <span class="dot"></span><span id="onair-text">OFF AIR</span>
     </div>
     <div class="top-actions">
       <button class="toggle" id="btn-auto" aria-pressed="false" title="Automation: Queue automatisch abspielen">AUTO</button>
       <button class="toggle" id="btn-stream" aria-pressed="false" title="Studio-Summe als Automation-Quelle senden">STREAM</button>
+      <button class="toggle" id="btn-mic" aria-pressed="false" title="Mikrofon live senden (z. B. Android Live, Priority 3)">MIC LIVE</button>
+      <button class="toggle" id="btn-listen" aria-pressed="false" title="Sendesignal mithören">🎧</button>
       <label class="chk" title="Musik absenken, während Carts laufen"><input type="checkbox" id="chk-duck" checked> Ducking</label>
       <button class="icon-btn" id="btn-station" title="Sender-Einstellungen">⚙</button>
     </div>
@@ -35,7 +43,10 @@
     <span class="conn" id="conn" title="Serververbindung"></span>
   </header>
 
-  <main class="studio">
+  <main class="view-page" id="view-planning" hidden></main>
+  <main class="view-page" id="view-recorder" hidden></main>
+  <main class="view-page" id="view-lautfm" hidden></main>
+  <main class="studio" id="view-studio">
     <section class="decks" id="decks" aria-label="Decks"></section>
 
     <section class="panel carts-panel" aria-label="Cardwall">
@@ -51,7 +62,10 @@
         <h2>Archiv</h2>
         <input type="search" id="lib-search" placeholder="Suchen …" aria-label="Archiv durchsuchen">
         <select id="lib-cat" aria-label="Kategorie-Filter"></select>
+        <select id="lib-folder" aria-label="Ordner-Filter"></select>
         <label class="btn small" title="Audiodateien hochladen">⭱ Upload<input type="file" id="lib-upload" accept="audio/*,.mp3,.ogg,.opus,.wav,.flac,.m4a,.aac,.webm" multiple hidden></label>
+        <label class="btn small" title="Ganzen Ordner hochladen (Ordnername wird übernommen)">⭱ Ordner<input type="file" id="lib-upload-dir" webkitdirectory multiple hidden></label>
+        <button class="btn small" id="btn-add-url" title="URL / Stream zur Bibliothek">＋ URL</button>
       </div>
       <div class="table-wrap" id="lib-drop">
         <table class="list">
@@ -68,6 +82,9 @@
         <span class="muted" id="queue-total"></span>
         <label class="chk"><input type="checkbox" id="chk-autofill"> Sendeuhr</label>
         <button class="btn small" id="btn-fill">Auffüllen</button>
+ <button class="btn small" id="btn-shuffle" title="Warteschlange mischen">Mischen</button>
+        <button class="btn small" id="btn-fill-from" title="Warteschlange aus Ordner oder Kategorie füllen">Aus Ordner …</button>
+        <button class="btn small" id="btn-m3u" title="Warteschlange als M3U exportieren">M3U</button>
         <button class="btn small" id="btn-clear">Leeren</button>
       </div>
       <div class="table-wrap" id="queue-drop">
@@ -85,6 +102,20 @@
         <div class="np-title" id="np-title">–</div>
         <div class="np-artist" id="np-artist"></div>
         <div class="np-next"><span class="muted">Next:</span> <span id="np-next">–</span></div>
+        <button class="btn small" id="btn-meta" style="margin-top:6px" title="Titelanzeige manuell an die Ausgänge senden">Titelanzeige senden …</button>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head"><h2>Server-Automation 24/7</h2><span class="pill" id="po-state">–</span></div>
+        <div class="po-title" id="po-title">–</div>
+        <div class="po-meta muted" id="po-meta"></div>
+        <div class="po-actions">
+          <button class="btn small primary" id="po-start">Start</button>
+          <button class="btn small" id="po-skip">Weiter ⏭</button>
+          <button class="toggle" id="po-mic" aria-pressed="false" hidden title="Mikrofon/Line-In am PC über die Musik legen (Musik wird abgesenkt)">🎙 Mikro</button>
+          <button class="btn small danger" id="po-stop">Stop</button>
+          <button class="btn small" id="po-settings" title="Format, Bitrate, Überblendung">⋯</button>
+        </div>
       </section>
 
       <section class="panel">
@@ -110,7 +141,7 @@
 
   <footer class="status">
     <span id="status-text">Bereit.</span>
-    <span class="muted">AirDeck 0.1 · local-first</span>
+    <span class="muted">AirDeck 0.3 · local-first</span>
   </footer>
 
   <dialog id="dialog"><form method="dialog" id="dialog-form"></form></dialog>

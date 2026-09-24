@@ -1,0 +1,126 @@
+name: Build
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '22', cache: npm }
+      - name: ffmpeg (für Playout-Integrationstest)
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends ffmpeg
+      - run: npm ci
+      - run: npm run check
+
+  windows:
+    needs: test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '22', cache: npm }
+      - run: npm ci
+      - name: AirDeck.exe bauen (Node Single Executable)
+        run: node scripts/build.mjs --sea
+      - name: ffmpeg beilegen
+        shell: pwsh
+        run: |
+          $dest = "dist/AirDeck/ffmpeg"
+          foreach ($variant in @('lgpl', 'gpl')) {
+            $zip = "$env:RUNNER_TEMP/ffmpeg-$variant.zip"
+            Invoke-WebRequest "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-$variant.zip" -OutFile $zip
+            Expand-Archive $zip -DestinationPath "$env:RUNNER_TEMP/ff-$variant" -Force
+            $bin = Get-ChildItem "$env:RUNNER_TEMP/ff-$variant" -Recurse -Filter ffmpeg.exe | Select-Object -First 1
+            $enc = & $bin.FullName -hide_banner -encoders
+            if (($enc | Select-String 'libmp3lame') -and ($enc | Select-String 'libopus')) {
+              Copy-Item $bin.FullName, (Join-Path $bin.DirectoryName 'ffprobe.exe'), (Join-Path $bin.DirectoryName 'ffplay.exe') $dest
+              Get-ChildItem (Split-Path $bin.DirectoryName) -Filter 'LICENSE*' | Copy-Item -Destination $dest
+              "ffmpeg-Build: BtbN/FFmpeg-Builds ($variant), https://github.com/BtbN/FFmpeg-Builds" | Out-File "$dest/QUELLE.txt"
+              Write-Host "ffmpeg ($variant) beigelegt"
+              exit 0
+            }
+          }
+          throw 'Kein ffmpeg-Build mit libmp3lame + libopus gefunden'
+      - name: Smoke-Test
+        shell: pwsh
+        run: |
+          $env:AIRDECK_DATA = "$env:RUNNER_TEMP/airdeck-data"
+          $env:AIRDECK_PORT = '8753'
+          $out = & dist/AirDeck/AirDeck.exe --new-admin-token
+          $out
+          if (-not ($out | Select-String 'ffmpeg version')) { throw 'ffmpeg wurde nicht erkannt' }
+          $p = Start-Process -FilePath dist/AirDeck/AirDeck.exe -ArgumentList '--headless' -PassThru
+          Start-Sleep -Seconds 5
+          $r = Invoke-RestMethod http://127.0.0.1:8753/api/v1/health
+          Stop-Process -Id $p.Id -Force
+          if (-not $r.ok) { throw 'Health-Check fehlgeschlagen' }
+          Write-Host 'AirDeck.exe startet und antwortet.'
+      - name: Installer bauen (Inno Setup)
+        shell: pwsh
+        run: |
+          $iscc = Get-Command iscc -ErrorAction SilentlyContinue
+          if (-not $iscc) {
+            $candidates = @("${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe", "$env:ProgramFiles\Inno Setup 6\ISCC.exe")
+            $found = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+            if (-not $found) { choco install innosetup -y --no-progress | Out-Null; $found = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1 }
+            $iscc = $found
+          } else { $iscc = $iscc.Source }
+          $version = (Get-Content package.json | ConvertFrom-Json).version
+          & $iscc "/DAppVersion=$version" packaging/windows/installer.iss
+          if ($LASTEXITCODE -ne 0) { throw 'Inno Setup fehlgeschlagen' }
+          Get-ChildItem dist/AirDeck-Setup-*.exe
+      - name: Installer-Test (still installieren, starten, deinstallieren)
+        shell: pwsh
+        run: |
+          $setup = Get-ChildItem dist/AirDeck-Setup-*.exe | Select-Object -First 1
+          Start-Process $setup.FullName -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/TASKS=""' -Wait
+          $exe = "$env:LOCALAPPDATA/Programs/AirDeck/AirDeck.exe"
+          if (-not (Test-Path $exe)) { throw 'AirDeck.exe nach Installation nicht gefunden' }
+          $env:AIRDECK_DATA = "$env:RUNNER_TEMP/airdeck-inst"
+          $env:AIRDECK_PORT = '8755'
+          $p = Start-Process $exe -ArgumentList '--headless' -PassThru
+          Start-Sleep -Seconds 5
+          $r = Invoke-RestMethod http://127.0.0.1:8755/api/v1/health
+          Stop-Process -Id $p.Id -Force
+          if (-not $r.ok) { throw 'Installierte Version antwortet nicht' }
+          Start-Process "$env:LOCALAPPDATA/Programs/AirDeck/unins000.exe" -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES' -Wait
+          Write-Host 'Installer: Installation, Start und Deinstallation OK'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AirDeck-Windows-Installer
+          path: dist/AirDeck-Setup-*.exe
+          retention-days: 30
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AirDeck-Windows
+          path: dist/AirDeck
+          retention-days: 30
+
+  android:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '22' }
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: '21' }
+      - name: APK bauen (Debug)
+        working-directory: apps/android
+        run: |
+          npm install --no-audit --no-fund
+          npm run build:debug
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AirDeck-Android
+          path: apps/android/android/app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 30

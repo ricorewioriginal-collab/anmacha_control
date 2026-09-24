@@ -27,6 +27,7 @@ export class Deck {
     this.id = id;
     this.el = new Audio();
     this.el.preload = 'auto';
+    this.el.crossOrigin = 'anonymous'; // nötig für Web Audio, wenn der Server fremd ist (Android-App)
     /** @type {any} */
     this.media = null;
     this.src = engine.ctx.createMediaElementSource(this.el);
@@ -154,7 +155,9 @@ export class AudioEngine {
   /** Cart abspielen (überlagert Musik, optional mit Ducking). @param {string} url @param {boolean} duck */
   async playCart(url, duck) {
     await this.resume();
-    const el = new Audio(url);
+    const el = new Audio();
+    el.crossOrigin = 'anonymous';
+    el.src = url;
     const node = this.ctx.createMediaElementSource(el);
     node.connect(this.master);
     if (duck) this.setDuck(+1);
@@ -192,26 +195,42 @@ export class AudioEngine {
    */
   startStream(send) {
     if (this.recorder) return;
-    const type = ['audio/webm;codecs=opus', 'audio/ogg;codecs=opus', 'audio/webm'].find((t) => MediaRecorder.isTypeSupported(t));
-    if (!type) throw new Error('Browser unterstützt keine Stream-Kodierung (MediaRecorder)');
-    const rec = new MediaRecorder(this.streamDest.stream, { mimeType: type, audioBitsPerSecond: 128_000 });
-    let first = true;
-    let chain = Promise.resolve();
-    rec.ondataavailable = (e) => {
-      if (!e.data.size) return;
-      const isFirst = first;
-      first = false;
-      // Reihenfolge sichern: Chunks strikt nacheinander senden.
-      chain = chain.then(() => send(e.data, isFirst, type.split(';')[0])).catch(() => {});
-    };
-    rec.start(1000);
-    this.recorder = rec;
+    this.recorder = recordStream(this.streamDest.stream, send);
   }
 
   stopStream() {
     this.recorder?.stop();
     this.recorder = null;
   }
+}
+
+/**
+ * Nimmt einen MediaStream als WebM/Opus in 1-s-Chunks auf und sendet sie der Reihe nach.
+ * @param {MediaStream} stream
+ * @param {(chunk: Blob, first: boolean, type: string) => Promise<void>} send
+ */
+export function recordStream(stream, send) {
+  const type = ['audio/webm;codecs=opus', 'audio/ogg;codecs=opus', 'audio/webm', 'audio/mp4'].find((t) => MediaRecorder.isTypeSupported(t));
+  if (!type) throw new Error('Gerät unterstützt keine Stream-Kodierung (MediaRecorder)');
+  const rec = new MediaRecorder(stream, { mimeType: type, audioBitsPerSecond: 128_000 });
+  let first = true;
+  let chain = Promise.resolve();
+  rec.ondataavailable = (e) => {
+    if (!e.data.size) return;
+    const isFirst = first;
+    first = false;
+    // Reihenfolge sichern: Chunks strikt nacheinander senden.
+    chain = chain.then(() => send(e.data, isFirst, type.split(';')[0])).catch(() => {});
+  };
+  rec.start(1000);
+  return rec;
+}
+
+/** Mikrofon öffnen – ohne Browser-Klangverbiegung (Echo/Noise/AGC aus). */
+export async function openMic() {
+  return navigator.mediaDevices.getUserMedia({
+    audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: 2 },
+  });
 }
 
 /** @param {number} db */
