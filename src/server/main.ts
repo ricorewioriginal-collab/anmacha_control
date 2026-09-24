@@ -10,6 +10,8 @@ import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { AirDeckApp } from './app.ts';
+import { SecretStore } from './secrets.ts';
+import { SyncManager } from './sync.ts';
 import { createHttpServer } from './http.ts';
 
 declare global {
@@ -66,7 +68,14 @@ async function main(): Promise<void> {
     return;
   }
 
-  const app = new AirDeckApp(dataDir, { appRoot: root });
+  // Optionaler Datenbank-Sync (MySQL/Firebase) vor dem Laden des Zustands; Fehler → lokaler Betrieb
+  const secrets = new SecretStore(dataDir);
+  const sync = new SyncManager(dataDir, secrets, (event, data) => console.log(`[sync] ${event}`, data ?? ''));
+  const decision = await sync.startup();
+  if (sync.config.backend !== 'local') {
+    console.log(`Datenspeicher: ${sync.config.backend} – Abgleich: ${decision ?? 'nicht möglich'}${sync.status.lastError ? ` (${sync.status.lastError})` : ''}`);
+  }
+  const app = new AirDeckApp(dataDir, { appRoot: root, secrets, sync });
   console.log(app.ffmpeg ? `ffmpeg: ${app.ffmpeg.version}` : 'ffmpeg nicht gefunden – Server-Playout (24/7) deaktiviert');
 
   if (argv.includes('--new-admin-token')) {
@@ -94,7 +103,10 @@ async function main(): Promise<void> {
     console.log('AirDeck wird beendet …');
     app.shutdown();
     server.close();
-    setTimeout(() => process.exit(0), 1000).unref();
+    setTimeout(() => process.exit(0), 3000).unref();
+    // letzten Stand noch in die Datenbank schreiben (falls konfiguriert)
+    const final = sync.config.backend !== 'local' ? sync.pushNow(app.stateJson()).catch(() => {}) : Promise.resolve();
+    void final.then(() => sync.close()).finally(() => process.exit(0));
   };
   process.on('SIGINT', stop);
   process.on('SIGTERM', stop);

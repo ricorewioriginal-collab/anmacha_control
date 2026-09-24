@@ -29,6 +29,9 @@
 - [x] Notfall-Ordner fürs Playout
 - [x] Metadaten-/Benachrichtigungs-Engine: signierte Webhooks (HMAC), Telegram-Alarme, Now-Playing als Text- und JSON-Datei, Stille/OFF AIR/Encoder-/Stream-Fehler
 
+- [x] Datenspeicher/Sync: MySQL/MariaDB und Firebase (Firestore, Service-Account/RS256) – Auswahl im Installer und unter „Datenspeicher & Sync“, Local-First mit Konflikterkennung; getestet mit echter MariaDB und Firestore-Mock
+- [x] Benachrichtigungen-Dialog (Webhook, Telegram, Now-Playing-Datei)
+
 ## Nächste Schritte (Vorschlag, in dieser Reihenfolge)
 
 1. Windows-Installer (Startmenü-Verknüpfung) und signierte Release-APK (Keystore als GitHub-Secret)

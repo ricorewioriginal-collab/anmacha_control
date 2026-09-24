@@ -25,6 +25,16 @@ Intern startet AirDeck einen kleinen Dienst, den nur dieser PC erreicht (`127.0.
 
 Deinstallieren geht über *Einstellungen → Apps*. Deine Daten bleiben erhalten.
 
+### Datenspeicher (im Installer oder später unter „Datenspeicher & Sync“)
+- **Nur lokal** (Standard): keine Einrichtung, läuft offline.
+- **MySQL / MariaDB**: Server, Port, Benutzer, Passwort und Datenbank eintragen. Die Datenbank muss existieren, die Tabelle legt AirDeck selbst an.
+- **Firebase (Cloud Firestore)**: Service-Account-Schlüssel (JSON) auswählen.
+
+Synchronisiert werden Sender, Quellen, Ausgänge, Bibliothek (Metadaten), Playlists und Planung, damit mehrere Standorte denselben Stand haben.
+Musikdateien werden **nicht** übertragen; sie müssen auf jedem Standort vorhanden sein.
+Ist die Datenbank nicht erreichbar, startet AirDeck trotzdem lokal und zeigt den Fehler unter „Datenspeicher & Sync“.
+Ändern beide Seiten gleichzeitig, gewinnt der lokale Stand. Der andere Stand wird als `airdeck.remote-conflict-….json` gesichert.
+
 ### B) Ohne Installation (portable)
 1. `AirDeck-Windows-Portable.zip` entpacken, z. B. nach `D:\AirDeck`.
 2. `AirDeck.exe` doppelklicken. Das Studio öffnet sich.

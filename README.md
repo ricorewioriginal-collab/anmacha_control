@@ -19,7 +19,7 @@ Die Roadmap steht in [`AIRDECK_PROGRESS.md`](AIRDECK_PROGRESS.md).
 
 ## Schnellstart
 
-Voraussetzung: **Node.js ≥ 22.18**. Es gibt keinen Build-Schritt und keine Laufzeit-Abhängigkeiten.
+Voraussetzung: **Node.js ≥ 22.18**. Es gibt keinen Build-Schritt. Einzige Laufzeit-Abhängigkeit ist `mysql2`, und die wird nur beim MySQL-Sync geladen.
 
 ```bash
 npm install          # nur Dev-Tools (TypeScript-Prüfung)

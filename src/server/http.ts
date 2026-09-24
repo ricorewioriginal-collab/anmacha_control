@@ -261,6 +261,31 @@ export function createHttpServer(app: AirDeckApp, studioDir: string): Server {
   add('POST', '/api/v1/stations/:sid/rec-plans', 'automation:write', async (c) => app.saveRecPlan(sid(c), null, await c.body()));
   add('DELETE', '/api/v1/stations/:sid/rec-plans/:id', 'automation:write', (c) => app.deleteRecPlan(sid(c), c.params.id!));
 
+  // --- Datenspeicher / Sync (MySQL, Firebase) – nur globale Admins ---
+  const globalAdmin = (c: Ctx) => {
+    if (!c.p.stationIds.includes('*') || !c.p.roles.includes('admin')) throw new AppError(403, 'forbidden', 'Nur für Administratoren');
+  };
+  add('GET', '/api/v1/storage', null, (c) => (globalAdmin(c), app.sync.view()));
+  add('PUT', '/api/v1/storage', null, async (c) => {
+    globalAdmin(c);
+    try {
+      return await app.sync.configure((await c.body()) as never, true);
+    } catch (err) {
+      if (err instanceof AppError) throw err;
+      throw new AppError(400, 'storage_error', (err as Error).message);
+    }
+  });
+  add('POST', '/api/v1/storage/sync', null, async (c) => {
+    globalAdmin(c);
+    app.persistNow();
+    try {
+      await app.sync.pushNow(app.stateJson());
+    } catch (err) {
+      throw new AppError(502, 'sync_failed', (err as Error).message);
+    }
+    return app.sync.view();
+  });
+
   // --- Benachrichtigungen / Webhooks / Now-Playing-Export ---
   add('GET', '/api/v1/stations/:sid/integrations', 'stations:write', (c) => app.integrations(sid(c)));
   add('PUT', '/api/v1/stations/:sid/integrations', 'stations:write', async (c) => app.setIntegrations(c.p, sid(c), await c.body()));

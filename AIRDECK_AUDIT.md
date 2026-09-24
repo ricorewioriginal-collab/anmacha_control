@@ -22,7 +22,7 @@ Legende: **A** vollständig vorhanden · **B** teilweise · **C** nur UI/Mock ·
 | Browser-Automation im Studio | **F** | `studio/js/app.js`, `audio.js` | Doppelte Automations-Logik in der UI → auf „lokales Vorhören/Notbetrieb“ zurückstufen, AUTO startet den Kern | I |
 | Decks zeigen Kern-Zustand | **E/F** | `app.js` | Decks bleiben „LEER“, wenn der Kern sendet → Kern-Zustand spiegeln | I |
 | VU/Pegel im Serverbetrieb | **E** | `playout.ts`, `app.js` | Meter misst nur Browser-Audio → Kern-Pegel per SSE senden | I |
-| Persistenz | B | `store.ts` (JSON, atomar, entprellt) | Für eine Station ok; **kein MySQL/Firebird/SQLite** (D) | Persistenztest |
+| Persistenz | B | `store.ts` (JSON, atomar), `sync.ts` | Lokal JSON (maßgeblich) + **Sync mit MySQL/MariaDB oder Firebase** (Zustands-Dokument, Konflikterkennung). Firebird/SQLite und tabellenweise Speicherung fehlen | `sync.test.ts` (echte MariaDB, Firestore-Mock) |
 | Event-Bus / SSE | A | `app.ts` `publish`, `http.ts` `/events` | Push statt Polling; Systemwerte werden noch gepollt (G, gering) | teilw. |
 | Audit-Log (JSONL, Rotation) | A | `store.ts` | Keine Secrets im Log (getestet) | ✔ |
 
@@ -84,8 +84,8 @@ Legende: **A** vollständig vorhanden · **B** teilweise · **C** nur UI/Mock ·
 | Feature | Status | Bewertung |
 |---|---|---|
 | Now Playing an Icecast/SHOUTcast | A | |
-| Now-Playing-Export (Textdatei, JSON, Webhook) | D | |
-| Webhooks (signiert) | D | |
+| Now-Playing-Export (Textdatei, JSON, Webhook) | A | `notify.ts`; HTTP/Serial/RDS fehlen |
+| Webhooks (HMAC-signiert), Telegram-Alarme | A | E-Mail fehlt (per Webhook-Brücke möglich) |
 | laut.fm Radioadmin (Playlists, Titel, Sendeplan, Statistik, Benutzer, Station, Live) | B | UI + Proxy vorhanden, **ohne echten Token ungetestet** |
 | Developer API (REST, SSE, Scopes, Rate Limit, Tokens) | A | Doku nur als Tabelle in `docs/ARCHITECTURE.md` (API.md fehlt) |
 | Plugin-System | D | |

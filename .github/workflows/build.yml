@@ -12,6 +12,20 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: root-pw
+          MYSQL_DATABASE: airdeck_test
+          MYSQL_USER: airdeck
+          MYSQL_PASSWORD: airdeck-pw
+        ports: ['3306:3306']
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -proot-pw"
+          --health-interval=5s --health-timeout=5s --health-retries=20
+    env:
+      AIRDECK_TEST_MYSQL: 127.0.0.1:3306:airdeck:airdeck-pw:airdeck_test
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

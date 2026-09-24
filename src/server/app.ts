@@ -47,6 +47,8 @@ import {
 import { pickNext as pickFromPool } from '../core/automation.ts';
 import type { RelayTap } from './relay.ts';
 import { RADIOADMIN, type LautfmConfig } from './lautfm.ts';
+import { SyncManager } from './sync.ts';
+import { readFileSync } from 'node:fs';
 import { NOTIFY_EVENTS, Notifier, validateExportPath, validateWebhookUrl, type IntegrationsConfig, type NotifyEvent } from './notify.ts';
 
 export interface Station {
@@ -212,12 +214,14 @@ export class AirDeckApp {
   private tickTimer: NodeJS.Timeout | null = null;
   private levelTimer: NodeJS.Timeout | null = null;
 
-  constructor(dataDir: string, opts: { stableMs?: number; cooldownMs?: number; appRoot?: string; ffmpeg?: FfmpegInfo | null } = {}) {
+  readonly sync: SyncManager;
+
+  constructor(dataDir: string, opts: { stableMs?: number; cooldownMs?: number; appRoot?: string; ffmpeg?: FfmpegInfo | null; secrets?: SecretStore; sync?: SyncManager } = {}) {
     this.dataDir = dataDir;
     this.ffmpeg = opts.ffmpeg !== undefined ? opts.ffmpeg : detectFfmpeg(opts.appRoot ?? process.cwd());
     this.mediaDir = join(dataDir, 'media');
     mkdirSync(this.mediaDir, { recursive: true });
-    this.secrets = new SecretStore(dataDir);
+    this.secrets = opts.secrets ?? new SecretStore(dataDir);
     this.audit = new AuditLog(join(dataDir, 'audit.log'));
     this.tokensFile = join(dataDir, 'tokens.json');
     this.tokens = readJson<ApiToken[]>(this.tokensFile, []);
@@ -232,6 +236,8 @@ export class AirDeckApp {
     });
     this.engine.on((e) => this.onEngineEvent(e));
     this.persist = new DebouncedJson(file, () => this.snapshot());
+    this.sync = opts.sync ?? new SyncManager(dataDir, this.secrets, (event, data) => this.audit.write({ kind: 'sync', event, ...data }));
+    this.persist.onWrite = () => this.sync.schedulePush(() => readFileSync(file, 'utf8'));
 
     for (const st of state?.stations ?? []) this.mountStation(st, state?.data[st.id]);
     for (const o of state?.outputs ?? []) this.mountOutput(o);
@@ -1767,6 +1773,15 @@ export class AirDeckApp {
   private publishQueue(stationId: string): void {
     this.publish('queue.changed', stationId, this.queueView(stationId));
     this.changed();
+  }
+
+  /** Zustand sofort speichern (z. B. vor manuellem Sync). */
+  persistNow(): void {
+    this.persist.flush();
+  }
+
+  stateJson(): string {
+    return readFileSync(join(this.dataDir, 'airdeck.json'), 'utf8');
   }
 
   private changed(): void {

@@ -1003,6 +1003,8 @@ function bindStatic() {
     if (d?.media) d.el.currentTime = (d.media.cueInMs ?? 0) / 1000;
   });
   $('btn-menu').addEventListener('click', () => $('sidebar').classList.toggle('open'));
+  $('btn-storage').addEventListener('click', editStorage);
+  $('btn-notify').addEventListener('click', editNotify);
   buildQuick();
   bindLiveVoice();
   bindProcessing();
@@ -1177,6 +1179,66 @@ function showView(name) {
   $('sidebar').classList.remove('open');
   for (const id of ['studio', 'planning', 'recorder', 'lautfm']) $(`view-${id}`).hidden = id !== name;
   if (name !== 'studio') views[name]?.show();
+}
+
+// ---------- Datenspeicher & Sync ----------
+
+async function editStorage() {
+  const cur = await run(() => api.get('/storage'));
+  if (!cur) return;
+  const st = cur.status ?? {};
+  status(`Speicher: ${cur.backend}${st.lastPushAt ? ` · letzter Sync ${clockTime(st.lastPushAt)}` : ''}${st.lastError ? ` · Fehler: ${st.lastError}` : ''}${st.conflictFile ? ` · Konflikt gesichert: ${st.conflictFile}` : ''}`, !!st.lastError);
+  const v = await formDialog('Datenspeicher & Sync', [
+    { name: 'backend', label: 'Speicher', value: cur.backend, options: [['local', 'Nur lokal (Standard, offline)'], ['mysql', 'MySQL / MariaDB (mehrere Standorte)'], ['firebase', 'Firebase (Cloud Firestore)']], hint: cur.note },
+    { name: 'firstSync', label: 'Beim ersten Verbinden', value: cur.firstSync ?? 'pull', options: [['pull', 'Stand aus der Datenbank übernehmen (neuer Standort)'], ['push', 'Diesen PC als Quelle verwenden']] },
+    { name: 'host', label: 'MySQL: Host', value: cur.mysql?.host ?? '' },
+    { name: 'port', label: 'MySQL: Port', type: 'number', value: cur.mysql?.port ?? 3306 },
+    { name: 'user', label: 'MySQL: Benutzer', value: cur.mysql?.user ?? '' },
+    { name: 'password', label: `MySQL: Passwort${cur.mysql?.hasPassword ? ' (leer = unverändert)' : ''}`, type: 'password', value: '' },
+    { name: 'database', label: 'MySQL: Datenbank', value: cur.mysql?.database ?? 'airdeck' },
+    { name: 'ssl', label: 'MySQL: TLS/SSL', type: 'checkbox', value: !!cur.mysql?.ssl },
+    { name: 'projectId', label: 'Firebase: Projekt-ID', value: cur.firebase?.projectId ?? '' },
+    { name: 'credentialsJson', label: `Firebase: Service-Account-JSON${cur.firebase?.hasCredentials ? ' (leer = unverändert)' : ''}`, type: 'textarea', value: '', hint: 'Firebase-Konsole → Projekteinstellungen → Dienstkonten → Neuen privaten Schlüssel generieren' },
+  ], 'Verbindung testen & speichern');
+  if (!v) return;
+  const body = {
+    backend: v.backend, firstSync: v.firstSync,
+    mysql: { host: v.host, port: v.port, user: v.user, password: v.password || undefined, database: v.database, ssl: v.ssl },
+    firebase: { projectId: v.projectId, credentialsJson: v.credentialsJson || undefined },
+  };
+  const r = await run(() => api.put('/storage', body));
+  if (r) status(v.backend === 'local' ? 'Nur lokaler Speicher aktiv' : `Verbindung OK – ${v.backend} ist eingerichtet. Abgleich beim nächsten Start, sofort hochladen mit „Jetzt synchronisieren“.`);
+  if (r && v.backend !== 'local' && confirm('Aktuellen Stand jetzt in die Datenbank hochladen?')) await run(() => api.post('/storage/sync'));
+}
+
+// ---------- Benachrichtigungen ----------
+
+async function editNotify() {
+  const cur = await run(() => api.get(url('/integrations')));
+  if (!cur) return;
+  const w = cur.webhooks?.[0];
+  const labels = /** @type {Record<string,string>} */ ({ now_playing: 'Now Playing', on_air_changed: 'Quelle gewechselt', off_air: 'OFF AIR', source_failed: 'Quelle ausgefallen', silence: 'Stille', silence_recovered: 'Stille beendet', encoder_crashed: 'Encoder-Absturz', stream_error: 'Stream-Fehler', stream_connected: 'Stream verbunden', schedule_fired: 'Zeitplan ausgelöst' });
+  const v = await formDialog('Benachrichtigungen & Export', [
+    { name: 'url', label: 'Webhook-URL (JSON per POST, leer = aus)', value: w?.url ?? '' },
+    { name: 'secret', label: `Webhook-Secret für Signatur (X-AirDeck-Signature)${w?.hasSecret ? ' – leer = unverändert' : ''}`, type: 'password', value: '' },
+    ...cur.events.map((/** @type {string} */ e) => ({ name: `ev_${e}`, label: `Webhook: ${labels[e] ?? e}`, type: 'checkbox', value: w ? w.events.includes(e) : ['now_playing', 'off_air', 'silence', 'encoder_crashed', 'stream_error'].includes(e) })),
+    { name: 'tgChat', label: 'Telegram: Chat-ID (Alarme)', value: cur.telegram?.chatId ?? '' },
+    { name: 'tgToken', label: `Telegram: Bot-Token${cur.telegram?.hasToken ? ' (leer = unverändert)' : ''}`, type: 'password', value: '' },
+    { name: 'npFile', label: 'Now Playing als Datei (absoluter Pfad, z. B. C:\\Radio\\nowplaying.txt)', value: cur.nowPlayingFile ?? '' },
+  ]);
+  if (!v) return;
+  const events = cur.events.filter((/** @type {string} */ e) => v[`ev_${e}`]);
+  const body = {
+    webhooks: v.url ? [{ id: w?.id, url: v.url, events, secret: v.secret || undefined, enabled: true }] : [],
+    telegram: v.tgChat ? { chatId: v.tgChat, botToken: v.tgToken || undefined, enabled: true } : null,
+    nowPlayingFile: v.npFile || null,
+  };
+  const r = await run(() => api.put(url('/integrations'), body));
+  if (!r) return;
+  if (confirm('Gespeichert. Testmeldung jetzt senden?')) {
+    const t = await run(() => api.post(url('/integrations/test')));
+    if (t) status(`Test: Webhook ${t.webhooks.map((/** @type {any} */ x) => (x.ok ? 'OK' : 'Fehler')).join(', ') || '–'} · Telegram ${t.telegram === null ? '–' : t.telegram ? 'OK' : 'Fehler'}`);
+  }
 }
 
 async function editStation() {

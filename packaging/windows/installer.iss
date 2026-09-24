@@ -55,3 +55,108 @@ Filename: "{cmd}"; Parameters: "/c taskkill /IM AirDeck.exe /F"; Flags: runhidde
 
 [Messages]
 de.WelcomeLabel2=AirDeck wird auf diesem Computer installiert.%n%nAirDeck läuft komplett lokal – kein eigener Server nötig. Deine Daten (Musik, Einstellungen, verschlüsselte Passwörter) liegen unter %LOCALAPPDATA%\AirDeck und bleiben bei einer Deinstallation erhalten.
+
+[Code]
+{ Seite "Datenspeicher": Lokal (Standard) / MySQL-MariaDB / Firebase.
+  Die Angaben werden als einmalige Einrichtungsdatei abgelegt; AirDeck importiert sie beim ersten Start
+  verschlüsselt in den eigenen Secret-Store und löscht die Datei sofort. }
+
+var
+  StoragePage: TInputOptionWizardPage;
+  MysqlPage: TInputQueryWizardPage;
+  FirebasePage: TInputFileWizardPage;
+  FirstSyncPage: TInputOptionWizardPage;
+
+procedure InitializeWizard;
+begin
+  StoragePage := CreateInputOptionPage(wpSelectTasks,
+    'Datenspeicher', 'Wo sollen die Senderdaten gespeichert werden?',
+    'AirDeck läuft immer lokal und offline. Optional kann der Senderzustand (Sender, Quellen, Ausgänge, Bibliothek, Playlists, Planung) mit einer Datenbank synchronisiert werden – z. B. für mehrere Studios. Musikdateien bleiben lokal.',
+    True, False);
+  StoragePage.Add('Nur lokal (empfohlen, keine Einrichtung nötig)');
+  StoragePage.Add('MySQL / MariaDB (eigener Server, mehrere Standorte)');
+  StoragePage.Add('Firebase (Google Cloud Firestore)');
+  StoragePage.SelectedValueIndex := 0;
+
+  MysqlPage := CreateInputQueryPage(StoragePage.ID,
+    'MySQL / MariaDB', 'Zugangsdaten zur Datenbank',
+    'Die Datenbank muss bereits existieren; AirDeck legt seine Tabelle selbst an. Das Passwort wird beim ersten Start verschlüsselt gespeichert.');
+  MysqlPage.Add('Server (Host):', False);
+  MysqlPage.Add('Port:', False);
+  MysqlPage.Add('Benutzer:', False);
+  MysqlPage.Add('Passwort:', True);
+  MysqlPage.Add('Datenbank:', False);
+  MysqlPage.Values[0] := 'localhost';
+  MysqlPage.Values[1] := '3306';
+  MysqlPage.Values[4] := 'airdeck';
+
+  FirebasePage := CreateInputFilePage(MysqlPage.ID,
+    'Firebase', 'Service-Account-Schlüssel auswählen',
+    'Firebase-Konsole → Projekteinstellungen → Dienstkonten → „Neuen privaten Schlüssel generieren“. Die Projekt-ID wird aus der Datei gelesen.');
+  FirebasePage.Add('Service-Account-JSON:', 'JSON-Dateien|*.json|Alle Dateien|*.*', '.json');
+
+  FirstSyncPage := CreateInputOptionPage(FirebasePage.ID,
+    'Erster Abgleich', 'Welcher Stand gilt beim ersten Verbinden?', '', True, False);
+  FirstSyncPage.Add('Stand aus der Datenbank übernehmen (weiterer Standort / Neuinstallation)');
+  FirstSyncPage.Add('Diesen PC als Quelle verwenden (erster Standort)');
+  FirstSyncPage.SelectedValueIndex := 0;
+end;
+
+function ShouldSkipPage(PageID: Integer): Boolean;
+begin
+  Result := False;
+  if PageID = MysqlPage.ID then Result := StoragePage.SelectedValueIndex <> 1;
+  if PageID = FirebasePage.ID then Result := StoragePage.SelectedValueIndex <> 2;
+  if PageID = FirstSyncPage.ID then Result := StoragePage.SelectedValueIndex = 0;
+end;
+
+function NextButtonClick(CurPageID: Integer): Boolean;
+begin
+  Result := True;
+  if (CurPageID = MysqlPage.ID) and ((Trim(MysqlPage.Values[0]) = '') or (Trim(MysqlPage.Values[2]) = '') or (Trim(MysqlPage.Values[4]) = '')) then
+  begin
+    MsgBox('Bitte Server, Benutzer und Datenbank angeben.', mbError, MB_OK);
+    Result := False;
+  end;
+  if (CurPageID = FirebasePage.ID) and not FileExists(FirebasePage.Values[0]) then
+  begin
+    MsgBox('Bitte die Service-Account-JSON-Datei auswählen.', mbError, MB_OK);
+    Result := False;
+  end;
+end;
+
+function JsonEscape(const S: String): String;
+var
+  I: Integer;
+  C: Char;
+begin
+  Result := '';
+  for I := 1 to Length(S) do
+  begin
+    C := S[I];
+    if C = '\' then Result := Result + '\\'
+    else if C = '"' then Result := Result + '\"'
+    else if Ord(C) < 32 then Result := Result + ' '
+    else Result := Result + C;
+  end;
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+var
+  DataDir, Json, FirstSync: String;
+  Lines: TArrayOfString;
+begin
+  if (CurStep <> ssPostInstall) or (StoragePage.SelectedValueIndex = 0) then Exit;
+  DataDir := ExpandConstant('{localappdata}\AirDeck\data');
+  ForceDirectories(DataDir);
+  if FirstSyncPage.SelectedValueIndex = 1 then FirstSync := 'push' else FirstSync := 'pull';
+  if StoragePage.SelectedValueIndex = 1 then
+    Json := '{"backend":"mysql","firstSync":"' + FirstSync + '","mysql":{"host":"' + JsonEscape(Trim(MysqlPage.Values[0])) +
+      '","port":"' + JsonEscape(Trim(MysqlPage.Values[1])) + '","user":"' + JsonEscape(Trim(MysqlPage.Values[2])) +
+      '","password":"' + JsonEscape(MysqlPage.Values[3]) + '","database":"' + JsonEscape(Trim(MysqlPage.Values[4])) + '"}}'
+  else
+    Json := '{"backend":"firebase","firstSync":"' + FirstSync + '","firebase":{"credentialsFile":"' + JsonEscape(FirebasePage.Values[0]) + '"}}';
+  SetArrayLength(Lines, 1);
+  Lines[0] := Json;
+  SaveStringsToUTF8File(DataDir + '\storage-setup.json', Lines, False);
+end;

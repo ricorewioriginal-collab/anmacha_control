@@ -28,6 +28,8 @@ export class DebouncedJson<T> {
   private readonly file: string;
   private readonly get: () => T;
   private readonly delayMs: number;
+  /** Wird nach jedem erfolgreichen Schreiben aufgerufen (z. B. Sync) */
+  onWrite: (() => void) | null = null;
 
   constructor(file: string, get: () => T, delayMs = 300) {
     this.file = file;
@@ -45,6 +47,7 @@ export class DebouncedJson<T> {
     if (this.timer) clearTimeout(this.timer);
     this.timer = null;
     writeFileAtomic(this.file, JSON.stringify(this.get(), null, 1));
+    this.onWrite?.();
   }
 }
 
