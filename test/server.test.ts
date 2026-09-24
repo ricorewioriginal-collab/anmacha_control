@@ -217,7 +217,7 @@ test('Mehrere Sender: anlegen, Logo setzen (öffentlich), löschen', async () =>
   assert.equal((await put('image/png', Buffer.from('keinbild-keinbild'))).status, 415, 'Signatur geprüft');
   const ok = await put('image/png', png);
   assert.equal(ok.status, 200);
-  assert.match((await ok.json()).logo, /^png:/);
+  assert.match(((await ok.json()) as { logo: string }).logo, /^png:/);
   const img = await fetch(`${base}/api/v1/stations/zweit/logo`);
   assert.equal(img.status, 200);
   assert.equal(img.headers.get('content-type'), 'image/png');
