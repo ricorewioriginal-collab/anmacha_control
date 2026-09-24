@@ -45,6 +45,8 @@ export interface MediaItem {
   year?: number;
   /** Von der KI erzeugt (Moderation/Nachrichten) – wird automatisch aufgeräumt */
   generatedBy?: 'ai';
+  /** Herkunft, z. B. "nextcloud:/Radio/Hits/x.mp3" (verhindert doppelte Übernahme) */
+  source?: string;
 }
 
 export interface QueueEntry {

@@ -324,6 +324,16 @@ export function createHttpServer(app: AirDeckApp, studioDir: string): Server {
     return STREAMED;
   });
 
+  // --- Nextcloud-Brücke ---
+  add('GET', '/api/v1/nextcloud', null, (c) => (globalAdmin(c), app.nextcloudConfig()));
+  add('PUT', '/api/v1/nextcloud', null, async (c) => (globalAdmin(c), app.setNextcloud(await c.body())));
+  add('GET', '/api/v1/nextcloud/list', 'media:read', (c) => app.nextcloudList(c.url.searchParams.get('path') ?? '/'));
+  add('POST', '/api/v1/stations/:sid/nextcloud/import', 'media:write', async (c) => {
+    const b = await c.body();
+    return app.nextcloudImport(sid(c), Array.isArray(b.paths) ? b.paths.map(String) : [], { category: str(b.category), folder: str(b.folder) });
+  });
+  add('POST', '/api/v1/stations/:sid/recordings/:id/nextcloud', 'media:write', async (c) => app.nextcloudUploadRecording(sid(c), c.params.id!, String((await c.body()).dir ?? '')));
+
   // --- Android-App / Netzwerk ---
   add('GET', '/api/v1/app/connect', null, (c) => (globalAdmin(c), app.appConnect()));
   add('PUT', '/api/v1/app/network', null, async (c) => (globalAdmin(c), app.setNetwork((await c.body()).lan === true)));

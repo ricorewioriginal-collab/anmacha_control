@@ -6,7 +6,7 @@ import { cpus, freemem, networkInterfaces, totalmem, uptime as osUptime } from '
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { createWriteStream, mkdirSync, rmSync, type WriteStream } from 'node:fs';
-import { join } from 'node:path';
+import { extname, join } from 'node:path';
 import {
   SourcePriorityEngine,
   PriorityError,
@@ -31,7 +31,10 @@ import {
   type RotationRules,
   DECK_IDS,
   MEDIA_CATEGORIES,
+  parseFileName,
 } from '../core/automation.ts';
+
+const AUDIO_FILE_RE = /\.(mp3|ogg|opus|wav|flac|m4a|aac|webm)$/i;
 import { AuditLog, DebouncedJson, readJson, writeFileAtomic } from './store.ts';
 import { SecretStore } from './secrets.ts';
 import { IcecastOutput, type BroadcastOutput, type OutputConfig, type OutputState } from './icecast.ts';
@@ -52,6 +55,7 @@ import { DEFAULT_SOURCE, Updater, type UpdateSource } from './update.ts';
 import { AiService } from './ai/service.ts';
 import { AiDirector, DEFAULT_AI, type AiStationConfig, type AiSource } from './ai/director.ts';
 import { AiError } from './ai/providers.ts';
+import { Nextcloud, NextcloudError, cleanPath, type NextcloudConfig } from './nextcloud.ts';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { NOTIFY_EVENTS, Notifier, validateExportPath, validateWebhookUrl, type IntegrationsConfig, type NotifyEvent } from './notify.ts';
 
@@ -1800,6 +1804,119 @@ export class AirDeckApp {
     this.updater.runWindowsSetup(file, this.headless);
     setTimeout(exit, 1500).unref();
     return { installing: true, to: info.latest };
+  }
+
+  // ---------- Nextcloud-Brücke ----------
+
+  nextcloudConfig(): (NextcloudConfig & { hasPassword: boolean }) | { configured: false } {
+    const c = readJson<NextcloudConfig | null>(join(this.dataDir, 'nextcloud.json'), null);
+    return c ? { ...c, hasPassword: this.secrets.has('nextcloud:password') } : { configured: false };
+  }
+
+  setNextcloud(input: Record<string, unknown>): unknown {
+    if (input.remove === true) {
+      rmSync(join(this.dataDir, 'nextcloud.json'), { force: true });
+      this.secrets.delete('nextcloud:password');
+      return { configured: false };
+    }
+    const url = String(input.url ?? '').trim().replace(/\/+$/, '');
+    if (!/^https?:\/\/[^\s/]+/.test(url)) throw new AppError(400, 'invalid_url', 'Nextcloud-Adresse mit https:// angeben');
+    const user = String(input.user ?? '').trim();
+    if (!user) throw new AppError(400, 'invalid_user', 'Benutzername fehlt');
+    let root: string;
+    try {
+      root = cleanPath(String(input.root ?? '/'));
+    } catch {
+      throw new AppError(400, 'invalid_path', 'Ungültiger Startordner');
+    }
+    if (typeof input.password === 'string' && input.password) this.secrets.set('nextcloud:password', input.password.trim());
+    if (!this.secrets.has('nextcloud:password')) throw new AppError(400, 'no_password', 'App-Passwort fehlt (Nextcloud → Einstellungen → Sicherheit → App-Passwort)');
+    writeFileAtomic(join(this.dataDir, 'nextcloud.json'), JSON.stringify({ url, user, root }));
+    this.audit.write({ kind: 'nextcloud', event: 'config', url, user });
+    return this.nextcloudConfig();
+  }
+
+  private nc(): { client: Nextcloud; root: string } {
+    const c = readJson<NextcloudConfig | null>(join(this.dataDir, 'nextcloud.json'), null);
+    const pw = this.secrets.get('nextcloud:password');
+    if (!c || !pw) throw new AppError(409, 'not_configured', 'Nextcloud ist noch nicht eingerichtet');
+    return { client: new Nextcloud(c, pw), root: c.root };
+  }
+
+  private ncCall<T>(fn: () => Promise<T>): Promise<T> {
+    return fn().catch((err) => {
+      if (err instanceof NextcloudError) throw new AppError(err.status === 401 ? 502 : err.status, 'nextcloud', err.message);
+      throw err;
+    });
+  }
+
+  /** Ordner in der Nextcloud (relativ zum Startordner). */
+  async nextcloudList(path: string): Promise<unknown> {
+    const { client, root } = this.nc();
+    const rel = cleanPath(path);
+    const entries = await this.ncCall(() => client.list(cleanPath(`${root}/${rel}`)));
+    return {
+      path: rel,
+      entries: entries.map((e) => ({ ...e, path: cleanPath(e.path.slice(root === '/' ? 0 : root.length)), audio: !e.dir && AUDIO_FILE_RE.test(e.name) })),
+    };
+  }
+
+  /** Dateien/Ordner (rekursiv, max. 500 Dateien) in die Bibliothek übernehmen. */
+  async nextcloudImport(stationId: string, paths: string[], opts: { category?: string; folder?: string }): Promise<{ imported: number; skipped: number; errors: string[] }> {
+    const { client, root } = this.nc();
+    const rt = this.rt(stationId);
+    const category = (MEDIA_CATEGORIES as readonly string[]).includes(String(opts.category)) ? (opts.category as MediaItem['category']) : 'music';
+    const files: { path: string; name: string; folder: string }[] = [];
+    const walk = async (rel: string, folder: string, depth: number): Promise<void> => {
+      const list = await this.ncCall(() => client.list(cleanPath(`${root}/${rel}`)));
+      for (const e of list) {
+        if (files.length >= 500) return;
+        const r = cleanPath(`${rel}/${e.name}`);
+        if (e.dir && depth < 4) await walk(r, folder ? `${folder} / ${e.name}` : e.name, depth + 1);
+        else if (!e.dir && AUDIO_FILE_RE.test(e.name)) files.push({ path: r, name: e.name, folder });
+      }
+    };
+    for (const p of paths.slice(0, 200)) {
+      const rel = cleanPath(p);
+      const name = rel.split('/').pop() ?? '';
+      if (AUDIO_FILE_RE.test(name)) files.push({ path: rel, name, folder: opts.folder ?? '' });
+      else await walk(rel, opts.folder || name, 0);
+    }
+    const errors: string[] = [];
+    let imported = 0;
+    let skipped = 0;
+    for (const f of files) {
+      // bereits übernommene Datei (gleicher Nextcloud-Pfad) nicht doppelt laden
+      if (rt.data.library.some((m) => m.source === `nextcloud:${f.path}`)) {
+        skipped++;
+        continue;
+      }
+      const id = newId('m');
+      const ext = extname(f.name).toLowerCase();
+      const file = `${id}${ext}`;
+      try {
+        await this.ncCall(() => client.download(cleanPath(`${root}/${f.path}`), join(this.mediaDir, stationId, file), 500 * 1024 * 1024));
+        const meta = parseFileName(f.name);
+        this.addMedia(stationId, { id, title: meta.title || f.name, artist: meta.artist, category, file, durationMs: null, addedAt: Date.now(), folder: f.folder.slice(0, 80) || undefined, originalName: f.name, source: `nextcloud:${f.path}` });
+        imported++;
+      } catch (err) {
+        errors.push(`${f.name}: ${(err as Error).message}`);
+      }
+    }
+    this.audit.write({ kind: 'nextcloud', event: 'import', stationId, imported, skipped, errors: errors.length });
+    return { imported, skipped, errors: errors.slice(0, 20) };
+  }
+
+  /** Mitschnitt in die Nextcloud hochladen. */
+  async nextcloudUploadRecording(stationId: string, recId: string, targetDir: string): Promise<unknown> {
+    const { client, root } = this.nc();
+    const { path, rec } = this.recordingFile(stationId, recId);
+    const ext = rec.contentType.includes('ogg') ? 'ogg' : rec.contentType.includes('aac') ? 'aac' : rec.contentType.includes('webm') ? 'webm' : 'mp3';
+    const name = `${new Date(rec.startedAt).toISOString().slice(0, 16).replace(/[:T]/g, '-')} ${rec.label}`.replace(/[\\/:*?"<>|]+/g, '_').slice(0, 120);
+    const target = cleanPath(`${root}/${targetDir || 'AirDeck-Mitschnitte'}/${name}.${ext}`);
+    await this.ncCall(() => client.upload(path, target, rec.contentType));
+    this.audit.write({ kind: 'nextcloud', event: 'upload', stationId, recId });
+    return { uploaded: target };
   }
 
   // ---------- Android-App / Netzwerk ----------

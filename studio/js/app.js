@@ -8,6 +8,7 @@ import { $, CATEGORY_STYLE, clockTime, download, fmt, formDialog, h, hydrateIcon
 import { mountPlanning, mountRecorder } from './planning.js';
 import { mountLautfm } from './lautfm.js';
 import { mountAi } from './ai.js';
+import { mountNextcloud } from './nextcloud.js';
 import { mountUpdates } from './updates.js';
 import { JUMP_TO_WIN, mountLayout } from './layout.js';
 
@@ -150,6 +151,7 @@ async function loadStation() {
     recorder: mountRecorder($('view-recorder'), ctx),
     lautfm: mountLautfm($('view-lautfm'), ctx),
     ai: mountAi($('view-ai'), ctx),
+    nextcloud: mountNextcloud($('view-nextcloud'), ctx),
   };
   if (currentView !== 'studio') views[currentView]?.show();
 }
@@ -1134,7 +1136,7 @@ function bindStatic() {
   // Tastatur: Alt+1…4 wechselt die Bereiche
   addEventListener('keydown', (e) => {
     if (!e.altKey || e.ctrlKey || e.metaKey) return;
-    const v = ({ 1: 'studio', 2: 'planning', 3: 'recorder', 4: 'lautfm', 5: 'ai' })[/** @type {1|2|3|4|5} */ (Number(e.key))];
+    const v = ({ 1: 'studio', 2: 'planning', 3: 'recorder', 4: 'lautfm', 5: 'ai', 6: 'nextcloud' })[/** @type {1|2|3|4|5|6} */ (Number(e.key))];
     if (v) {
       e.preventDefault();
       showView(v);
@@ -1320,7 +1322,7 @@ function showView(name) {
   currentView = name;
   for (const b of document.querySelectorAll('#view-tabs button, #bottom-nav button')) b.setAttribute('aria-pressed', String(/** @type {HTMLElement} */ (b).dataset.view === name));
   $('sidebar').classList.remove('open');
-  for (const id of ['studio', 'planning', 'recorder', 'lautfm', 'ai']) $(`view-${id}`).hidden = id !== name;
+  for (const id of ['studio', 'planning', 'recorder', 'lautfm', 'ai', 'nextcloud']) $(`view-${id}`).hidden = id !== name;
   if (name !== 'studio') views[name]?.show();
 }
 

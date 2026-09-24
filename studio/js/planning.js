@@ -254,6 +254,11 @@ export function mountRecorder(root, ctx) {
         h('td', {}, r.label), h('td', { class: 'num' }, r.endedAt ? fmt(r.endedAt - r.startedAt) : 'läuft'),
         h('td', { class: 'num' }, `${(r.bytes / 1048576).toFixed(1)} MB`),
         act(iconBtn('Anhören', '▶', () => listen(r)), iconBtn('Herunterladen', '⭳', () => save(r)),
+          r.endedAt ? iconBtn('In die Nextcloud hochladen', '☁', () => run(async () => {
+            status('Lade Mitschnitt in die Nextcloud …');
+            const u = await ctx.api.post(ctx.url(`/recordings/${r.id}/nextcloud`), { dir: 'AirDeck-Mitschnitte' });
+            status(`In der Nextcloud: ${u.uploaded}`);
+          })) : null,
           iconBtn('Löschen', '✕', () => confirm(`„${r.label}“ löschen?`) && run(async () => { await ctx.api.del(ctx.url(`/recordings/${r.id}`)); await load(); }))))),
       'Noch keine Aufnahmen.'));
     const plans = panel('Automatische Aufnahmen', [h('button', { class: 'btn small primary', onclick: addPlan }, '＋ Zeitfenster')],

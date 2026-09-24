@@ -67,6 +67,7 @@ footer { text-align: center; color: var(--muted); font-size: 13px; padding: 24px
   <a href="#cardwall">Cardwall &amp; Schnelltrigger</a>
   <a href="#live">Live senden &amp; Quellen</a>
   <a href="#audio">Audio &amp; Geräte</a>
+  <a href="#nextcloud">Nextcloud-Medien</a>
   <div class="grp">Sendebetrieb</div>
   <a href="#automation">Server-Automation 24/7</a>
   <a href="#planung">Sendeplan &amp; Events</a>
@@ -196,6 +197,16 @@ footer { text-align: center; color: var(--muted); font-size: 13px; padding: 24px
   <div class="warn">Gerätenamen erscheinen erst, wenn du einmal den Mikrofonzugriff erlaubst.</div>
 </section>
 
+<section id="nextcloud">
+  <h2>Nextcloud-Medien</h2>
+  <ol>
+    <li>In der Nextcloud unter Einstellungen → Sicherheit ein <b>App-Passwort</b> erstellen.</li>
+    <li>AirDeck → <b>Nextcloud-Medien</b> → Verbinden: Adresse, Benutzer und App-Passwort eintragen, optional einen Startordner wie <code>/Radio</code>. Nur dieser Ordner ist sichtbar.</li>
+    <li>Ordner antippen zum Öffnen. Dateien oder ganze Ordner anhaken, Kategorie wählen und „In die Bibliothek übernehmen“. Unterordner (bis 4 Ebenen, max. 500 Dateien) werden als Bibliotheks-Ordner übernommen.</li>
+  </ol>
+  <p>Bereits übernommene Dateien werden nicht doppelt geladen. Im <b>Recorder</b> lädt ☁ einen Mitschnitt in den Ordner <code>AirDeck-Mitschnitte</code> der Nextcloud. Das App-Passwort liegt verschlüsselt auf dem AirDeck.</p>
+</section>
+
 <section id="automation">
   <h2>Server-Automation 24/7</h2>
   <ul>
@@ -310,7 +321,7 @@ footer { text-align: center; color: var(--muted); font-size: 13px; padding: 24px
   <h2>Tastenkürzel</h2>
   <table>
     <tr><td><kbd>F1</kbd>–<kbd>F4</kbd></td><td>Deck A–D Play/Pause</td></tr>
-    <tr><td><kbd>Alt</kbd>+<kbd>1</kbd>…<kbd>5</kbd></td><td>Dashboard, Sendeplan, Recorder, laut.fm, KI</td></tr>
+    <tr><td><kbd>Alt</kbd>+<kbd>1</kbd>…<kbd>6</kbd></td><td>Dashboard, Sendeplan, Recorder, laut.fm, KI, Nextcloud</td></tr>
     <tr><td><kbd>Enter</kbd>/<kbd>Leertaste</kbd> auf einem Cart</td><td>Cart abfeuern</td></tr>
     <tr><td>Doppelklick in der Bibliothek</td><td>Titel in die Queue</td></tr>
   </table>
