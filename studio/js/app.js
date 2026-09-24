@@ -10,6 +10,7 @@ import { mountLautfm } from './lautfm.js';
 import { mountAi } from './ai.js';
 import { mountNextcloud } from './nextcloud.js';
 import { mountBridges } from './bridges.js';
+import { mountUsers } from './users.js';
 import { mountUpdates } from './updates.js';
 import { JUMP_TO_WIN, mountLayout } from './layout.js';
 
@@ -60,6 +61,7 @@ const S = {
   /** @type {{ rmsDb: number, peakDb: number }|null} */ srvLevel: null,
   /** @type {{ rec: MediaRecorder, stream: MediaStream, sourceId: string }|null} */ mic: null,
   /** @type {HTMLAudioElement|null} */ listen: null,
+  /** @type {any} */ me: null,
   /** @type {ReturnType<typeof setTimeout>|undefined} */ listenRetry: undefined,
 };
 const serverMode = () => !!S.playout?.status?.running;
@@ -82,7 +84,7 @@ async function boot() {
   if (!token || (isNativeApp() && !serverBase())) return askToken();
   api = new Api(token);
   try {
-    await api.get('/me');
+    S.me = await api.get('/me');
   } catch (e) {
     if (e instanceof ApiError && e.status === 401) return askToken('Token ungültig.');
     status('Server nicht erreichbar – neuer Versuch in 3 s', true);
@@ -92,6 +94,7 @@ async function boot() {
     setTimeout(boot, 3000);
     return;
   }
+  if (S.me?.user?.mustChangePassword) return forcePasswordChange();
   S.stations = await api.get('/stations');
   const saved = localStorage.getItem('airdeck.station');
   S.station = S.stations.find((s) => s.id === saved) ?? S.stations[0];
@@ -107,22 +110,63 @@ async function boot() {
 }
 
 /** @param {string} [msg] */
+/** Anmeldung: Benutzer + Passwort (Eigenbetrieb) oder Verbindungslink/API-Token (App, Integrationen). @param {string} [msg] */
 async function askToken(msg) {
   const needServer = isNativeApp() || !!serverBase();
-  const v = await formDialog('Mit AirDeck verbinden', [
-    ...(needServer ? [{ name: 'server', label: 'Server-Adresse', value: serverBase() || 'http://192.168.', hint: 'z. B. http://192.168.1.20:8750 – entfällt, wenn du unten einen Verbindungslink einfügst' }] : []),
-    { name: 'token', label: 'Verbindungslink oder API-Token', type: 'password', required: true, hint: msg ?? 'Am einfachsten: im AirDeck am PC „Android-App → Zugang erstellen“ und den Link hier einfügen.' },
-  ], 'Verbinden');
-  if (!v?.token) return;
+  const v = await formDialog('Bei AirDeck anmelden', [
+    ...(needServer ? [{ name: 'server', label: 'Server-Adresse', value: serverBase() || 'http://192.168.', hint: 'z. B. http://192.168.1.20:8750 – entfällt beim Verbindungslink' }] : []),
+    { name: 'username', label: 'Benutzername', value: '', hint: msg ?? '' },
+    { name: 'password', label: 'Passwort', type: 'password', value: '' },
+    { name: 'token', label: 'oder Verbindungslink / API-Token', type: 'password', value: '', hint: 'Aus „Android-App → Zugang erstellen“ oder ein API-Token' },
+  ], 'Anmelden');
+  if (!v) return;
+  const raw = String(v.token ?? '').trim();
   // Verbindungslink aus dem Studio („http://…:8750/#token=…“) direkt einfügen
-  const link = /^(https?:\/\/[^#\s]+?)\/?#token=([^&\s]+)/.exec(v.token.trim());
+  const link = /^(https?:\/\/[^#\s]+?)\/?#token=([^&\s]+)/.exec(raw);
   if (link) {
     saveServer(link[1]);
     saveToken(decodeURIComponent(link[2]));
     return location.reload();
   }
   if (needServer) saveServer(v.server);
-  saveToken(v.token.trim());
+  if (raw) {
+    saveToken(raw);
+    return location.reload();
+  }
+  if (!v.username || !v.password) return askToken('Benutzername und Passwort eingeben');
+  try {
+    const r = await fetch(`${serverBase()}/api/v1/auth/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: v.username, password: v.password }) });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) return askToken(d.message ?? 'Anmeldung fehlgeschlagen');
+    saveToken(d.token);
+    location.reload();
+  } catch {
+    askToken('Server nicht erreichbar – Adresse prüfen');
+  }
+}
+
+/** Erstanmeldung/zurückgesetztes Passwort: eigenes Passwort festlegen. @param {string} [msg] */
+async function forcePasswordChange(msg) {
+  const v = await formDialog('Eigenes Passwort festlegen', [
+    { name: 'info', label: 'Sicherheit', type: 'info', value: msg ?? 'Bitte ersetze das Einmal-Passwort durch ein eigenes (mindestens 10 Zeichen, Buchstaben und Ziffer oder Sonderzeichen).' },
+    { name: 'current', label: 'Aktuelles Passwort', type: 'password', value: '', required: true },
+    { name: 'next', label: 'Neues Passwort', type: 'password', value: '', required: true },
+    { name: 'repeat', label: 'Neues Passwort wiederholen', type: 'password', value: '', required: true },
+  ], 'Passwort speichern');
+  if (!v) return logout();
+  if (v.next !== v.repeat) return forcePasswordChange('Die neuen Passwörter stimmen nicht überein.');
+  try {
+    const r = await api.post('/auth/password', { current: v.current, next: v.next });
+    saveToken(r.token);
+    location.reload();
+  } catch (e) {
+    forcePasswordChange(e instanceof Error ? e.message : String(e));
+  }
+}
+
+async function logout() {
+  try { await api.post('/auth/logout'); } catch {}
+  saveToken(null);
   location.reload();
 }
 
@@ -154,6 +198,7 @@ async function loadStation() {
     ai: mountAi($('view-ai'), ctx),
     nextcloud: mountNextcloud($('view-nextcloud'), ctx),
     bridges: mountBridges($('view-bridges'), ctx),
+    users: mountUsers($('view-users'), { api, stations: () => S.stations, me: () => S.me }),
   };
   if (currentView !== 'studio') views[currentView]?.show();
 }
@@ -1219,6 +1264,13 @@ function bindStatic() {
   $('btn-listen').addEventListener('click', () => toggleListen());
   $('btn-audio').addEventListener('click', editAudio);
   $('btn-android').addEventListener('click', androidApp);
+  // Benutzer: Abmelden/Passwort nur mit Sitzung, Benutzerverwaltung nur für Administratoren
+  const isAdmin = S.me?.roles?.includes('admin') && S.me?.stationIds?.includes('*');
+  $('nav-users').hidden = !isAdmin;
+  $('btn-logout').hidden = !S.me?.user;
+  $('btn-password').hidden = !S.me?.user;
+  $('btn-logout').addEventListener('click', () => confirm('Abmelden?') && logout());
+  $('btn-password').addEventListener('click', () => forcePasswordChange('Neues Passwort festlegen. Alle anderen Sitzungen werden beendet.'));
   // Beenden nur anbieten, wenn das Studio auf demselben PC läuft (Windows-Programm im Hintergrund)
   if (!isNativeApp() && ['127.0.0.1', 'localhost', '[::1]'].includes(location.hostname)) {
     $('btn-quit').hidden = false;
@@ -1356,7 +1408,7 @@ function showView(name) {
   currentView = name;
   for (const b of document.querySelectorAll('#view-tabs button, #bottom-nav button')) b.setAttribute('aria-pressed', String(/** @type {HTMLElement} */ (b).dataset.view === name));
   $('sidebar').classList.remove('open');
-  for (const id of ['studio', 'planning', 'recorder', 'lautfm', 'ai', 'nextcloud', 'bridges']) $(`view-${id}`).hidden = id !== name;
+  for (const id of ['studio', 'planning', 'recorder', 'lautfm', 'ai', 'nextcloud', 'bridges', 'users']) $(`view-${id}`).hidden = id !== name;
   if (name !== 'studio') views[name]?.show();
 }
 

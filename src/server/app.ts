@@ -57,6 +57,7 @@ import { AiDirector, DEFAULT_AI, type AiStationConfig, type AiSource } from './a
 import { AiError } from './ai/providers.ts';
 import { Nextcloud, NextcloudError, cleanPath, type NextcloudConfig } from './nextcloud.ts';
 import { liquidsoapScript } from './liquidsoap.ts';
+import { UserStore } from './users.ts';
 import { lautfmStatus, listenUrlOf, type StreamStatus } from './status.ts';
 import { PullRelay, fetchAzuracast, fetchIcecastMount, type ExternalNow } from './bridge.ts';
 
@@ -183,6 +184,8 @@ export interface ApiToken {
 export interface Principal extends Actor {
   scopes: string[];
   tokenId: string;
+  /** Angemeldeter Benutzer (Sitzung), sonst API-Token */
+  user?: { id: string; username: string; name: string; mustChangePassword?: boolean };
 }
 
 export interface NowPlaying {
@@ -255,6 +258,7 @@ export class AirDeckApp {
   readonly sync: SyncManager;
 
   readonly updater: Updater;
+  readonly users: UserStore;
   readonly ai: AiService;
   readonly director: AiDirector;
   readonly packaged: boolean;
@@ -276,6 +280,7 @@ export class AirDeckApp {
     this.appRoot = opts.appRoot ?? process.cwd();
     this.headless = opts.headless ?? false;
     this.audit = new AuditLog(join(dataDir, 'audit.log'));
+    this.users = new UserStore(dataDir);
     this.ai = new AiService(dataDir, {
       get: (ref) => this.secrets.get(ref),
       set: (ref, v) => (v === null ? this.secrets.delete(ref) : this.secrets.set(ref, v)),
@@ -348,6 +353,7 @@ export class AirDeckApp {
 
   shutdown(): void {
     this.ai.flush();
+    this.users.flush();
     for (const r of this.pulls.values()) r.stop();
     this.pulls.clear();
     if (this.tickTimer) clearInterval(this.tickTimer);
@@ -410,8 +416,13 @@ export class AirDeckApp {
     if (!token) return null;
     const h = hashToken(token);
     const t = this.tokens.find((x) => x.hash === h);
-    if (!t) return null;
-    return { id: t.id, tokenId: t.id, roles: t.roles, stationIds: t.stationIds, scopes: t.scopes };
+    if (t) return { id: t.id, tokenId: t.id, roles: t.roles, stationIds: t.stationIds, scopes: t.scopes };
+    const u = this.users.session(token);
+    if (!u) return null;
+    return {
+      id: u.id, tokenId: `session:${u.id}`, roles: u.roles, stationIds: u.stationIds, scopes: UserStore.scopesFor(u.roles),
+      user: { id: u.id, username: u.username, name: u.name, ...(u.mustChangePassword ? { mustChangePassword: true } : {}) },
+    };
   }
 
   static hasScope(p: Principal, scope: string): boolean {

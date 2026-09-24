@@ -36,11 +36,14 @@
       <button data-view="ai" aria-pressed="false"><i data-icon="bolt"></i><span>KI-Automation</span><kbd>5</kbd></button>
       <div class="nav-group">Einstellungen</div>
       <button id="btn-station"><i data-icon="settings"></i><span>Sender &amp; Branding</span></button>
+      <button data-view="users" aria-pressed="false" id="nav-users" hidden><i data-icon="user"></i><span>Benutzer &amp; Rollen</span></button>
       <button id="btn-audio"><i data-icon="headphones"></i><span>Audio &amp; Geräte</span></button>
       <button id="btn-storage"><i data-icon="cloud"></i><span>Datenspeicher &amp; Sync</span></button>
       <button id="btn-notify"><i data-icon="bell"></i><span>Benachrichtigungen</span></button>
       <button id="btn-android"><i data-icon="signal"></i><span>Android-App</span></button>
       <a class="nav-link" href="handbuch.html" target="_blank" rel="noopener"><i data-icon="list"></i><span>Handbuch</span></a>
+      <button id="btn-password" hidden><i data-icon="settings"></i><span>Passwort ändern</span></button>
+      <button id="btn-logout" hidden><i data-icon="user"></i><span>Abmelden</span></button>
       <button id="btn-quit" hidden><i data-icon="stop"></i><span>AirDeck beenden</span></button>
       <button id="btn-update"><i data-icon="update"></i><span>Updates</span><b class="nav-badge" id="update-badge" hidden>neu</b></button>
     </nav>
@@ -81,6 +84,7 @@
     <main class="view-page" id="view-ai" hidden></main>
     <main class="view-page" id="view-nextcloud" hidden></main>
     <main class="view-page" id="view-bridges" hidden></main>
+    <main class="view-page" id="view-users" hidden></main>
 
     <!-- Dashboard -->
     <main class="dash" id="view-studio">

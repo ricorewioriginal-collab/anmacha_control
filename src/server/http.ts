@@ -8,6 +8,7 @@ import { pipeline } from 'node:stream/promises';
 import { Readable } from 'node:stream';
 import { AirDeckApp, AppError, canSee, newId, type Principal } from './app.ts';
 import { AiError } from './ai/providers.ts';
+import { AuthError, ROLES, ROLE_LABEL, ROLE_SCOPES } from './users.ts';
 import { MEDIA_CATEGORIES, parseFileName, type MediaCategory } from '../core/automation.ts';
 import { OUTPUT_CAPABILITIES } from './icecast.ts';
 import { DSP_PRESETS } from './playout.ts';
@@ -78,7 +79,55 @@ export function createHttpServer(app: AirDeckApp, studioDir: string): Server {
   };
 
   // --- System ---
-  add('GET', '/api/v1/me', null, (c) => ({ id: c.p.id, roles: c.p.roles, scopes: c.p.scopes, stationIds: c.p.stationIds }));
+  add('GET', '/api/v1/me', null, (c) => ({ id: c.p.id, roles: c.p.roles, scopes: c.p.scopes, stationIds: c.p.stationIds, user: c.p.user ?? null }));
+
+  // --- Benutzer & Anmeldung ---
+  const authCall = async <T>(fn: () => T | Promise<T>): Promise<T> => {
+    try {
+      return await fn();
+    } catch (err) {
+      if (err instanceof AuthError) throw new AppError(err.status, 'auth', err.message);
+      throw err;
+    }
+  };
+  add('POST', '/api/v1/auth/logout', null, (c) => {
+    const tok = /^Bearer (.+)$/i.exec(String(c.req.headers.authorization ?? ''))?.[1];
+    if (tok && c.p.user) app.users.logout(tok);
+    app.audit.write({ kind: 'auth', event: 'logout', actor: c.p.id });
+  });
+  add('POST', '/api/v1/auth/password', null, async (c) => {
+    if (!c.p.user) throw new AppError(400, 'no_user', 'Passwort ändern geht nur mit Benutzeranmeldung');
+    const b = await c.body();
+    const u = app.users.get(c.p.user.id)!;
+    const { verifyPassword } = await import('./users.ts');
+    if (!(await verifyPassword(String(b.current ?? ''), u.passwordHash))) throw new AppError(403, 'wrong_password', 'Aktuelles Passwort stimmt nicht');
+    await authCall(() => app.users.update(u.id, { password: String(b.next ?? ''), mustChangePassword: false }));
+    app.audit.write({ kind: 'auth', event: 'password_changed', actor: u.id });
+    // alle Sitzungen wurden beendet – neu anmelden
+    return authCall(() => app.users.login(u.username, String(b.next ?? ''), 'password-change'));
+  });
+  add('GET', '/api/v1/users', null, (c) => (globalAdmin(c), { users: app.users.list(), roles: ROLES.map((r) => ({ id: r, label: ROLE_LABEL[r], scopes: ROLE_SCOPES[r] })) }));
+  add('POST', '/api/v1/users', null, async (c) => {
+    globalAdmin(c);
+    const b = await c.body();
+    const u = await authCall(() => app.users.create({ username: String(b.username ?? ''), name: str(b.name), password: String(b.password ?? ''), roles: b.roles, stationIds: b.stationIds, mustChangePassword: b.mustChangePassword !== false }));
+    app.audit.write({ kind: 'auth', event: 'user_created', actor: c.p.id, user: u.id, roles: u.roles });
+    return u;
+  });
+  add('PATCH', '/api/v1/users/:id', null, async (c) => {
+    globalAdmin(c);
+    const u = await authCall(async () => app.users.update(c.params.id!, await c.body()));
+    app.audit.write({ kind: 'auth', event: 'user_updated', actor: c.p.id, user: u.id, roles: u.roles, disabled: !!u.disabled });
+    return u;
+  });
+  add('DELETE', '/api/v1/users/:id', null, (c) => {
+    globalAdmin(c);
+    if (c.p.user?.id === c.params.id) throw new AppError(409, 'self', 'Das eigene Konto kann nicht gelöscht werden');
+    return authCall(() => {
+      app.users.remove(c.params.id!);
+      app.audit.write({ kind: 'auth', event: 'user_deleted', actor: c.p.id, user: c.params.id });
+    });
+  });
   add('GET', '/api/v1/capabilities', null, () => ({ outputs: OUTPUT_CAPABILITIES, mediaTypes: Object.keys(AUDIO_EXT), categories: MEDIA_CATEGORIES }));
   add('GET', '/api/v1/audit', 'audit:read', (c) => app.audit.tail(Math.min(Number(c.url.searchParams.get('limit') ?? 100), 500)));
   add('GET', '/api/v1/tokens', 'tokens:write', () => app.listTokens());
@@ -494,6 +543,23 @@ export function createHttpServer(app: AirDeckApp, studioDir: string): Server {
 
     if (path.startsWith('/ingest/')) return handleIngest(app, req, res, path);
     if (path === '/api/v1/health') return json(res, 200, { ok: true, name: 'AirDeck', version: '0.4.0' });
+    // Anmeldung (öffentlich): Benutzername + Passwort → Sitzungs-Token; Sperre nach Fehlversuchen im UserStore
+    if (path === '/api/v1/auth/status' && req.method === 'GET') return json(res, 200, { users: app.users.count > 0 });
+    if (path === '/api/v1/auth/login' && req.method === 'POST') {
+      try {
+        const b = JSON.parse((await readRaw(req, 16 * 1024)).toString('utf8') || '{}') as { username?: string; password?: string };
+        const ip = String(req.socket.remoteAddress ?? '');
+        const r = await app.users.login(String(b.username ?? ''), String(b.password ?? ''), ip);
+        app.audit.write({ kind: 'auth', event: 'login', actor: r.user.id, ip });
+        return json(res, 200, r);
+      } catch (err) {
+        if (err instanceof AuthError) {
+          app.audit.write({ kind: 'auth', event: 'login_failed', ip: String(req.socket.remoteAddress ?? ''), status: err.status });
+          return json(res, err.status, { error: 'auth', message: err.message });
+        }
+        return json(res, 400, { error: 'invalid', message: 'Ungültige Anfrage' });
+      }
+    }
     // Öffentlicher Stream-Status (wie Icecast): /status.json, /status/<sender>.<fmt>, /status/lautfm/<name>.<fmt>
     const st = /^\/status(?:\.json|\/(lautfm\/)?([a-z0-9_-]{1,60})\.(json|xml|m3u|xspf))$/.exec(path);
     if (st && req.method === 'GET') {
@@ -590,6 +656,10 @@ export function createHttpServer(app: AirDeckApp, studioDir: string): Server {
     }
     const p = auth(app, req, url);
     if (!p) return json(res, 401, { error: 'unauthorized', message: 'Gültiges API-Token erforderlich' });
+    // Erst neues Passwort setzen (Erstanmeldung/Zurücksetzen) – vorher nur Passwort ändern, Abmelden, /me
+    if (p.user?.mustChangePassword && !['/api/v1/auth/password', '/api/v1/auth/logout', '/api/v1/me'].includes(path)) {
+      return json(res, 403, { error: 'password_change_required', message: 'Bitte zuerst ein eigenes Passwort festlegen' });
+    }
     if (route.scope && !AirDeckApp.hasScope(p, route.scope)) return json(res, 403, { error: 'insufficient_scope', scope: route.scope });
     if (!route.re.source.includes('chunks') && !allow(p.tokenId)) return json(res, 429, { error: 'rate_limited' });
 

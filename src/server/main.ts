@@ -7,6 +7,7 @@
 import { spawn } from 'node:child_process';
 import { createWriteStream, mkdirSync, renameSync, statSync } from 'node:fs';
 import { format } from 'node:util';
+import { randomBytes } from 'node:crypto';
 import { createServer } from 'node:net';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -154,6 +155,13 @@ async function main(): Promise<void> {
     const { token } = app.createToken({ name: 'admin (neu)', scopes: ['*'], roles: ['admin'], stationIds: ['*'] });
     console.log(`\n  Neues Admin-Token: ${token}\n`);
     process.exit(0);
+  }
+  // Eigenbetrieb (Server/Docker): erstes Administrator-Konto mit Einmal-Passwort anlegen
+  if (!desktop && app.users.count === 0) {
+    const pw = randomBytes(9).toString('base64url');
+    await app.users.create({ username: 'admin', name: 'Administrator', password: `${pw}1`, roles: ['admin'], stationIds: ['*'], mustChangePassword: true });
+    console.log('\n  Anmeldung im Studio – Benutzer: admin  Einmal-Passwort (bitte beim ersten Login ändern):');
+    console.log(`  ${pw}1\n`);
   }
   if (!app.hasTokens() && !desktop) {
     const { token } = app.createToken({ name: 'admin', scopes: ['*'], roles: ['admin'], stationIds: ['*'] });
