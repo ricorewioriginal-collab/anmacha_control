@@ -1,4 +1,4 @@
-# AirDeck
+# AirDeck – Radio-Automation & Live-Broadcast
 
 <p>
   <img src="assets/icons/airdeck-gesamt.png" width="96" alt="AirDeck">
@@ -7,84 +7,95 @@
   <img src="assets/icons/airdeck-server.png" width="96" alt="AirDeck Server">
 </p>
 
-Unabhängige Radio-Automation für **Windows, Android und Self-Hosted-Server**.
-AirDeck läuft ohne AnMaCha. AnMaCha und laut.fm sind höchstens optionale Adapter.
+**Powered by AnMaCha Radioproduktion & RicoReWi – für Broadcast, Automation, Live und laut.fm.**
 
-**Stand 0.3:** Core, Server, Studio, 24/7-Server-Playout, Planung (Zeitplan, Stunden-Uhr, Sendeplan, Playlists), Recorder, laut.fm Radioadmin, Windows-Installer und Android-App.
-Der Abgleich mit dem AnMaCha-Dashboard steht in [`docs/FEATURE_PARITY.md`](docs/FEATURE_PARITY.md).
-Die Roadmap steht in [`AIRDECK_PROGRESS.md`](AIRDECK_PROGRESS.md).
+AirDeck ist eine eigenständige Sendesoftware für Webradio. Sie bietet Automation rund um die Uhr, Live-Sendungen mit Quellen-Priorität, Sendeplan, Recorder, laut.fm-Verwaltung, Klangoptimierung und auf Wunsch einen komplett KI-moderierten Sender. AirDeck läuft als **Windows-Programm**, als **Server/Docker** oder gesteuert per **Android-App**. Einen eigenen Server brauchst du nicht.
 
-**Installieren und testen:** siehe [`docs/INSTALLATION.md`](docs/INSTALLATION.md) (Windows, portable, Android) und [`docs/DOCKER.md`](docs/DOCKER.md) (Server).
-**Handbuch:** [`studio/handbuch.html`](studio/handbuch.html). Es ist auch in AirDeck unter „Handbuch“ erreichbar.
+## ⬇️ Download
 
-> **Hobbyprojekt:** Nutzung auf eigene Verantwortung, siehe [Haftungsausschluss](HAFTUNGSAUSSCHLUSS.md).
-> **Mitmachen:** Webentwickler dürfen eigene Features einbauen, siehe [CONTRIBUTING.md](CONTRIBUTING.md).
-> Powered by AnMaCha Radioproduktion & RicoReWi – für Broadcast, Automation, Live und laut.fm
-
-## Plattformen
-
-| Plattform | Was | Wie |
+| | Datei | Hinweis |
 |---|---|---|
-| **Windows** | Installer `AirDeck-Setup.exe`: läuft komplett lokal, ohne eigenen Server (Startmenü, Desktop, optional Autostart 24/7), ffmpeg liegt bei | GitHub Actions → Artefakt `AirDeck-Windows-Installer` |
-| **Android** | App: Studio-Fernbedienung, MIC LIVE (Priority 3), Mithören | GitHub Actions → Artefakt `AirDeck-Android` (APK), siehe [`apps/android`](apps/android/README.md) |
-| **Self-Hosted** | Server unter Linux/macOS, headless 24/7 | `npm start` bzw. `node dist/airdeck.cjs --headless` mit ffmpeg im PATH |
-| **Docker** | Server-Container mit ffmpeg, Daten im Volume | `docker compose up -d`, siehe [`docs/DOCKER.md`](docs/DOCKER.md) |
+| 🪟 **Windows-Installer** | [**AirDeck-Setup.exe**](https://github.com/ricorewioriginal-collab/anmacha_control/releases/download/nightly/AirDeck-Setup.exe) | Installation ohne Adminrechte. Deutsch/English, mit Audio-Engine (ffmpeg/LAME) und Android-APK |
+| 🪟 **Windows portable** | [**AirDeck-Windows-Portable.zip**](https://github.com/ricorewioriginal-collab/anmacha_control/releases/download/nightly/AirDeck-Windows-Portable.zip) | Ohne Installation: entpacken, `AirDeck.exe` starten |
+| 🤖 **Android-App** | [**AirDeck-Android.apk**](https://github.com/ricorewioriginal-collab/anmacha_control/releases/download/nightly/AirDeck-Android.apk) | Touch-Studio, MIC LIVE und Mithören. Die APK gibt es auch direkt aus AirDeck unter `http://<PC>:8750/download/AirDeck-Android.apk` |
+| 🐳 **Server (Docker)** | `docker compose up -d` | siehe [docs/DOCKER.md](docs/DOCKER.md) |
+
+Alle Dateien stehen auf der Seite [**Releases → AirDeck – aktueller Stand**](https://github.com/ricorewioriginal-collab/anmacha_control/releases/tag/nightly). Sie werden nach jeder Änderung automatisch gebaut und getestet. Solange das Repository privat ist, funktionieren die Links nur für angemeldete Mitglieder.
+Windows kann bei nicht signierten Dateien warnen: „Weitere Informationen“ → „Trotzdem ausführen“ (Details in [docs/INSTALLATION.md](docs/INSTALLATION.md)).
+
+## Funktionen
+
+**Studio & Sendebetrieb**
+- Dashboard mit frei anordenbaren Fenstern (verschieben, Größe ändern, abdocken). Dazu vier Decks mit CUE/Vorhören, Cardwall, Schnelltrigger, Queue mit Backtiming, Bibliothek mit Ordnern und Drag & Drop (auch Dateien aus dem Explorer).
+- **Server-Automation 24/7** ohne offenes Fenster: Crossfade, Carts mit Ducking, Mikrofon/Line-In, Stille-Erkennung, Notfall-Ordner, Autostart.
+- **Source Priority Engine:** Live-Studio, Remote, Android, Automation und Relays mit Priorität, Übernahme, Fallback und Anti-Flapping.
+- **Sendeplan & Events:** Programmpläne, Stundenuhr, Einzel-Jobs, Aufnahmepläne. Dazu ein **Recorder** mit Replays.
+- **Klang:** Lautheitsangleich pro Titel (EBU R128), Klangprofile, 10-Band-EQ, Multiband, AGC und Limiter. **LAME-MP3** (CBR/VBR), AAC, Opus.
+- **Ausgänge:** Icecast, SHOUTcast v1/v2, **laut.fm** (Zugang automatisch aus dem Radioadmin), optional über **Liquidsoap**.
+- **Audio-Routing:** Sendesignal und Vorhören getrennt auf Windows-Ausgabegeräte legbar.
+
+**laut.fm**
+- Kompletter Radioadmin: Playlists, Titel, **Tags**, **Automations-Algorithmen** (16 Vorlagen), Sendeplan, Statistik, **Werbe-Trigger-Log**, Benutzer, Station, Live-Zugang.
+- Anmeldung per Radioadmin-Token (callback/Origin wie von laut.fm vorgegeben). Dazu die öffentliche laut.fm-API vollständig nach Spezifikation.
+
+**Status, Web & Anbindungen**
+- **Stream-Status** für alle Sendewege, so wie Icecast ihn liefert: JSON, XML, M3U und XSPF. Für laut.fm-Sender baut AirDeck die Werte nach. Dazu kommen eine öffentliche Statusseite und ein einbettbares **Player-Widget**.
+- **Brücke zu bestehenden Systemen:** AzuraCast, Icecast, SAM, mAirList, RadioDJ oder ein Web-Relay lassen sich als Relay-Quelle und Status-Spiegel einbinden. Die **Bridge-API** vergibt stabile Schlüssel, damit nichts doppelt angelegt wird ([docs/BRIDGE.md](docs/BRIDGE.md)).
+- **Nextcloud-Brücke:** Medien aus der Cloud übernehmen, Mitschnitte hochladen.
+- REST-API mit Live-Ereignissen (SSE), signierte Webhooks, Telegram-Alarme, Now-Playing-Export.
+
+**KI-Automation** ([docs/AI.md](docs/AI.md))
+- Eigene API-Keys oder lokale Modelle. Text: OpenAI, Anthropic, Gemini, Ollama/LM Studio. Sprache: OpenAI TTS, ElevenLabs, Kokoro, Piper offline.
+- Moderation alle n Titel, Nachrichten zur vollen Stunde aus eigenen Quellen und KI-Musikplanung. Freigabe-Modus, Kostenkontrolle mit Budgets und Protokoll.
+
+**Betrieb & Sicherheit**
+- **Benutzerverwaltung** mit Login und Logout sowie Rollen: Administrator, Sendeleitung, Redaktion, Moderation, Ansicht. Die Rollen lassen sich pro Sender zuweisen.
+- Mehrere Sender mit eigenem Logo. Datenspeicher lokal oder mit Sync zu MySQL/MariaDB bzw. Firebase. Zugangsdaten liegen verschlüsselt (AES-256-GCM).
+- **Updates** per Klick (Windows) bzw. neue APK (Android). Windows-Programm ohne Konsolenfenster mit Tray-Symbol. Handbuch im Programm.
 
 ## Schnellstart
 
-Voraussetzung: **Node.js ≥ 22.18**. Es gibt keinen Build-Schritt. Einzige Laufzeit-Abhängigkeit ist `mysql2`, und die wird nur beim MySQL-Sync geladen.
+**Windows:** Installer starten, fertig. Das Studio öffnet sich, AirDeck läuft danach im Hintergrund. Das Symbol im Infobereich bietet Studio öffnen, Protokoll und Beenden.
 
+**Android:** Im Studio am PC unter **Android-App** „Im Netzwerk erreichbar“ einschalten. Dann die APK auf dem Handy laden und den Verbindungslink einfügen ([Anleitung](docs/INSTALLATION.md#android)).
+
+**Server:**
 ```bash
-npm install          # nur Dev-Tools (TypeScript-Prüfung)
-npm start            # startet http://127.0.0.1:8750
+docker compose up -d
+docker compose logs airdeck      # Einmal-Passwort für „admin“ und Admin-Token
 ```
-
-Beim ersten Start zeigt die Konsole ein **Admin-Token** und einen fertigen Studio-Link an.
-Das Token wird nur gehasht gespeichert. Ein neues Token erzeugst du mit `npm run token`.
+Ohne Docker geht es mit Node.js ≥ 22.18 und ffmpeg: `npm install && npm start`. Danach läuft das Studio unter `http://127.0.0.1:8750`.
 
 | Variable | Standard | Bedeutung |
 |---|---|---|
 | `AIRDECK_PORT` | `8750` | HTTP-Port |
-| `AIRDECK_HOST` | `127.0.0.1` | Bind-Adresse. `0.0.0.0` für Server-/Netzbetrieb, dann TLS-Reverse-Proxy davorsetzen |
-| `AIRDECK_DATA` | `./data` | Daten, Medien, Audit-Log, verschlüsselte Secrets |
-| `AIRDECK_SECRET_KEY` | *(auto)* | 64 Hex-Zeichen. Ohne diese Variable wird `data/.secret.key` (0600) erzeugt |
-| `AIRDECK_FFMPEG` | *(auto)* | Pfad zu ffmpeg. Sonst wird `./ffmpeg/` bzw. der PATH durchsucht |
-| `AIRDECK_CORS_ORIGINS` | – | zusätzliche erlaubte Origins (kommagetrennt). Die Android-App ist immer erlaubt |
+| `AIRDECK_HOST` | `127.0.0.1` | Bind-Adresse. `0.0.0.0` für Netz/Server, im Internet nur hinter HTTPS |
+| `AIRDECK_DATA` | `./data` | Daten, Medien, Protokolle, verschlüsselte Zugangsdaten |
+| `AIRDECK_SECRET_KEY` | *(auto)* | 64 Hex-Zeichen. Sonst wird `data/.secret.key` erzeugt |
+| `AIRDECK_FFMPEG` | *(auto)* | Pfad zu ffmpeg |
 
-## Was schon funktioniert
+## Dokumentation
 
-- **Server-Automation 24/7 (headless)**: ffmpeg dekodiert und kodiert, AirDeck mischt selbst (Crossfade, Carts, Ducking, Limiter). Läuft ohne Browser und startet nach einem Neustart automatisch wieder. Bei Stille wird die Quelle als ungesund markiert und der Sender fällt auf die nächste Quelle nach Priorität zurück. Stürzt der Encoder ab, startet er neu. Laufzeiten ermittelt ffprobe beim Upload.
-- **MIC LIVE**: Handy oder PC sendet das Mikrofon als Live-Quelle und übernimmt nach Priorität. 🎧 hört das Sendesignal mit.
-- **Source Priority Engine**: positive Ganzzahl, kleinere Zahl = höhere Priorität. Übernahmen sind autorisiert und atomar. Anti-Flapping, Cooldown, Fallback-Kette, Operator- und Emergency-Override, Audit-Log, Wiederherstellung nach Neustart ohne konkurrierende aktive Quellen.
-- **Live-/Relay-Kern**: Encoder verbinden sich Icecast-kompatibel per `PUT` oder `SOURCE` auf `/ingest/<sender>/<mount>` (Benutzer = Quellen-ID, Passwort pro Quelle). Nur die aktive Quelle wird weitergeleitet. Standby-Quellen bleiben verbunden, damit der Fallback sofort greift.
-- **Broadcast-Adapter Icecast** (HTTP PUT, Icecast 2.4+) mit optionalem `?prio=<n>` für laut.fm-artige Server. Titel-Metadaten laufen über `/admin/metadata`, Reconnect mit Backoff, Auth-Fehler werden nicht endlos wiederholt. SHOUTcast ist ehrlich als *unsupported* markiert.
-- **Studio (Browser/PWA)**: 4 Decks, Cardwall, Archiv mit Upload, Queue mit Backtiming, Drag & Drop (Archiv → Deck/Cart/Queue, Dateien → Archiv, Queue sortieren), Automation mit Crossfade nach Sendeuhr und Rotationsregeln, Ducking, Master-Limiter, RMS-/Peak-Meter, Stilleerkennung (löst Fallback aus) und Studio-Stream als Automation-Quelle. Tasten F1–F4 steuern die Decks.
-- **REST API v1 + Server-Sent Events** mit Scopes laut `API_SCOPE_MATRIX`, RBAC pro Sender und Rate-Limit pro Token.
-- **Multi-Sender**: Branding (Name, Slogan, Farben), Medien, Queue, Cardwall und Quellen sind pro Sender getrennt.
+| Thema | Datei |
+|---|---|
+| Handbuch (auch im Programm) | [studio/handbuch.html](studio/handbuch.html) |
+| Installation Windows/Android | [docs/INSTALLATION.md](docs/INSTALLATION.md) |
+| Docker/Server | [docs/DOCKER.md](docs/DOCKER.md) |
+| Streaming, Klang, Liquidsoap | [docs/STREAMING.md](docs/STREAMING.md) |
+| Brücke & Bridge-API | [docs/BRIDGE.md](docs/BRIDGE.md) |
+| KI-Automation | [docs/AI.md](docs/AI.md) |
+| Architektur | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) |
+| Funktionsabgleich | [docs/FEATURE_PARITY.md](docs/FEATURE_PARITY.md) |
+| Fortschritt | [AIRDECK_PROGRESS.md](AIRDECK_PROGRESS.md) |
 
-## Encoder anbinden (z. B. BUTT, Mixxx, Liquidsoap)
+## Mitmachen
 
-1. Im Studio unter *Quellen* die gewünschte Quelle öffnen (⋯) und ein Encoder-Passwort setzen.
-2. Den Encoder so einstellen:
-   - Typ: Icecast
-   - Host/Port: AirDeck-Server
-   - Mount: `/ingest/<sender-id>/live`
-   - Benutzer: die Quellen-ID (steht nach dem Speichern in der Statuszeile)
-3. Die Quelle mit der kleineren Zahl übernimmt automatisch, nach 2 s stabiler Verbindung (Anti-Flapping).
-
-## Entwicklung
+Webentwicklerinnen und Webentwickler dürfen eigene Features einbauen. Aufbau, Regeln und Andockpunkte stehen in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ```bash
 npm run check        # Typprüfung (Server + Studio) und alle Tests
-npm test             # node:test, inkl. End-to-End-Relay-Test gegen einen Icecast-Mock
 ```
 
-Struktur:
+## Haftungsausschluss
 
-```text
-src/core/     reine Domain-Logik (Source Priority, Automation) – plattformunabhängig
-src/server/   HTTP/REST/SSE, Relay, Icecast-Adapter, Persistenz, Secrets
-studio/       Studio-Oberfläche (Vanilla JS + Web Audio, als PWA installierbar)
-test/         Tests (node:test)
-docs/         Architektur, Fortschritt, Übergabe-Unterlagen
-```
+AirDeck ist ein **privates Hobbyprojekt** und wird ohne Gewähr bereitgestellt. Die Nutzung erfolgt auf eigene Verantwortung, siehe [HAFTUNGSAUSSCHLUSS.md](HAFTUNGSAUSSCHLUSS.md).
