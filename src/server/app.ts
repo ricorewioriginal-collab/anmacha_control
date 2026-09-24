@@ -47,6 +47,7 @@ import {
 import { pickNext as pickFromPool } from '../core/automation.ts';
 import type { RelayTap } from './relay.ts';
 import { RADIOADMIN, type LautfmConfig } from './lautfm.ts';
+import { NOTIFY_EVENTS, Notifier, validateExportPath, validateWebhookUrl, type IntegrationsConfig, type NotifyEvent } from './notify.ts';
 
 export interface Station {
   id: string;
@@ -76,6 +77,7 @@ interface StationData {
   playLog?: PlayLogEntry[];
   planCursor?: Record<string, number>;
   lautfm?: LautfmConfig;
+  integrations?: IntegrationsConfig;
 }
 
 export interface Playlist {
@@ -116,6 +118,8 @@ export interface PlayoutConfig extends PlayoutOptions {
   autostart: boolean;
   /** Quelle, als die das Playout sendet (Standard: Automation-Quelle des Senders) */
   sourceId?: string;
+  /** Notfall-Ordner: spielt, wenn Queue, Sendeuhr und Sendeplan nichts liefern */
+  emergencyFolder?: string;
 }
 
 interface PersistedState {
@@ -199,11 +203,14 @@ export class AirDeckApp {
   private lastSchedAt = Date.now();
   private readonly activePlanId = new Map<string, string | null>();
   private readonly recorders = new Map<string, ActiveRecording>();
+  private readonly notifier: Notifier;
+  private readonly lastOutStatus = new Map<string, string>();
   private readonly subscribers = new Set<(e: HubEvent) => void>();
   private readonly persist: DebouncedJson<PersistedState>;
   private tokens: ApiToken[];
   private readonly tokensFile: string;
   private tickTimer: NodeJS.Timeout | null = null;
+  private levelTimer: NodeJS.Timeout | null = null;
 
   constructor(dataDir: string, opts: { stableMs?: number; cooldownMs?: number; appRoot?: string; ffmpeg?: FfmpegInfo | null } = {}) {
     this.dataDir = dataDir;
@@ -214,6 +221,7 @@ export class AirDeckApp {
     this.audit = new AuditLog(join(dataDir, 'audit.log'));
     this.tokensFile = join(dataDir, 'tokens.json');
     this.tokens = readJson<ApiToken[]>(this.tokensFile, []);
+    this.notifier = new Notifier((ref) => this.secrets.get(ref), (event, data) => this.audit.write({ kind: 'notify', event, ...data }));
 
     const file = join(dataDir, 'airdeck.json');
     const state = readJson<PersistedState | null>(file, null);
@@ -233,6 +241,12 @@ export class AirDeckApp {
   start(): void {
     this.tickTimer = setInterval(() => this.tick(), 500);
     this.tickTimer.unref();
+    // Pegel des Kerns für die VU-Anzeige (nur wenn jemand zuhört)
+    this.levelTimer = setInterval(() => {
+      if (this.subscribers.size === 0) return;
+      for (const [id, { playout }] of this.playouts) this.publish('playout.level', id, playout.readLevel());
+    }, 200);
+    this.levelTimer.unref();
     // 24/7: Playouts, die vor dem Neustart liefen, automatisch wieder starten
     for (const [id, rt] of this.stations) {
       if (!rt.data.playout?.autostart) continue;
@@ -246,6 +260,7 @@ export class AirDeckApp {
 
   shutdown(): void {
     if (this.tickTimer) clearInterval(this.tickTimer);
+    if (this.levelTimer) clearInterval(this.levelTimer);
     for (const { playout } of this.playouts.values()) playout.stop();
     this.playouts.clear();
     for (const id of [...this.recorders.keys()]) this.stopRecording(id);
@@ -320,6 +335,7 @@ export class AirDeckApp {
   }
 
   private publish(type: string, stationId: string | undefined, payload: unknown): void {
+    if (stationId) this.notifyFrom(type, stationId, payload);
     const e = { type, stationId, payload };
     for (const s of this.subscribers) {
       try {
@@ -893,6 +909,7 @@ export class AirDeckApp {
       onStreamData: (chunk) => this.ingestData(source, chunk),
       onStreamStop: () => this.ingestClose(source),
       onSilence: (silent) => {
+        if (!silent) this.publish('playout.log', stationId, { event: 'silence_recovered' });
         // Stille → Quelle ungesund → Fallback nach Priorität; bei Erholung wieder anmelden
         this.engine.setHealth(source.id, !silent, silent ? 'silence' : undefined);
         if (!silent && this.engine.get(source.id)?.state === 'disconnected' && this.relayFor(stationId, source.target).hasSession(source.id)) {
@@ -1038,6 +1055,7 @@ export class AirDeckApp {
     }
     if (typeof input.monitor === 'boolean') cur.monitor = input.monitor;
     if (typeof input.inputDevice === 'string') cur.inputDevice = input.inputDevice.slice(0, 200);
+    if (typeof input.emergencyFolder === 'string') cur.emergencyFolder = input.emergencyFolder.slice(0, 80) || undefined;
     const num = (v: unknown, min: number, max: number) => (typeof v === 'number' && Number.isFinite(v) && v >= min && v <= max ? v : undefined);
     cur.bitrateKbps = num(input.bitrateKbps, 32, 320) ?? cur.bitrateKbps;
     cur.crossfadeMs = num(input.crossfadeMs, 0, 15000) ?? cur.crossfadeMs;
@@ -1055,7 +1073,14 @@ export class AirDeckApp {
 
   /** Notfall-Auswahl, wenn Queue und Sendeuhr nichts liefern: beliebiger Musiktitel, sonst irgendein Titel. */
   private emergencyPick(stationId: string): MediaItem | null {
-    const lib = this.rt(stationId).data.library;
+    const rt = this.rt(stationId);
+    const lib = rt.data.library;
+    const folder = rt.data.playout?.emergencyFolder;
+    const emergency = folder ? lib.filter((m) => (m.folder ?? '') === folder && !m.url) : [];
+    if (emergency.length) {
+      this.audit.write({ kind: 'playout', event: 'emergency_folder', stationId, folder });
+      return pickFromPool(emergency.map((x) => ({ ...x, category: 'music' as const })), 'music', rt.data.history, rt.data.rotation) ?? emergency[0]!;
+    }
     const pool = lib.filter((m) => m.category === 'music');
     const list = pool.length ? pool : lib;
     return list.length ? list[Math.floor(Math.random() * list.length)]! : null;
@@ -1501,6 +1526,107 @@ export class AirDeckApp {
     rt.data.recPlans = (rt.data.recPlans ?? []).filter((p) => p.id !== id);
     this.publish('recorder.changed', stationId, this.recordings(stationId));
     this.changed();
+  }
+
+  // ---------- Benachrichtigungen, Webhooks, Now-Playing-Export ----------
+
+  /** Übersetzt interne Ereignisse in externe Meldungen (Webhook/Telegram/Datei). */
+  private notifyFrom(type: string, stationId: string, payload: unknown): void {
+    const cfg = this.stations.get(stationId)?.data.integrations;
+    if (!cfg) return;
+    const p = (payload ?? {}) as Record<string, any>;
+    let event: NotifyEvent | null = null;
+    let data: Record<string, unknown> = {};
+    switch (type) {
+      case 'now_playing.changed':
+        event = 'now_playing';
+        data = { mediaId: p.mediaId, title: p.media?.title, artist: p.media?.artist, album: p.media?.album, category: p.media?.category, durationMs: p.media?.durationMs };
+        break;
+      case 'source.takeover_completed':
+        event = 'on_air_changed';
+        data = { source: this.engine.get(p.sourceId)?.name ?? p.sourceId, priority: p.data?.priority, target: p.target };
+        break;
+      case 'source.off_air':
+        event = 'off_air';
+        data = { target: p.target };
+        break;
+      case 'source.source_failed':
+        event = 'source_failed';
+        data = { source: this.engine.get(p.sourceId)?.name ?? p.sourceId, reason: p.data?.reason };
+        break;
+      case 'playout.log':
+        if (p.event === 'silence_detected') event = 'silence';
+        else if (p.event === 'silence_recovered') event = 'silence_recovered';
+        else if (p.event === 'encoder_crashed') event = 'encoder_crashed';
+        data = { detail: p.stderr };
+        break;
+      case 'stream.state_changed': {
+        const prev = this.lastOutStatus.get(p.id);
+        this.lastOutStatus.set(p.id, p.status);
+        if (prev === p.status) break;
+        const name = this.outputs.get(p.id)?.cfg.name ?? p.id;
+        if (p.status === 'error') event = 'stream_error';
+        else if (p.status === 'connected') event = 'stream_connected';
+        data = { output: name, error: p.error };
+        break;
+      }
+      case 'schedule.fired':
+        event = 'schedule_fired';
+        data = { label: p.label, kind: p.kind, mode: p.mode };
+        break;
+    }
+    if (event) this.notifier.emit(cfg, { event, station: stationId, at: new Date().toISOString(), data });
+  }
+
+  integrations(stationId: string): unknown {
+    const cfg = this.rt(stationId).data.integrations ?? { webhooks: [] };
+    return {
+      events: NOTIFY_EVENTS,
+      webhooks: cfg.webhooks.map(({ secretRef, ...w }) => ({ ...w, hasSecret: !!secretRef && this.secrets.has(secretRef) })),
+      telegram: cfg.telegram ? { chatId: cfg.telegram.chatId, enabled: cfg.telegram.enabled, hasToken: this.secrets.has(cfg.telegram.botTokenRef) } : null,
+      nowPlayingFile: cfg.nowPlayingFile ?? null,
+    };
+  }
+
+  setIntegrations(p: Principal, stationId: string, input: Record<string, any>): unknown {
+    const rt = this.rt(stationId);
+    const cur: IntegrationsConfig = rt.data.integrations ?? { webhooks: [] };
+    try {
+      if (Array.isArray(input.webhooks)) {
+        cur.webhooks = input.webhooks.slice(0, 10).map((w: Record<string, any>) => {
+          const prev = cur.webhooks.find((x) => x.id === w.id);
+          const id = prev?.id ?? newId('wh');
+          const secretRef = prev?.secretRef ?? `webhook:${stationId}:${id}`;
+          if (typeof w.secret === 'string' && w.secret) this.secrets.set(secretRef, w.secret);
+          const events = (Array.isArray(w.events) ? w.events : []).filter((e: string) => (NOTIFY_EVENTS as readonly string[]).includes(e));
+          return { id, url: validateWebhookUrl(String(w.url ?? '')), events, secretRef, enabled: w.enabled !== false };
+        });
+      }
+      if (input.telegram === null) cur.telegram = undefined;
+      else if (input.telegram && typeof input.telegram === 'object') {
+        const botTokenRef = cur.telegram?.botTokenRef ?? `telegram:${stationId}`;
+        if (typeof input.telegram.botToken === 'string' && input.telegram.botToken) this.secrets.set(botTokenRef, input.telegram.botToken.trim());
+        cur.telegram = { chatId: String(input.telegram.chatId ?? '').slice(0, 64), botTokenRef, enabled: input.telegram.enabled !== false };
+      }
+      if (input.nowPlayingFile === null || input.nowPlayingFile === '') cur.nowPlayingFile = undefined;
+      else if (typeof input.nowPlayingFile === 'string') cur.nowPlayingFile = validateExportPath(input.nowPlayingFile);
+    } catch (err) {
+      throw new AppError(400, 'invalid_integration', (err as Error).message);
+    }
+    rt.data.integrations = cur;
+    this.audit.write({ kind: 'notify', event: 'config', actor: p.id, stationId });
+    this.changed();
+    return this.integrations(stationId);
+  }
+
+  /** Testmeldung an alle Webhooks/Telegram senden und Ergebnisse zurückgeben. */
+  async testIntegrations(stationId: string): Promise<unknown> {
+    const cfg = this.rt(stationId).data.integrations;
+    if (!cfg) return { webhooks: [], telegram: null };
+    const payload = { event: 'schedule_fired' as const, station: stationId, at: new Date().toISOString(), data: { test: true, label: 'AirDeck Testmeldung' } };
+    const webhooks = await Promise.all(cfg.webhooks.map(async (w) => ({ id: w.id, ok: await this.notifier.deliverWebhook(w, payload) })));
+    const telegram = cfg.telegram ? await this.notifier.deliverTelegram(cfg.telegram.chatId, cfg.telegram.botTokenRef, `✅ AirDeck ${stationId}: Testmeldung`) : null;
+    return { webhooks, telegram };
   }
 
   // ---------- laut.fm ----------

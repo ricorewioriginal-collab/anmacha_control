@@ -133,6 +133,7 @@ button:disabled { opacity: .45; cursor: not-allowed; box-shadow: none !important
 .deck.drop { outline: 2px solid var(--c); }
 .deck[data-status="playing"] { box-shadow: 0 0 30px color-mix(in srgb, var(--c) 35%, transparent), inset 0 1px 0 rgba(255, 255, 255, .06); }
 .deck-head { display: flex; align-items: center; gap: 8px; padding: 7px 10px; background: linear-gradient(90deg, color-mix(in srgb, var(--c) 45%, transparent), color-mix(in srgb, var(--c) 12%, transparent)); font-weight: 700; }
+.deck-head { white-space: nowrap; overflow: hidden; }
 .deck-head .role { color: color-mix(in srgb, var(--c) 60%, #fff); font-weight: 600; }
 .deck-status { margin-left: auto; font-size: 10px; letter-spacing: .08em; text-transform: uppercase; color: rgba(255, 255, 255, .7); }
 .deck[data-status="playing"] .deck-status { color: #fff; }

@@ -134,7 +134,9 @@ export interface PlayoutStatus {
   bitrateKbps: number;
   encoder: 'running' | 'restarting' | 'stopped';
   silent: boolean;
-  current: { mediaId: string; title: string; artist: string; positionMs: number; durationMs: number | null } | null;
+  current: { mediaId: string; title: string; artist: string; positionMs: number; durationMs: number | null; deck: 'A' | 'B' } | null;
+  /** Titel, der gerade ausgeblendet wird (Crossfade), falls vorhanden */
+  fading: { mediaId: string; title: string; deck: 'A' | 'B' } | null;
   carts: number;
   startedAt: number | null;
   underruns: number;
@@ -168,6 +170,11 @@ export class Playout {
   private inputState: PlayoutStatus['input'] = 'off';
   private micOn = false;
   private micGain = 0;
+  private trackCounter = 0;
+  private readonly deckOf = new WeakMap<object, 'A' | 'B'>();
+  private levelPeak = 0;
+  private levelSum = 0;
+  private levelN = 0;
 
   constructor(ffmpeg: string, hooks: PlayoutHooks, opts: Partial<PlayoutOptions> = {}, extras: PlayoutExtras = {}) {
     this.ffmpeg = ffmpeg;
@@ -222,6 +229,16 @@ export class Playout {
     this.skipRequested = true;
   }
 
+  /** Pegel seit dem letzten Abruf (RMS/Peak in dBFS) – für die VU-Anzeige im Studio. */
+  readLevel(): { rmsDb: number; peakDb: number } {
+    const toDb = (x: number) => (x > 0 ? Math.max(-90, 20 * Math.log10(x)) : -90);
+    const r = { rmsDb: this.levelN ? toDb(Math.sqrt(this.levelSum / this.levelN)) : -90, peakDb: toDb(this.levelPeak) };
+    this.levelPeak = 0;
+    this.levelSum = 0;
+    this.levelN = 0;
+    return r;
+  }
+
   /** Mikrofon/Line-In auf Sendung (mit Ducking der Musik) oder stumm. */
   setMic(on: boolean): void {
     if (on && this.inputState !== 'running') throw new Error('Kein Aufnahmegerät aktiv');
@@ -247,8 +264,13 @@ export class Playout {
             mediaId: cur.media.id, title: cur.media.title, artist: cur.media.artist,
             positionMs: framesToMs(cur.played) + (cur.media.cueInMs ?? 0),
             durationMs: cur.totalFrames == null ? null : framesToMs(cur.totalFrames),
+            deck: this.deckOf.get(cur) ?? 'A',
           }
         : null,
+      fading: (() => {
+        const f = this.voices.find((v) => v.kind === 'track' && v.fadeTo === 0 && !v.finished);
+        return f ? { mediaId: f.media.id, title: f.media.title, deck: this.deckOf.get(f) ?? 'A' } : null;
+      })(),
       carts: this.voices.filter((v) => v.kind === 'cart').length,
       startedAt: this.startedAt,
       underruns: this.underruns,
@@ -365,6 +387,7 @@ export class Playout {
     const m = this.hooks.nextTrack();
     if (!m) return false;
     const v = new Voice(m, 'track', false);
+    this.deckOf.set(v, this.trackCounter++ % 2 === 0 ? 'A' : 'B');
     if (this.opts.fadeInMs > 0) {
       const target = v.gain;
       v.gain = 0;
@@ -444,6 +467,12 @@ export class Playout {
     const mon = this.monitorProc;
     if (mon?.stdin && mon.stdin.writableLength < 512 * 1024) mon.stdin.write(pcm);
 
+    for (let i = 0; i < bus.length; i++) {
+      const a = Math.abs(bus[i]!);
+      if (a > this.levelPeak) this.levelPeak = a;
+      this.levelSum += bus[i]! * bus[i]!;
+    }
+    this.levelN += bus.length;
     const ev = this.silence.feed(busRmsDb(bus), Date.now());
     if (ev === 'silence') {
       this.silent = true;

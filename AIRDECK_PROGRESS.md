@@ -21,6 +21,14 @@
 - [x] CORS für die App, Serveradresse im Studio einstellbar
 - [x] GitHub Actions: Tests, Windows-Build mit Smoke-Test, Android-APK
 
+## Erledigt (0.4 – Phase 1 laut Masterprompt)
+
+- [x] AIRDECK_AUDIT.md aus dem echten Code, mit Messwerten
+- [x] **Windows-Fehler behoben:** Studio lieferte unter Windows `{"error":"forbidden"}` (Pfadprüfung nutzte `/`). Test mit Windows-Pfadlogik, CI prüft jetzt auch Startseite und Skripte
+- [x] Kern ist maßgeblich: AUTO startet die 24/7-Automation im Kern; Decks A/B und VU spiegeln das Server-Playout; Browser-Automation nur noch als Notbetrieb ohne ffmpeg
+- [x] Notfall-Ordner fürs Playout
+- [x] Metadaten-/Benachrichtigungs-Engine: signierte Webhooks (HMAC), Telegram-Alarme, Now-Playing als Text- und JSON-Datei, Stille/OFF AIR/Encoder-/Stream-Fehler
+
 ## Nächste Schritte (Vorschlag, in dieser Reihenfolge)
 
 1. Windows-Installer (Startmenü-Verknüpfung) und signierte Release-APK (Keystore als GitHub-Secret)

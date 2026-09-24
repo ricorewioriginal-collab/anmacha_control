@@ -61,8 +61,13 @@ jobs:
           $p = Start-Process -FilePath dist/AirDeck/AirDeck.exe -ArgumentList '--headless' -PassThru
           Start-Sleep -Seconds 5
           $r = Invoke-RestMethod http://127.0.0.1:8753/api/v1/health
+          # Studio-Oberfläche muss wirklich ausgeliefert werden (nicht nur die API)
+          $page = Invoke-WebRequest http://127.0.0.1:8753/ -UseBasicParsing
+          $js = Invoke-WebRequest http://127.0.0.1:8753/js/app.js -UseBasicParsing
           Stop-Process -Id $p.Id -Force
           if (-not $r.ok) { throw 'Health-Check fehlgeschlagen' }
+          if ($page.StatusCode -ne 200 -or -not ($page.Content -match 'AirDeck')) { throw 'Studio-Startseite wird nicht ausgeliefert' }
+          if ($js.StatusCode -ne 200) { throw 'Studio-Skripte werden nicht ausgeliefert' }
           Write-Host 'AirDeck.exe startet und antwortet.'
       - name: Installer bauen (Inno Setup)
         shell: pwsh
@@ -90,8 +95,10 @@ jobs:
           $p = Start-Process $exe -ArgumentList '--headless' -PassThru
           Start-Sleep -Seconds 5
           $r = Invoke-RestMethod http://127.0.0.1:8755/api/v1/health
+          $page = Invoke-WebRequest http://127.0.0.1:8755/ -UseBasicParsing
           Stop-Process -Id $p.Id -Force
           if (-not $r.ok) { throw 'Installierte Version antwortet nicht' }
+          if ($page.StatusCode -ne 200) { throw 'Installierte Version liefert das Studio nicht aus' }
           Start-Process "$env:LOCALAPPDATA/Programs/AirDeck/unins000.exe" -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES' -Wait
           Write-Host 'Installer: Installation, Start und Deinstallation OK'
       - uses: actions/upload-artifact@v4

@@ -51,6 +51,8 @@ const S = {
   busyNext: false,
   /** @type {string|null} */ lastAutoDeck: null,
   /** @type {any} */ playout: null,
+  playoutAt: 0,
+  /** @type {{ rmsDb: number, peakDb: number }|null} */ srvLevel: null,
   /** @type {{ rec: MediaRecorder, stream: MediaStream, sourceId: string }|null} */ mic: null,
   /** @type {HTMLAudioElement|null} */ listen: null,
 };
@@ -195,7 +197,8 @@ function onEvent(type, data) {
     case 'library.changed': run(async () => { setLibrary(await api.get(url('/media'))); renderLibrary(); renderCarts(); }); break;
     case 'cardwall.changed': S.carts = data; renderCarts(); break;
     case 'cardwall.triggered': if (!data.server) playCart(data); break; // Fernauslösung ohne Server-Playout: lokal spielen
-    case 'playout.state': if (S.playout) { S.playout.status = data; renderPlayout(); } break;
+    case 'playout.state': if (S.playout) { S.playout.status = data; S.playoutAt = Date.now(); renderPlayout(); } break;
+    case 'playout.level': S.srvLevel = data; break;
     case 'playout.log':
       if (['encoder_crashed', 'silence_detected', 'decode_failed', 'autostart_failed'].includes(data.event)) status(`Server-Playout: ${data.event}${data.mediaId ? ` (${data.mediaId})` : ''}`, true);
       if (['playout_started', 'playout_stopped'].includes(data.event)) run(async () => { S.playout = await api.get(url('/playout')); renderPlayout(); });
@@ -370,6 +373,8 @@ async function toggleStream() {
 function renderAutoState() {
   const server = serverMode();
   $('st-auto').classList.toggle('on', server || S.auto);
+  $('btn-auto').setAttribute('aria-pressed', String(server || S.auto));
+  $('btn-auto').title = S.playout?.supported ? '24/7-Automation im Kern starten/stoppen (läuft ohne Fenster weiter)' : 'Browser-Automation (ffmpeg fehlt – Notbetrieb)';
   $('st-auto-text').textContent = server ? 'Server-Automation läuft (24/7)' : S.auto ? 'Browser-Automation läuft' : 'Automation aus';
   const po = S.playout?.status;
   const lvOn = server && po?.input === 'running' ? !!po.micOn : !!S.mic && S.mic.stream.getAudioTracks().some((t) => t.enabled);
@@ -1022,7 +1027,20 @@ function bindStatic() {
   $('btn-clear').addEventListener('click', () => confirm('Queue leeren?') && run(() => api.post(url('/queue/clear'))));
   $('chk-autofill').addEventListener('change', (e) => run(() => api.patch(url('/automation'), { autoFill: /** @type {HTMLInputElement} */ (e.target).checked })));
   $('btn-auto').addEventListener('click', async () => {
-    if (!S.auto && serverMode()) return status('Server-Playout (24/7) läuft – Browser-Automation ist dann aus', true);
+    // Der Kern ist die maßgebliche Automation (läuft auch ohne geöffnetes Fenster weiter).
+    if (S.playout?.supported && !S.auto) {
+      if (serverMode()) {
+        if (!confirm('24/7-Automation stoppen? Der Sender fällt auf die nächste Quelle zurück.')) return;
+        S.playout = (await run(() => api.post(url('/playout/stop')))) ?? S.playout;
+      } else {
+        if (S.streaming) await toggleStream();
+        S.playout = (await run(() => api.post(url('/playout/start'), {}))) ?? S.playout;
+      }
+      renderPlayout();
+      return;
+    }
+    // Notbetrieb ohne ffmpeg: Automation im Browser (endet, wenn das Fenster geschlossen wird)
+    if (!S.auto && !confirm('Auf diesem System fehlt ffmpeg. Browser-Automation starten? (Sie stoppt, wenn das Fenster geschlossen wird.)')) return;
     S.auto = !S.auto;
     $('btn-auto').setAttribute('aria-pressed', String(S.auto));
     status(S.auto ? 'Automation EIN' : 'Automation AUS');
@@ -1179,7 +1197,66 @@ function meter(el, db) {
   el.style.width = `${Math.max(0, Math.min(100, ((db + 60) / 60) * 100))}%`;
 }
 
+/** Decks A/B zeigen, was der Kern gerade sendet (Server-Automation ist maßgeblich). */
+function renderServerDecks() {
+  const st = S.playout?.status;
+  if (!st?.running) {
+    for (const id of AUTO_DECKS) {
+      if (deckEls[id]?.card.dataset.srv) {
+        delete deckEls[id].card.dataset.srv;
+        renderDeck(id);
+        deckEls[id].meter.style.height = '0';
+      }
+    }
+    return;
+  }
+  const elapsed = Date.now() - (S.playoutAt || Date.now());
+  for (const id of AUTO_DECKS) {
+    const els = deckEls[id];
+    if (audio?.decks[id]?.media) continue; // Browser-Deck ist manuell belegt
+    const cur = st.current?.deck === id ? st.current : null;
+    const fading = st.fading?.deck === id ? st.fading : null;
+    const m = cur ? S.libById.get(cur.mediaId) : fading ? S.libById.get(fading.mediaId) : null;
+    const key = `${cur?.mediaId ?? ''}|${fading?.mediaId ?? ''}`;
+    if (els.card.dataset.srv !== key) {
+      els.card.dataset.srv = key;
+      els.card.dataset.status = cur ? 'playing' : 'empty';
+      els.status.textContent = cur ? 'on air' : fading ? 'fade' : 'leer';
+      els.title.textContent = m?.title ?? '–';
+      els.artist.textContent = m?.artist ?? '';
+      els.bpm.textContent = m?.bpm ? String(m.bpm) : '–';
+      els.total.textContent = fmt(cur?.durationMs ?? m?.durationMs);
+      els.cover.replaceWith((els.cover = coverEl(m, 'cover', id)));
+    }
+    if (cur) {
+      const pos = cur.positionMs + elapsed;
+      const rem = cur.durationMs != null ? Math.max(0, cur.durationMs - pos) : null;
+      els.elapsed.textContent = fmt(pos);
+      els.remain.textContent = rem != null ? `-${fmt(rem)}` : '∞';
+      els.remain.classList.toggle('warn', rem != null && rem < 20_000 && rem >= 10_000);
+      els.remain.classList.toggle('end', rem != null && rem < 10_000);
+      els.bar.style.width = cur.durationMs ? `${Math.min(100, (pos / cur.durationMs) * 100)}%` : '0';
+      const lv = S.srvLevel?.rmsDb ?? -90;
+      els.meter.style.height = `${Math.max(0, Math.min(100, ((lv + 60) / 60) * 100))}%`;
+    } else {
+      els.elapsed.textContent = '0:00';
+      els.remain.textContent = '--:--';
+      els.bar.style.width = '0';
+      els.meter.style.height = '0';
+    }
+  }
+}
+
 function liveProgress() {
+  renderServerDecks();
+  if (serverMode() && S.srvLevel) {
+    const lv = S.srvLevel;
+    meter($('m-rms'), lv.rmsDb);
+    meter($('m-peak'), lv.peakDb);
+    $('m-rms-v').textContent = lv.rmsDb <= -90 ? '-∞' : lv.rmsDb.toFixed(1);
+    $('m-peak-v').textContent = lv.peakDb <= -90 ? '-∞' : lv.peakDb.toFixed(1);
+    $('lufs-v').textContent = lv.rmsDb <= -90 ? '– dB' : `${lv.rmsDb.toFixed(1)} dB RMS · Server`;
+  }
   // Now Playing: Fortschritt aus laufendem Deck bzw. Server-Playout
   const po = S.playout?.status;
   const playing = DECKS.map((id) => audio?.decks[id]).find((d) => d?.playing && d.media?.id === S.nowPlaying?.mediaId);
@@ -1229,6 +1306,7 @@ function tick() {
       }
     }
   }
+  if (serverMode()) return; // Pegel kommen dann vom Kern
   const lv = audio.masterLevel();
   meter($("m-rms"), lv.rmsDb);
   $("lufs-v").textContent = lv.rmsDb <= -90 ? "– dB" : `${lv.rmsDb.toFixed(1)} dB RMS`;

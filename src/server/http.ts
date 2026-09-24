@@ -3,7 +3,7 @@
 
 import { createServer, type IncomingMessage, type ServerResponse, type Server } from 'node:http';
 import { createReadStream, createWriteStream, existsSync, statSync, rmSync } from 'node:fs';
-import { extname, join, normalize, resolve } from 'node:path';
+import path, { extname, join, normalize, resolve } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import { AirDeckApp, AppError, canSee, newId, type Principal } from './app.ts';
 import { MEDIA_CATEGORIES, parseFileName, type MediaCategory } from '../core/automation.ts';
@@ -261,6 +261,11 @@ export function createHttpServer(app: AirDeckApp, studioDir: string): Server {
   add('POST', '/api/v1/stations/:sid/rec-plans', 'automation:write', async (c) => app.saveRecPlan(sid(c), null, await c.body()));
   add('DELETE', '/api/v1/stations/:sid/rec-plans/:id', 'automation:write', (c) => app.deleteRecPlan(sid(c), c.params.id!));
 
+  // --- Benachrichtigungen / Webhooks / Now-Playing-Export ---
+  add('GET', '/api/v1/stations/:sid/integrations', 'stations:write', (c) => app.integrations(sid(c)));
+  add('PUT', '/api/v1/stations/:sid/integrations', 'stations:write', async (c) => app.setIntegrations(c.p, sid(c), await c.body()));
+  add('POST', '/api/v1/stations/:sid/integrations/test', 'stations:write', (c) => app.testIntegrations(sid(c)));
+
   // --- laut.fm ---
   add('GET', '/api/v1/stations/:sid/lautfm', 'lautfm:read', (c) => app.lautfmConfig(sid(c)));
   add('PUT', '/api/v1/stations/:sid/lautfm', 'lautfm:write', async (c) => app.setLautfmConfig(c.p, sid(c), await c.body()));
@@ -517,7 +522,7 @@ function serveStatic(req: IncomingMessage, res: ServerResponse, root: string, pa
   const rel = path === '/' ? 'index.html' : decodeURIComponent(path).replace(/^\/+/, '');
   const base = resolve(root);
   const file = resolve(base, normalize(rel));
-  if (!file.startsWith(base + '/') && file !== base) return json(res, 403, { error: 'forbidden' });
+  if (!isInside(base, file)) return json(res, 403, { error: 'forbidden' });
   if (!existsSync(file) || !statSync(file).isFile()) return json(res, 404, { error: 'not_found' });
   res.setHeader(
     'Content-Security-Policy',
@@ -526,6 +531,15 @@ function serveStatic(req: IncomingMessage, res: ServerResponse, root: string, pa
   res.writeHead(200, { 'Content-Type': STATIC_TYPES[extname(file)] ?? 'application/octet-stream', 'Cache-Control': 'no-cache' });
   if (req.method === 'HEAD') return void res.end();
   createReadStream(file).pipe(res);
+}
+
+/**
+ * Liegt `file` innerhalb von `base`? Plattformunabhängig (Windows nutzt "\\" als Trenner).
+ * @param p Pfadmodul (für Tests: path.win32 / path.posix)
+ */
+export function isInside(base: string, file: string, p: typeof path = path): boolean {
+  const rel = p.relative(base, file);
+  return rel !== '' && !rel.startsWith('..') && !p.isAbsolute(rel);
 }
 
 function arr(v: unknown): string[] {

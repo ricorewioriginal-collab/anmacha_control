@@ -218,3 +218,15 @@ test('Persistenz: Neustart stellt Konfiguration ohne aktive Quellen wieder her',
   assert.ok(again.authenticate(token));
   again.shutdown();
 });
+
+test('Pfadprüfung funktioniert mit Windows- und Linux-Pfaden', async () => {
+  const { isInside } = await import('../src/server/http.ts');
+  const path = await import('node:path');
+  assert.equal(isInside('C:\\Program Files\\AirDeck\\studio', 'C:\\Program Files\\AirDeck\\studio\\index.html', path.win32), true);
+  assert.equal(isInside('C:\\Program Files\\AirDeck\\studio', 'C:\\Program Files\\AirDeck\\studio\\js\\app.js', path.win32), true);
+  assert.equal(isInside('C:\\Program Files\\AirDeck\\studio', 'C:\\Program Files\\AirDeck\\secret.txt', path.win32), false);
+  assert.equal(isInside('C:\\Program Files\\AirDeck\\studio', 'D:\\x.html', path.win32), false);
+  assert.equal(isInside('/opt/airdeck/studio', '/opt/airdeck/studio/index.html', path.posix), true);
+  assert.equal(isInside('/opt/airdeck/studio', '/opt/airdeck/studio-evil/x', path.posix), false);
+  assert.equal(isInside('/opt/airdeck/studio', '/opt/airdeck/studio', path.posix), false);
+});
