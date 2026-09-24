@@ -18,6 +18,8 @@ declare global {
   // wird im gebündelten Windows-/Desktop-Build per Banner gesetzt (scripts/build.mjs)
   var __AIRDECK_ROOT: string | undefined;
   var __AIRDECK_PACKAGED: boolean | undefined;
+  var __AIRDECK_BUILD: string | undefined;
+  var __AIRDECK_VERSION: string | undefined;
 }
 
 const argv = process.argv.slice(2);
@@ -75,7 +77,7 @@ async function main(): Promise<void> {
   if (sync.config.backend !== 'local') {
     console.log(`Datenspeicher: ${sync.config.backend} – Abgleich: ${decision ?? 'nicht möglich'}${sync.status.lastError ? ` (${sync.status.lastError})` : ''}`);
   }
-  const app = new AirDeckApp(dataDir, { appRoot: root, secrets, sync });
+  const app = new AirDeckApp(dataDir, { appRoot: root, secrets, sync, build: globalThis.__AIRDECK_BUILD ?? 'dev', packaged, headless: !desktop });
   console.log(app.ffmpeg ? `ffmpeg: ${app.ffmpeg.version}` : 'ffmpeg nicht gefunden – Server-Playout (24/7) deaktiviert');
 
   if (argv.includes('--new-admin-token')) {

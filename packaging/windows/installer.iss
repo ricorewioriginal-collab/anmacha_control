@@ -51,6 +51,9 @@ Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: 
 [Run]
 Filename: "{app}\AirDeck.exe"; Description: "AirDeck jetzt starten"; Flags: nowait postinstall skipifsilent
 
+; Nach einem automatischen Update (Aufruf mit /UPDATE=1) AirDeck wieder starten
+Filename: "{app}\AirDeck.exe"; Parameters: "{code:RelaunchParams}"; Flags: nowait; Check: IsUpdate
+
 [UninstallRun]
 Filename: "{cmd}"; Parameters: "/c taskkill /IM AirDeck.exe /F"; Flags: runhidden; RunOnceId: "StopAirDeck"
 
@@ -67,6 +70,16 @@ var
   MysqlPage: TInputQueryWizardPage;
   FirebasePage: TInputFileWizardPage;
   FirstSyncPage: TInputOptionWizardPage;
+
+function IsUpdate: Boolean;
+begin
+  Result := ExpandConstant('{param:UPDATE|0}') = '1';
+end;
+
+function RelaunchParams(Param: String): String;
+begin
+  if ExpandConstant('{param:HEADLESSRUN|0}') = '1' then Result := '--headless' else Result := '';
+end;
 
 procedure InitializeWizard;
 begin

@@ -75,6 +75,8 @@ export function formDialog(title, fields, submitLabel = 'Speichern') {
     if (f.type === 'days') {
       const set = new Set(Array.isArray(f.value) ? f.value : []);
       input = h('div', { class: 'days', id }, ...DAYS.map((d, i) => h('label', { class: 'chk' }, h('input', { type: 'checkbox', name: `${f.name}_${i}`, checked: set.has(i) }), d)));
+    } else if (f.type === 'info') {
+      input = h('output', { id, class: 'info' }, String(f.value ?? ''));
     } else if (f.type === 'textarea') {
       input = h('textarea', { id, name: f.name, rows: '8', value: f.value ?? '' });
     } else if (f.options) {
@@ -97,6 +99,7 @@ export function formDialog(title, fields, submitLabel = 'Speichern') {
       /** @type {Record<string, any>} */
       const out = {};
       for (const f of fields) {
+        if (f.type === 'info') continue;
         if (f.type === 'days') {
           out[f.name] = DAYS.map((_, i) => i).filter((i) => /** @type {HTMLInputElement} */ (form.elements.namedItem(`${f.name}_${i}`)).checked);
           continue;
@@ -169,6 +172,7 @@ const ICONS = /** @type {Record<string, string>} */ ({
   auto: 'M21 12a9 9 0 1 1-3-6.7M21 4v5h-5',
   sliders: 'M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6',
   cloud: 'M17.5 19H9a7 7 0 1 1 6.7-9h1.8a4.5 4.5 0 1 1 0 9z',
+  update: 'M21 12a9 9 0 1 1-2.6-6.4M21 3v6h-6M12 8v5l3 2',
   lautfm: 'M12 12m-2 0a2 2 0 1 0 4 0a2 2 0 1 0 -4 0M16.2 7.8a6 6 0 0 1 0 8.4M7.8 16.2a6 6 0 0 1 0-8.4M19.1 4.9a10 10 0 0 1 0 14.2M4.9 19.1a10 10 0 0 1 0-14.2',
 });
 

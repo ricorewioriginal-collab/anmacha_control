@@ -7,6 +7,7 @@ import { AudioEngine, DECKS, SilenceDetector, openMic, recordStream } from './au
 import { $, CATEGORY_STYLE, clockTime, download, fmt, formDialog, h, hydrateIcons, icon, mediaTitle, run, status } from './ui.js';
 import { mountPlanning, mountRecorder } from './planning.js';
 import { mountLautfm } from './lautfm.js';
+import { mountUpdates } from './updates.js';
 
 const CATEGORY_LABEL = /** @type {Record<string,string>} */ ({
   music: 'Musik', jingle: 'Jingle', sweeper: 'Sweeper', station_id: 'Station ID', drop: 'Drop', news: 'News',
@@ -1005,6 +1006,7 @@ function bindStatic() {
   $('btn-menu').addEventListener('click', () => $('sidebar').classList.toggle('open'));
   $('btn-storage').addEventListener('click', editStorage);
   $('btn-notify').addEventListener('click', editNotify);
+  mountUpdates(api);
   buildQuick();
   bindLiveVoice();
   bindProcessing();

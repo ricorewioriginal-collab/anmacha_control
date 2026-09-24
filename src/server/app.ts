@@ -48,6 +48,7 @@ import { pickNext as pickFromPool } from '../core/automation.ts';
 import type { RelayTap } from './relay.ts';
 import { RADIOADMIN, type LautfmConfig } from './lautfm.ts';
 import { SyncManager } from './sync.ts';
+import { DEFAULT_SOURCE, Updater, type UpdateSource } from './update.ts';
 import { readFileSync } from 'node:fs';
 import { NOTIFY_EVENTS, Notifier, validateExportPath, validateWebhookUrl, type IntegrationsConfig, type NotifyEvent } from './notify.ts';
 
@@ -216,12 +217,19 @@ export class AirDeckApp {
 
   readonly sync: SyncManager;
 
-  constructor(dataDir: string, opts: { stableMs?: number; cooldownMs?: number; appRoot?: string; ffmpeg?: FfmpegInfo | null; secrets?: SecretStore; sync?: SyncManager } = {}) {
+  readonly updater: Updater;
+  readonly packaged: boolean;
+  readonly headless: boolean;
+
+  constructor(dataDir: string, opts: { stableMs?: number; cooldownMs?: number; appRoot?: string; ffmpeg?: FfmpegInfo | null; secrets?: SecretStore; sync?: SyncManager; build?: string; packaged?: boolean; headless?: boolean } = {}) {
     this.dataDir = dataDir;
     this.ffmpeg = opts.ffmpeg !== undefined ? opts.ffmpeg : detectFfmpeg(opts.appRoot ?? process.cwd());
     this.mediaDir = join(dataDir, 'media');
     mkdirSync(this.mediaDir, { recursive: true });
     this.secrets = opts.secrets ?? new SecretStore(dataDir);
+    this.updater = new Updater(opts.build ?? 'dev');
+    this.packaged = opts.packaged ?? false;
+    this.headless = opts.headless ?? false;
     this.audit = new AuditLog(join(dataDir, 'audit.log'));
     this.tokensFile = join(dataDir, 'tokens.json');
     this.tokens = readJson<ApiToken[]>(this.tokensFile, []);
@@ -1633,6 +1641,55 @@ export class AirDeckApp {
     const webhooks = await Promise.all(cfg.webhooks.map(async (w) => ({ id: w.id, ok: await this.notifier.deliverWebhook(w, payload) })));
     const telegram = cfg.telegram ? await this.notifier.deliverTelegram(cfg.telegram.chatId, cfg.telegram.botTokenRef, `✅ AirDeck ${stationId}: Testmeldung`) : null;
     return { webhooks, telegram };
+  }
+
+  // ---------- Updates ----------
+
+  updateConfig(): UpdateSource & { autoCheck: boolean } {
+    const s = readJson<Partial<UpdateSource> & { autoCheck?: boolean }>(join(this.dataDir, 'update.json'), {});
+    return { ...DEFAULT_SOURCE, ...s, tokenRef: 'update:token', autoCheck: s.autoCheck ?? true };
+  }
+
+  updateSettingsView(): unknown {
+    const s = this.updateConfig();
+    return {
+      repo: s.repo, tag: s.tag, manifestUrl: s.manifestUrl ?? '', autoCheck: s.autoCheck, hasToken: this.secrets.has('update:token'),
+      build: this.updater.current, canInstall: process.platform === 'win32' && this.packaged,
+    };
+  }
+
+  setUpdateSettings(input: Record<string, unknown>): unknown {
+    const cur = this.updateConfig();
+    const repo = typeof input.repo === 'string' && input.repo ? input.repo.trim() : cur.repo;
+    if (!/^[\w.-]+\/[\w.-]+$/.test(repo)) throw new AppError(400, 'invalid_repo', 'Repository im Format besitzer/name angeben');
+    const manifestUrl = typeof input.manifestUrl === 'string' ? input.manifestUrl.trim() : cur.manifestUrl ?? '';
+    if (manifestUrl && !/^https:\/\//.test(manifestUrl)) throw new AppError(400, 'invalid_url', 'Update-Adresse muss https:// sein');
+    if (typeof input.token === 'string') {
+      if (input.token) this.secrets.set('update:token', input.token.trim());
+      else this.secrets.delete('update:token');
+    }
+    writeFileAtomic(join(this.dataDir, 'update.json'), JSON.stringify({
+      repo, tag: typeof input.tag === 'string' && input.tag ? input.tag : cur.tag, manifestUrl: manifestUrl || undefined,
+      autoCheck: typeof input.autoCheck === 'boolean' ? input.autoCheck : cur.autoCheck,
+    }));
+    return this.updateSettingsView();
+  }
+
+  checkUpdate(force = false): Promise<unknown> {
+    return this.updater.check(this.updateConfig(), this.secrets.get('update:token'), force);
+  }
+
+  /** Windows (installiertes Programm): Setup laden, prüfen, still installieren, AirDeck beenden. */
+  async installUpdate(exit: () => void): Promise<unknown> {
+    if (process.platform !== 'win32' || !this.packaged) throw new AppError(409, 'not_supported', 'Automatische Installation nur im installierten Windows-Programm – sonst bitte manuell herunterladen');
+    const info = await this.updater.check(this.updateConfig(), this.secrets.get('update:token'), true);
+    if (info.error) throw new AppError(502, 'update_check_failed', info.error);
+    if (!info.available || !info.assets.setup) throw new AppError(409, 'no_update', 'Kein neueres Update verfügbar');
+    const file = await this.updater.download(info.assets.setup, this.secrets.get('update:token'));
+    this.audit.write({ kind: 'update', event: 'install', from: this.updater.current, to: info.latest });
+    this.updater.runWindowsSetup(file, this.headless);
+    setTimeout(exit, 1500).unref();
+    return { installing: true, to: info.latest };
   }
 
   // ---------- laut.fm ----------

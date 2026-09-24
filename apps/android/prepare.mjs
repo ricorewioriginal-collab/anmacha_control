@@ -10,6 +10,10 @@ const run = (cmd) => execSync(cmd, { cwd: here, stdio: 'inherit' });
 
 rmSync(www, { recursive: true, force: true });
 cpSync(resolve(here, '../../studio'), www, { recursive: true, filter: (src) => !src.endsWith('tsconfig.json') });
+// Build-Kennung für die Update-Prüfung der App
+const build = (process.env.GITHUB_SHA || execSync('git rev-parse HEAD', { cwd: here, encoding: 'utf8' }).trim()).slice(0, 7);
+const version = JSON.parse(readFileSync(resolve(here, '../../package.json'), 'utf8')).version;
+writeFileSync(join(www, 'build.json'), JSON.stringify({ build, version, platform: 'android' }));
 
 if (!existsSync(join(here, 'android'))) run('npx cap add android');
 

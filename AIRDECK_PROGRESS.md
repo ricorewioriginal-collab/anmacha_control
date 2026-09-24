@@ -31,6 +31,7 @@
 
 - [x] Datenspeicher/Sync: MySQL/MariaDB und Firebase (Firestore, Service-Account/RS256) – Auswahl im Installer und unter „Datenspeicher & Sync“, Local-First mit Konflikterkennung; getestet mit echter MariaDB und Firestore-Mock
 - [x] Benachrichtigungen-Dialog (Webhook, Telegram, Now-Playing-Datei)
+- [x] **Update-Funktion Windows + Android:** Prüfung gegen das Release „nightly“ (oder eigene Update-Adresse), Build-Kennung im Programm, SHA-256-Prüfung des Downloads, Windows installiert still und startet neu, Android lädt die APK über den verbundenen AirDeck (Token bleibt auf dem Server). Tests mit GitHub-Mock
 
 ## Nächste Schritte (Vorschlag, in dieser Reihenfolge)
 

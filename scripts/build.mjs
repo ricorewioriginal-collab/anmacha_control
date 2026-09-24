@@ -13,6 +13,14 @@ const root = resolve(import.meta.dirname, '..');
 const dist = join(root, 'dist');
 const sea = process.argv.includes('--sea');
 const version = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).version;
+// Build-Kennung (Commit) für die Update-Prüfung
+const buildId = (process.env.GITHUB_SHA || (() => {
+  try {
+    return execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
+  } catch {
+    return 'dev';
+  }
+})()).slice(0, 7);
 
 rmSync(dist, { recursive: true, force: true });
 mkdirSync(dist, { recursive: true });
@@ -31,6 +39,8 @@ await build({
       '/* AirDeck ' + version + ' */',
       'const __sea = (() => { try { return require("node:sea").isSea(); } catch { return false; } })();',
       'globalThis.__AIRDECK_PACKAGED = __sea;',
+      `globalThis.__AIRDECK_BUILD = ${JSON.stringify(buildId)};`,
+      `globalThis.__AIRDECK_VERSION = ${JSON.stringify(version)};`,
       'globalThis.__AIRDECK_ROOT = __sea ? require("node:path").dirname(process.execPath) : require("node:path").resolve(__dirname, "..");',
     ].join('\n'),
   },
@@ -72,6 +82,7 @@ if (sea) {
   if (process.platform === 'darwin') execFileSync('codesign', ['--sign', '-', exe]);
 
   cpSync(join(root, 'studio'), join(out, 'studio'), { recursive: true, filter: (src) => !src.endsWith('tsconfig.json') });
+  writeFileSync(join(out, 'studio', 'build.json'), JSON.stringify({ build: buildId, version, platform: 'windows' }));
   cpSync(join(root, 'packaging', 'windows'), out, { recursive: true, filter: (src) => !src.endsWith('.iss') });
   mkdirSync(join(out, 'icons'), { recursive: true });
   for (const f of ['airdeck-windows.ico', 'airdeck-server.ico']) copyFileSync(join(root, 'assets', 'icons', f), join(out, 'icons', f));

@@ -62,6 +62,18 @@ Sie verbindet sich mit AirDeck auf deinem PC. Die Automation selbst läuft auf d
    Es ist eine Test-APK; eine signierte Play-Store-Version folgt.
 3. App starten, dann **Server-Adresse** eintragen (z. B. `http://192.168.1.20:8750`, die IP deines PCs) und das Token.
 
+## Updates
+
+Unter **Updates** in der Seitenleiste zeigt AirDeck die installierte und die neueste Version. Ein roter Hinweis „neu“ erscheint, sobald ein Update bereitsteht. Geprüft wird beim Start und danach alle 6 Stunden. Das lässt sich im Dialog abschalten.
+
+- **Windows (installiert):** „Jetzt installieren“ lädt das Setup und prüft die SHA-256-Prüfsumme. Danach wird AirDeck beendet, still aktualisiert und neu gestartet. Daten und Einstellungen bleiben erhalten. Die laufende Sendung wird dabei kurz unterbrochen.
+- **Windows (portable) / Server:** Das Update wird angezeigt, aber manuell eingespielt (ZIP entpacken bzw. Paket ersetzen).
+- **Android:** „Neue APK laden & installieren“ lädt die APK über den verbundenen AirDeck-Server. Danach die Installation bestätigen. Beim ersten Mal muss „Unbekannte Apps installieren“ erlaubt werden.
+- **Privates Repository:** Im Dialog ein GitHub-Token mit reinem Lesezugriff („Contents: Read“) hinterlegen. Es wird verschlüsselt gespeichert und verlässt den Server nie.
+- **Eigene Update-Adresse:** Alternativ eine https-URL zu einer JSON-Datei `{ "build": "<commit>", "publishedAt": "…", "assets": { "setup": { "url", "size", "sha256" }, "portable": {…}, "apk": {…} } }`.
+
+API: `GET /api/v1/update`, `GET|PUT /api/v1/update/settings`, `POST /api/v1/update/install` (Admin), `GET /api/v1/update/apk`.
+
 ## Häufige Fragen
 
 - **„Windows hat den PC geschützt“** – das liegt an der fehlenden Code-Signatur. Ein Signaturzertifikat kann später ergänzt werden.

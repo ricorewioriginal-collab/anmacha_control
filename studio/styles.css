@@ -53,6 +53,7 @@ button, select, input, textarea { font: inherit; color: inherit; }
 .nav button { display: flex; align-items: center; gap: 10px; width: 100%; background: none; border: 1px solid transparent; border-radius: 9px; padding: 8px 10px; color: #b6c4de; cursor: pointer; text-align: left; }
 .nav button:hover { background: rgba(47, 140, 255, .08); color: #fff; }
 .nav button[aria-pressed="true"] { background: linear-gradient(90deg, rgba(47, 140, 255, .35), rgba(47, 140, 255, .12)); border-color: rgba(47, 140, 255, .45); color: #fff; box-shadow: 0 0 18px rgba(47, 140, 255, .18) inset; }
+.nav-badge { margin-left: auto; background: #ff3b5c; color: #fff; font-size: 10px; font-weight: 700; border-radius: 8px; padding: 1px 6px; text-transform: uppercase; }
 .side-foot { margin-top: auto; }
 .side-label { color: var(--muted); font-size: 10px; letter-spacing: .12em; text-transform: uppercase; padding: 0 8px 6px; }
 .side-outputs { display: flex; flex-direction: column; gap: 4px; padding: 0 4px; }
@@ -372,3 +373,4 @@ tr.active-row td { background: rgba(34,197,94,.08); }
 .bar { flex: 1; display: flex; flex-direction: column; align-items: center; height: 100%; justify-content: flex-end; font-size: 9px; color: var(--muted); }
 .bar i { width: 100%; background: linear-gradient(180deg, var(--primary), var(--accent)); border-radius: 3px 3px 0 0; min-height: 2px; }
 @media (max-width: 720px) { .lf-split { grid-template-columns: 1fr; } .views { width: 100%; order: 5; } }
+.field output.info { display: block; padding: 8px 10px; background: rgba(255,255,255,.04); border-radius: 8px; }

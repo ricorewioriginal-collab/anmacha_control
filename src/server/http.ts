@@ -5,6 +5,7 @@ import { createServer, type IncomingMessage, type ServerResponse, type Server } 
 import { createReadStream, createWriteStream, existsSync, statSync, rmSync } from 'node:fs';
 import path, { extname, join, normalize, resolve } from 'node:path';
 import { pipeline } from 'node:stream/promises';
+import { Readable } from 'node:stream';
 import { AirDeckApp, AppError, canSee, newId, type Principal } from './app.ts';
 import { MEDIA_CATEGORIES, parseFileName, type MediaCategory } from '../core/automation.ts';
 import { OUTPUT_CAPABILITIES } from './icecast.ts';
@@ -284,6 +285,27 @@ export function createHttpServer(app: AirDeckApp, studioDir: string): Server {
       throw new AppError(502, 'sync_failed', (err as Error).message);
     }
     return app.sync.view();
+  });
+
+  // --- Updates ---
+  add('GET', '/api/v1/update', 'automation:read', (c) => app.checkUpdate(c.url.searchParams.get('force') === '1'));
+  add('GET', '/api/v1/update/settings', null, (c) => (globalAdmin(c), app.updateSettingsView()));
+  add('PUT', '/api/v1/update/settings', null, async (c) => (globalAdmin(c), app.setUpdateSettings(await c.body())));
+  add('POST', '/api/v1/update/install', null, (c) => {
+    globalAdmin(c);
+    return app.installUpdate(() => {
+      app.shutdown();
+      process.exit(0);
+    });
+  });
+  // APK für die Android-App über diesen AirDeck laden (funktioniert auch bei privatem Repository)
+  add('GET', '/api/v1/update/apk', 'automation:read', async (c) => {
+    const info = (await app.checkUpdate()) as { assets: { apk?: import('./update.ts').UpdateAsset }; error?: string };
+    if (!info.assets.apk) throw new AppError(404, 'no_apk', info.error ?? 'Keine APK im Release');
+    const r = await app.updater.open(info.assets.apk, app.secrets.get('update:token'));
+    c.res.writeHead(200, { 'Content-Type': 'application/vnd.android.package-archive', 'Content-Disposition': 'attachment; filename="AirDeck-Android.apk"', ...(info.assets.apk.size ? { 'Content-Length': info.assets.apk.size } : {}) });
+    await pipeline(Readable.fromWeb(r.body as never), c.res);
+    return STREAMED;
   });
 
   // --- Benachrichtigungen / Webhooks / Now-Playing-Export ---
