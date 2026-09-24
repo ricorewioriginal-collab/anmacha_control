@@ -2,6 +2,9 @@
 // Keine Abhängigkeit zu AnMaCha oder anderen externen Diensten.
 
 import { createHash, randomBytes } from 'node:crypto';
+import { cpus, freemem, totalmem, uptime as osUptime } from 'node:os';
+import { spawn } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { createWriteStream, mkdirSync, rmSync, type WriteStream } from 'node:fs';
 import { join } from 'node:path';
 import {
@@ -942,6 +945,74 @@ export class AirDeckApp {
   inputDevices(): unknown {
     if (!this.ffmpeg) return { supported: false, devices: [] };
     return { supported: true, devices: listInputDevices(this.ffmpeg.ffmpeg), monitor: !!this.ffmpeg.ffplay, eqBands: EQ_BANDS };
+  }
+
+  private cpuPrev = cpus().map((c) => c.times);
+
+  /** Systemwerte für das Monitoring (CPU, RAM, Stream-Durchsatz). */
+  system(): unknown {
+    const now = cpus().map((c) => c.times);
+    let idle = 0;
+    let total = 0;
+    now.forEach((t, i) => {
+      const p = this.cpuPrev[i] ?? t;
+      const d = (k: keyof typeof t) => t[k] - p[k];
+      const sum = d('user') + d('nice') + d('sys') + d('idle') + d('irq');
+      total += sum;
+      idle += d('idle');
+    });
+    this.cpuPrev = now;
+    const outBytes = [...this.outputs.values()].reduce((a, o) => a + o.state.bytesSent, 0);
+    const t = Date.now();
+    const rate = this.lastOut ? ((outBytes - this.lastOut.bytes) / Math.max(1, t - this.lastOut.at)) * 1000 : 0;
+    this.lastOut = { bytes: outBytes, at: t };
+    return {
+      cpu: total > 0 ? Math.round((1 - idle / total) * 100) : 0,
+      ram: Math.round((1 - freemem() / totalmem()) * 100),
+      uptimeS: Math.round(osUptime()),
+      processMb: Math.round(process.memoryUsage().rss / 1048576),
+      streamBytesPerSec: Math.max(0, Math.round(rate)),
+      outputsConnected: [...this.outputs.values()].filter((o) => o.state.status === 'connected').length,
+    };
+  }
+  private lastOut: { bytes: number; at: number } | null = null;
+
+  /** Cover-Bild aus der Audiodatei (eingebettetes Bild), zwischengespeichert. */
+  async cover(stationId: string, mediaId: string): Promise<string | null> {
+    const m = this.media(stationId, mediaId);
+    if (m.url || !this.ffmpeg) return null;
+    const dir = join(this.dataDir, 'covers', stationId);
+    const file = join(dir, `${m.id}.jpg`);
+    const none = `${file}.none`;
+    if (existsSync(file)) return file;
+    if (existsSync(none)) return null;
+    mkdirSync(dir, { recursive: true });
+    const ok = await new Promise<boolean>((resolve) => {
+      const p = spawn(this.ffmpeg!.ffmpeg, ['-hide_banner', '-loglevel', 'error', '-y', '-i', this.mediaPath(stationId, m), '-an', '-frames:v', '1', '-vf', 'scale=300:300:force_original_aspect_ratio=increase,crop=300:300', file], { windowsHide: true });
+      p.on('error', () => resolve(false));
+      p.on('close', (code) => resolve(code === 0 && existsSync(file)));
+      setTimeout(() => p.kill(), 15_000).unref();
+    });
+    if (!ok) {
+      rmSync(file, { force: true });
+      writeFileAtomic(none, '');
+      return null;
+    }
+    return file;
+  }
+
+  /** Schnelltrigger: Titel einer Kategorie (Rotation) über der Musik oder als Nächstes. */
+  quickTrigger(stationId: string, category: string, mode?: string): MediaItem {
+    const rt = this.rt(stationId);
+    if (!(MEDIA_CATEGORIES as readonly string[]).includes(category)) throw new AppError(400, 'invalid_category', 'Unbekannte Kategorie');
+    const pool = rt.data.library.filter((m) => m.category === category);
+    const picked = pickFromPool(pool.map((x) => ({ ...x, category: 'music' as const })), 'music', rt.data.history, rt.data.rotation);
+    if (!picked) throw new AppError(404, 'empty', 'Keine Titel in dieser Kategorie');
+    const m = rt.data.library.find((x) => x.id === picked.id)!;
+    const fx = ['jingle', 'sweeper', 'station_id', 'drop', 'tts', 'bed'].includes(category);
+    const md = mode === 'fx' || mode === 'now' || mode === 'track' ? mode : fx ? 'fx' : 'now';
+    this.executeTarget(stationId, { kind: 'media', mediaId: m.id, mode: md, label: m.title }, 'quick');
+    return m;
   }
 
   shuffleQueue(stationId: string): void {

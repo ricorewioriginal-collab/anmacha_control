@@ -177,3 +177,22 @@ test('laut.fm: nur erlaubte Pfade, Token bleibt serverseitig', async () => {
   upstream.close();
   proxy.close();
 });
+
+test('Schnelltrigger nach Kategorie, Systemwerte', () => {
+  const { app, done } = setup();
+  try {
+    const events: unknown[] = [];
+    app.subscribe((e) => e.type === 'automation.command' && events.push(e.payload));
+    const m = app.quickTrigger('main', 'jingle');
+    assert.equal(m.id, 'j');
+    assert.deepEqual(events, [{ action: 'fx', mediaId: 'j' }]); // Jingle läuft über der Musik
+    app.quickTrigger('main', 'music', 'track');
+    assert.equal((app.queueView('main') as { items: { origin: string }[] }).items[0]!.origin, 'schedule');
+    assert.throws(() => app.quickTrigger('main', 'news'), /Keine Titel/);
+    assert.throws(() => app.quickTrigger('main', 'x'), /Kategorie/);
+    const s = app.system() as { cpu: number; ram: number };
+    assert.ok(s.ram > 0 && s.ram <= 100 && s.cpu >= 0 && s.cpu <= 100);
+  } finally {
+    done();
+  }
+});

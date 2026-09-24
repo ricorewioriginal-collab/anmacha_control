@@ -192,6 +192,15 @@ export function createHttpServer(app: AirDeckApp, studioDir: string): Server {
   add('POST', '/api/v1/stations/:sid/playout/start', 'automation:write', async (c) => app.startPlayout(c.p, sid(c), (await c.body()) as never));
   add('POST', '/api/v1/stations/:sid/playout/stop', 'automation:write', (c) => app.stopPlayout(c.p, sid(c)));
   add('POST', '/api/v1/stations/:sid/playout/mic', 'automation:write', async (c) => app.setMic(sid(c), (await c.body()).on === true));
+  add('GET', '/api/v1/system', null, () => app.system());
+  add('POST', '/api/v1/stations/:sid/quick/:category', 'cardwall:trigger', async (c) => app.quickTrigger(sid(c), c.params.category!, str((await c.body()).mode)));
+  add('GET', '/api/v1/stations/:sid/media/:id/cover', 'media:read', async (c) => {
+    const file = await app.cover(sid(c), c.params.id!);
+    if (!file) throw new AppError(404, 'no_cover', 'Kein Cover');
+    c.res.setHeader('Cache-Control', 'private, max-age=86400');
+    sendFile(c.req, c.res, file, 'image/jpeg');
+    return STREAMED;
+  });
   add('GET', '/api/v1/audio-devices', 'automation:read', () => app.inputDevices());
   add('POST', '/api/v1/stations/:sid/queue/shuffle', 'queue:write', (c) => app.shuffleQueue(sid(c)));
   add('POST', '/api/v1/stations/:sid/playout/skip', 'automation:write', (c) => app.skipPlayout(sid(c)));
@@ -309,7 +318,7 @@ export function createHttpServer(app: AirDeckApp, studioDir: string): Server {
     }
 
     if (path.startsWith('/ingest/')) return handleIngest(app, req, res, path);
-    if (path === '/api/v1/health') return json(res, 200, { ok: true, name: 'AirDeck', version: '0.3.0' });
+    if (path === '/api/v1/health') return json(res, 200, { ok: true, name: 'AirDeck', version: '0.4.0' });
 
     if (path.startsWith('/listen/')) {
       const p = auth(app, req, url);
