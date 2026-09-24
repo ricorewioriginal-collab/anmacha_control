@@ -1,0 +1,10 @@
+{
+  "name": "AirDeck Studio",
+  "short_name": "AirDeck",
+  "start_url": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#070d18",
+  "theme_color": "#0a1120",
+  "icons": [{ "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
+}

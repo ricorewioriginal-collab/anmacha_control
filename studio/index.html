@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0a1120">
+  <title>AirDeck Studio</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="top">
+    <div class="brand">
+      <img src="icon.svg" alt="" width="28" height="28">
+      <div>
+        <div class="brand-name">AirDeck</div>
+        <div class="brand-sub" id="station-slogan"></div>
+      </div>
+    </div>
+    <select id="station-select" aria-label="Sender"></select>
+    <div class="onair" id="onair" data-state="off">
+      <span class="dot"></span><span id="onair-text">OFF AIR</span>
+    </div>
+    <div class="top-actions">
+      <button class="toggle" id="btn-auto" aria-pressed="false" title="Automation: Queue automatisch abspielen">AUTO</button>
+      <button class="toggle" id="btn-stream" aria-pressed="false" title="Studio-Summe als Automation-Quelle senden">STREAM</button>
+      <label class="chk" title="Musik absenken, während Carts laufen"><input type="checkbox" id="chk-duck" checked> Ducking</label>
+      <button class="icon-btn" id="btn-station" title="Sender-Einstellungen">⚙</button>
+    </div>
+    <div class="clock">
+      <div id="clock-time">--:--:--</div>
+      <div id="clock-date"></div>
+    </div>
+    <span class="conn" id="conn" title="Serververbindung"></span>
+  </header>
+
+  <main class="studio">
+    <section class="decks" id="decks" aria-label="Decks"></section>
+
+    <section class="panel carts-panel" aria-label="Cardwall">
+      <div class="panel-head">
+        <h2>Cardwall</h2>
+        <div class="tabs" id="cart-groups"></div>
+      </div>
+      <div class="carts" id="carts"></div>
+    </section>
+
+    <section class="panel lib-panel" aria-label="Musikarchiv">
+      <div class="panel-head">
+        <h2>Archiv</h2>
+        <input type="search" id="lib-search" placeholder="Suchen …" aria-label="Archiv durchsuchen">
+        <select id="lib-cat" aria-label="Kategorie-Filter"></select>
+        <label class="btn small" title="Audiodateien hochladen">⭱ Upload<input type="file" id="lib-upload" accept="audio/*,.mp3,.ogg,.opus,.wav,.flac,.m4a,.aac,.webm" multiple hidden></label>
+      </div>
+      <div class="table-wrap" id="lib-drop">
+        <table class="list">
+          <thead><tr><th>Titel</th><th>Interpret</th><th>Kat.</th><th class="num">Dauer</th><th></th></tr></thead>
+          <tbody id="lib-body"></tbody>
+        </table>
+        <div class="empty" id="lib-empty">Audiodateien hierher ziehen oder über „Upload“ hinzufügen.</div>
+      </div>
+    </section>
+
+    <section class="panel queue-panel" aria-label="Queue">
+      <div class="panel-head">
+        <h2>Queue</h2>
+        <span class="muted" id="queue-total"></span>
+        <label class="chk"><input type="checkbox" id="chk-autofill"> Sendeuhr</label>
+        <button class="btn small" id="btn-fill">Auffüllen</button>
+        <button class="btn small" id="btn-clear">Leeren</button>
+      </div>
+      <div class="table-wrap" id="queue-drop">
+        <table class="list">
+          <thead><tr><th class="num">Start</th><th>Titel</th><th class="num">Dauer</th><th></th></tr></thead>
+          <tbody id="queue-body"></tbody>
+        </table>
+        <div class="empty" id="queue-empty">Queue ist leer – Titel aus dem Archiv hierher ziehen.</div>
+      </div>
+    </section>
+
+    <aside class="side">
+      <section class="panel np">
+        <h2>Now Playing</h2>
+        <div class="np-title" id="np-title">–</div>
+        <div class="np-artist" id="np-artist"></div>
+        <div class="np-next"><span class="muted">Next:</span> <span id="np-next">–</span></div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head"><h2>Quellen · Priorität</h2><button class="btn small" id="btn-add-source">＋</button></div>
+        <p class="hint">Kleinere Zahl = höhere Priorität</p>
+        <ul class="sources" id="sources"></ul>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head"><h2>Ausgänge</h2><button class="btn small" id="btn-add-output">＋</button></div>
+        <ul class="outputs" id="outputs"></ul>
+      </section>
+
+      <section class="panel meters-panel">
+        <h2>Master</h2>
+        <div class="meter-row"><span>RMS</span><div class="meter"><i id="m-rms"></i></div><span class="num" id="m-rms-v">-∞</span></div>
+        <div class="meter-row"><span>Peak</span><div class="meter"><i id="m-peak"></i></div><span class="num" id="m-peak-v">-∞</span></div>
+        <div class="meter-row"><span>Limiter</span><div class="meter gr"><i id="m-gr"></i></div><span class="num" id="m-gr-v">0.0</span></div>
+        <div class="silence" id="silence" hidden>STILLE ERKANNT</div>
+      </section>
+    </aside>
+  </main>
+
+  <footer class="status">
+    <span id="status-text">Bereit.</span>
+    <span class="muted">AirDeck 0.1 · local-first</span>
+  </footer>
+
+  <dialog id="dialog"><form method="dialog" id="dialog-form"></form></dialog>
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
