@@ -32,6 +32,8 @@ import { AuditLog, DebouncedJson, readJson, writeFileAtomic } from './store.ts';
 import { SecretStore } from './secrets.ts';
 import { IcecastOutput, type OutputConfig, type OutputState } from './icecast.ts';
 import { RelayTarget } from './relay.ts';
+import { detectFfmpeg, probeDurationMs, type FfmpegInfo } from './ffmpeg.ts';
+import { DEFAULT_PLAYOUT, Playout, type PlayoutOptions } from './playout.ts';
 
 export interface Station {
   id: string;
@@ -51,6 +53,14 @@ interface StationData {
   clockCursor: number;
   autoFill: boolean;
   minQueue: number;
+  playout?: PlayoutConfig;
+}
+
+export interface PlayoutConfig extends PlayoutOptions {
+  /** Nach Serverstart automatisch wieder senden (24/7) */
+  autostart: boolean;
+  /** Quelle, als die das Playout sendet (Standard: Automation-Quelle des Senders) */
+  sourceId?: string;
 }
 
 interface PersistedState {
@@ -127,14 +137,18 @@ export class AirDeckApp {
   private readonly stations = new Map<string, StationRuntime>();
   private readonly outputs = new Map<string, IcecastOutput>();
   private readonly relays = new Map<string, RelayTarget>();
+  private readonly playouts = new Map<string, { playout: Playout; source: SourceConfig }>();
+  readonly ffmpeg: FfmpegInfo | null;
+  private tickCount = 0;
   private readonly subscribers = new Set<(e: HubEvent) => void>();
   private readonly persist: DebouncedJson<PersistedState>;
   private tokens: ApiToken[];
   private readonly tokensFile: string;
   private tickTimer: NodeJS.Timeout | null = null;
 
-  constructor(dataDir: string, opts: { stableMs?: number; cooldownMs?: number } = {}) {
+  constructor(dataDir: string, opts: { stableMs?: number; cooldownMs?: number; appRoot?: string; ffmpeg?: FfmpegInfo | null } = {}) {
     this.dataDir = dataDir;
+    this.ffmpeg = opts.ffmpeg !== undefined ? opts.ffmpeg : detectFfmpeg(opts.appRoot ?? process.cwd());
     this.mediaDir = join(dataDir, 'media');
     mkdirSync(this.mediaDir, { recursive: true });
     this.secrets = new SecretStore(dataDir);
@@ -160,10 +174,21 @@ export class AirDeckApp {
   start(): void {
     this.tickTimer = setInterval(() => this.tick(), 500);
     this.tickTimer.unref();
+    // 24/7: Playouts, die vor dem Neustart liefen, automatisch wieder starten
+    for (const [id, rt] of this.stations) {
+      if (!rt.data.playout?.autostart) continue;
+      try {
+        this.startPlayout(SYSTEM_PRINCIPAL, id, {});
+      } catch (err) {
+        this.audit.write({ kind: 'playout', event: 'autostart_failed', stationId: id, message: (err as Error).message });
+      }
+    }
   }
 
   shutdown(): void {
     if (this.tickTimer) clearInterval(this.tickTimer);
+    for (const { playout } of this.playouts.values()) playout.stop();
+    this.playouts.clear();
     for (const o of this.outputs.values()) o.stop();
     this.persist.flush();
   }
@@ -190,6 +215,18 @@ export class AirDeckApp {
     writeFileAtomic(this.tokensFile, JSON.stringify(this.tokens, null, 1), 0o600);
     const { hash: _hash, ...info } = rec;
     return { token, info };
+  }
+
+  /**
+   * Token für das lokale Desktop-Programm (Windows): verschlüsselt im Secret Store,
+   * damit das Studio-Fenster ohne Eingabe startet. Wird bei Widerruf neu erzeugt.
+   */
+  desktopToken(): string {
+    const saved = this.secrets.get('desktop:token');
+    if (saved && this.authenticate(saved)) return saved;
+    const { token } = this.createToken({ name: 'desktop', scopes: ['*'], roles: ['admin'], stationIds: ['*'] });
+    this.secrets.set('desktop:token', token);
+    return token;
   }
 
   listTokens(): Omit<ApiToken, 'hash'>[] {
@@ -245,6 +282,9 @@ export class AirDeckApp {
 
   private tick(): void {
     this.engine.tick();
+    if (++this.tickCount % 2 === 0) {
+      for (const [id, { playout }] of this.playouts) this.publish('playout.state', id, playout.status());
+    }
     // Transportebene: Quelle ohne Daten > 5 s gilt als getrennt (Netzwerkabbruch).
     for (const [key, relay] of this.relays) {
       for (const id of relay.staleSessions(5000)) {
@@ -269,6 +309,7 @@ export class AirDeckApp {
       clockCursor: data?.clockCursor ?? 0,
       autoFill: data?.autoFill ?? true,
       minQueue: data?.minQueue ?? 8,
+      playout: data?.playout,
     };
     const decks = Object.fromEntries(DECK_IDS.map((id) => [id, { id, mediaId: null, status: 'empty' }])) as Record<DeckId, DeckState>;
     const rt: StationRuntime = { station, data: d, queue: new PlayQueue(d.queue), decks, nowPlaying: { mediaId: null, deck: null, startedAt: null } };
@@ -445,6 +486,9 @@ export class AirDeckApp {
     if (!p.roles.includes('admin') && !src.allowedRoles.some((r) => p.roles.includes(r))) {
       throw new AppError(403, 'forbidden', 'Nicht autorisiert für diese Quelle');
     }
+    if ([...this.playouts.values()].some((x) => x.source.id === id)) {
+      throw new AppError(409, 'source_busy', 'Diese Quelle wird bereits vom Server-Playout (24/7) verwendet');
+    }
     const relay = this.relayFor(stationId, src.target);
     if (start || !relay.hasSession(id)) {
       // Neuer Stream (neuer Container-Header): Sitzung komplett neu aufbauen.
@@ -554,6 +598,13 @@ export class AirDeckApp {
     rt.data.library.push(item);
     this.publish('library.changed', stationId, { added: item });
     this.changed();
+    // Laufzeit serverseitig ermitteln (wichtig für Crossfade/Backtiming im Headless-Betrieb)
+    const ffprobe = this.ffmpeg?.ffprobe;
+    if (ffprobe && item.durationMs == null) {
+      probeDurationMs(ffprobe, this.mediaPath(stationId, item)).then((ms) => {
+        if (ms && item.durationMs == null && rt.data.library.includes(item)) this.updateMedia(stationId, item.id, { durationMs: ms });
+      });
+    }
     return item;
   }
 
@@ -698,6 +749,117 @@ export class AirDeckApp {
     return Object.values(this.rt(stationId).decks);
   }
 
+  // ---------- Server-Playout (24/7) ----------
+
+  playoutView(stationId: string): unknown {
+    const rt = this.rt(stationId);
+    const cfg = { ...DEFAULT_PLAYOUT, autostart: false, ...rt.data.playout };
+    return {
+      supported: !!this.ffmpeg,
+      ffmpeg: this.ffmpeg ? { version: this.ffmpeg.version, encoders: this.ffmpeg.encoders, probe: !!this.ffmpeg.ffprobe } : null,
+      config: cfg,
+      status: this.playouts.get(stationId)?.playout.status() ?? null,
+    };
+  }
+
+  startPlayout(p: Principal, stationId: string, input: Partial<PlayoutConfig>): unknown {
+    const rt = this.rt(stationId);
+    if (!this.ffmpeg) throw new AppError(501, 'unsupported', 'Server-Playout benötigt ffmpeg (AIRDECK_FFMPEG, ./ffmpeg/ oder PATH)');
+    const cfg = this.savePlayoutConfig(stationId, input);
+    if (cfg.format === 'opus' && !this.ffmpeg.encoders.opus) throw new AppError(501, 'unsupported', 'ffmpeg ohne libopus');
+    if (cfg.format === 'mp3' && !this.ffmpeg.encoders.mp3) throw new AppError(501, 'unsupported', 'ffmpeg ohne libmp3lame');
+    if (this.playouts.has(stationId)) return this.playoutView(stationId);
+    const sources = this.engine.list(stationId);
+    const source = (cfg.sourceId && sources.find((s) => s.id === cfg.sourceId)) || sources.find((s) => s.type === 'automation');
+    if (!source) throw new AppError(409, 'no_source', 'Keine Automation-Quelle für das Playout vorhanden');
+    // Browser-Stream derselben Quelle beenden, bevor das Server-Playout übernimmt
+    this.relayFor(stationId, source.target).close(source.id);
+    if (this.engine.get(source.id)?.state !== 'disconnected') this.engine.disconnect(source.id);
+
+    const playout = new Playout(this.ffmpeg.ffmpeg, {
+      nextTrack: () => this.queueNext(stationId) ?? this.emergencyPick(stationId),
+      mediaPath: (m) => this.mediaPath(stationId, m),
+      onNowPlaying: (m) => this.setNowPlaying(stationId, m.id, 'A'),
+      onStreamStart: (type) => {
+        try {
+          this.relayFor(stationId, source.target).close(source.id);
+          this.ingestOpen(source, type);
+        } catch (err) {
+          this.audit.write({ kind: 'playout', event: 'source_rejected', stationId, message: (err as Error).message });
+        }
+      },
+      onStreamData: (chunk) => this.ingestData(source, chunk),
+      onStreamStop: () => this.ingestClose(source),
+      onSilence: (silent) => {
+        // Stille → Quelle ungesund → Fallback nach Priorität; bei Erholung wieder anmelden
+        this.engine.setHealth(source.id, !silent, silent ? 'silence' : undefined);
+        if (!silent && this.engine.get(source.id)?.state === 'disconnected' && this.relayFor(stationId, source.target).hasSession(source.id)) {
+          try {
+            this.engine.connect(source.id);
+          } catch {
+            // gesperrt o. ä. – bleibt getrennt
+          }
+        }
+      },
+      log: (event, data) => {
+        this.audit.write({ kind: 'playout', event, stationId, ...data });
+        this.publish('playout.log', stationId, { event, ...data });
+      },
+    }, cfg);
+    this.playouts.set(stationId, { playout, source });
+    playout.start();
+    rt.data.playout = { ...cfg, autostart: input.autostart ?? true };
+    this.audit.write({ kind: 'playout', event: 'start', actor: p.id, stationId, sourceId: source.id });
+    this.changed();
+    return this.playoutView(stationId);
+  }
+
+  stopPlayout(p: Principal, stationId: string): unknown {
+    const rt = this.rt(stationId);
+    const po = this.playouts.get(stationId);
+    if (po) {
+      this.playouts.delete(stationId);
+      po.playout.stop();
+      this.engine.setHealth(po.source.id, true);
+    }
+    // Bewusst gestoppt → nach Neustart nicht automatisch wieder senden
+    if (rt.data.playout) rt.data.playout.autostart = false;
+    this.audit.write({ kind: 'playout', event: 'stop', actor: p.id, stationId });
+    this.changed();
+    return this.playoutView(stationId);
+  }
+
+  skipPlayout(stationId: string): void {
+    const po = this.playouts.get(stationId);
+    if (!po) throw new AppError(409, 'not_running', 'Server-Playout läuft nicht');
+    po.playout.skip();
+  }
+
+  savePlayoutConfig(stationId: string, input: Partial<PlayoutConfig>): PlayoutConfig {
+    const rt = this.rt(stationId);
+    const cur: PlayoutConfig = { ...DEFAULT_PLAYOUT, autostart: false, ...rt.data.playout };
+    if (input.format === 'mp3' || input.format === 'opus') cur.format = input.format;
+    const num = (v: unknown, min: number, max: number) => (typeof v === 'number' && Number.isFinite(v) && v >= min && v <= max ? v : undefined);
+    cur.bitrateKbps = num(input.bitrateKbps, 32, 320) ?? cur.bitrateKbps;
+    cur.crossfadeMs = num(input.crossfadeMs, 0, 15000) ?? cur.crossfadeMs;
+    cur.duckDb = num(input.duckDb, -40, 0) ?? cur.duckDb;
+    cur.silenceThresholdDb = num(input.silenceThresholdDb, -90, -10) ?? cur.silenceThresholdDb;
+    cur.silenceMs = num(input.silenceMs, 2000, 120000) ?? cur.silenceMs;
+    if (typeof input.sourceId === 'string') cur.sourceId = input.sourceId || undefined;
+    if (typeof input.autostart === 'boolean') cur.autostart = input.autostart;
+    rt.data.playout = cur;
+    this.changed();
+    return cur;
+  }
+
+  /** Notfall-Auswahl, wenn Queue und Sendeuhr nichts liefern: beliebiger Musiktitel, sonst irgendein Titel. */
+  private emergencyPick(stationId: string): MediaItem | null {
+    const lib = this.rt(stationId).data.library;
+    const pool = lib.filter((m) => m.category === 'music');
+    const list = pool.length ? pool : lib;
+    return list.length ? list[Math.floor(Math.random() * list.length)]! : null;
+  }
+
   // ---------- Cardwall ----------
 
   cardwall(stationId: string): CartSlot[] {
@@ -723,7 +885,12 @@ export class AirDeckApp {
     const slot = this.rt(stationId).data.cardwall.find((c) => c.id === slotId);
     if (!slot) throw new AppError(404, 'not_found', 'Cart nicht gefunden');
     if (!slot.mediaId) throw new AppError(409, 'empty_cart', 'Cart ist leer');
-    this.publish('cardwall.triggered', stationId, slot);
+    const po = this.playouts.get(stationId);
+    if (po) {
+      const m = this.media(stationId, slot.mediaId);
+      po.playout.playCart(m, ['voice_track', 'tts', 'news', 'ad'].includes(m.category));
+    }
+    this.publish('cardwall.triggered', stationId, { ...slot, server: !!po });
     return slot;
   }
 
@@ -775,6 +942,8 @@ export class AirDeckApp {
 }
 
 // ---------- Hilfsfunktionen ----------
+
+const SYSTEM_PRINCIPAL: Principal = { id: 'system', tokenId: 'system', roles: ['admin'], stationIds: ['*'], scopes: ['*'] };
 
 export function canSee(p: Principal, stationId: string): boolean {
   return p.stationIds.includes('*') || p.stationIds.includes(stationId);

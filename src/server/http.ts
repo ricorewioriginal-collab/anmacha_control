@@ -39,6 +39,27 @@ const MAX_UPLOAD = 300 * 1024 * 1024;
 const MAX_JSON = 1024 * 1024;
 const MAX_CHUNK = 2 * 1024 * 1024;
 
+/**
+ * Erlaubte Fremd-Origins (Android-App, eigene Frontends). Standard: Capacitor-WebView.
+ * Erweiterbar über AIRDECK_CORS_ORIGINS (kommagetrennt).
+ */
+const CORS_ORIGINS = new Set([
+  'https://localhost', 'http://localhost', 'capacitor://localhost',
+  ...String(process.env.AIRDECK_CORS_ORIGINS ?? '').split(',').map((s) => s.trim()).filter(Boolean),
+]);
+
+function applyCors(req: IncomingMessage, res: ServerResponse): boolean {
+  const origin = req.headers.origin;
+  if (!origin || !CORS_ORIGINS.has(origin)) return false;
+  res.setHeader('Access-Control-Allow-Origin', origin);
+  res.setHeader('Vary', 'Origin');
+  res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type, Range');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
+  res.setHeader('Access-Control-Expose-Headers', 'Content-Range, Content-Length');
+  res.setHeader('Access-Control-Max-Age', '600');
+  return true;
+}
+
 export function createHttpServer(app: AirDeckApp, studioDir: string): Server {
   const routes: Route[] = [];
   const add = (method: string, path: string, scope: string | null, handler: Handler) => {
@@ -155,6 +176,16 @@ export function createHttpServer(app: AirDeckApp, studioDir: string): Server {
   add('GET', '/api/v1/stations/:sid/decks', 'automation:read', (c) => app.decks(sid(c)));
   add('PUT', '/api/v1/stations/:sid/decks/:deck', 'automation:write', async (c) => app.setDeck(sid(c), c.params.deck!, (await c.body()) as never));
 
+  // --- Server-Playout (24/7) ---
+  add('GET', '/api/v1/stations/:sid/playout', 'automation:read', (c) => app.playoutView(sid(c)));
+  add('PATCH', '/api/v1/stations/:sid/playout', 'automation:write', async (c) => {
+    app.savePlayoutConfig(sid(c), (await c.body()) as never);
+    return app.playoutView(sid(c));
+  });
+  add('POST', '/api/v1/stations/:sid/playout/start', 'automation:write', async (c) => app.startPlayout(c.p, sid(c), (await c.body()) as never));
+  add('POST', '/api/v1/stations/:sid/playout/stop', 'automation:write', (c) => app.stopPlayout(c.p, sid(c)));
+  add('POST', '/api/v1/stations/:sid/playout/skip', 'automation:write', (c) => app.skipPlayout(sid(c)));
+
   // --- Cardwall ---
   add('GET', '/api/v1/stations/:sid/cardwall', 'cardwall:read', (c) => app.cardwall(sid(c)));
   add('PATCH', '/api/v1/stations/:sid/cardwall/:slot', 'automation:write', async (c) => app.updateCart(sid(c), c.params.slot!, await c.body()));
@@ -196,9 +227,14 @@ export function createHttpServer(app: AirDeckApp, studioDir: string): Server {
     const url = new URL(req.url ?? '/', 'http://localhost');
     const path = url.pathname;
     setSecurityHeaders(res);
+    const cors = applyCors(req, res);
+    if (req.method === 'OPTIONS') {
+      res.writeHead(cors ? 204 : 403);
+      return void res.end();
+    }
 
     if (path.startsWith('/ingest/')) return handleIngest(app, req, res, path);
-    if (path === '/api/v1/health') return json(res, 200, { ok: true, name: 'AirDeck', version: '0.1.0' });
+    if (path === '/api/v1/health') return json(res, 200, { ok: true, name: 'AirDeck', version: '0.2.0' });
 
     if (path.startsWith('/listen/')) {
       const p = auth(app, req, url);
