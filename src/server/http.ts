@@ -11,6 +11,7 @@ import { AiError } from './ai/providers.ts';
 import { MEDIA_CATEGORIES, parseFileName, type MediaCategory } from '../core/automation.ts';
 import { OUTPUT_CAPABILITIES } from './icecast.ts';
 import { DSP_PRESETS } from './playout.ts';
+import { toIcecastXml, toM3u, toXspf, type StreamStatus } from './status.ts';
 import { PUBLIC_API, RADIOADMIN, allowedPublicPath, allowedRadioadminPath, forward } from './lautfm.ts';
 
 type Params = Record<string, string>;
@@ -460,6 +461,28 @@ export function createHttpServer(app: AirDeckApp, studioDir: string): Server {
 
     if (path.startsWith('/ingest/')) return handleIngest(app, req, res, path);
     if (path === '/api/v1/health') return json(res, 200, { ok: true, name: 'AirDeck', version: '0.4.0' });
+    // Öffentlicher Stream-Status (wie Icecast): /status.json, /status/<sender>.<fmt>, /status/lautfm/<name>.<fmt>
+    const st = /^\/status(?:\.json|\/(lautfm\/)?([a-z0-9_-]{1,60})\.(json|xml|m3u|xspf))$/.exec(path);
+    if (st && req.method === 'GET') {
+      const pub = { 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'no-cache', 'X-Content-Type-Options': 'nosniff' };
+      if (!st[2]) {
+        res.writeHead(200, { ...pub, 'Content-Type': 'application/json; charset=utf-8' });
+        return void res.end(JSON.stringify({ stations: app.publicStations() }));
+      }
+      try {
+        const data: StreamStatus = st[1] ? await app.lautfmPublicStatus(st[2]) : await app.streamStatus(st[2], String(req.headers.host ?? 'localhost'));
+        const fmt = st[3];
+        const [type, body] = fmt === 'xml' ? ['application/xml; charset=utf-8', toIcecastXml(data)]
+          : fmt === 'm3u' ? ['audio/x-mpegurl; charset=utf-8', toM3u(data)]
+          : fmt === 'xspf' ? ['application/xspf+xml; charset=utf-8', toXspf(data)]
+          : ['application/json; charset=utf-8', JSON.stringify(data)];
+        res.writeHead(200, { ...pub, 'Content-Type': type, ...(fmt === 'm3u' || fmt === 'xspf' ? { 'Content-Disposition': `inline; filename="${st[2]}.${fmt}"` } : {}) });
+        return void res.end(body);
+      } catch (err) {
+        res.writeHead(err instanceof AppError ? err.status : 502, { ...pub, 'Content-Type': 'application/json' });
+        return void res.end(JSON.stringify({ status: 'error', message: (err as Error).message }));
+      }
+    }
     // Offizielle Android-App: mitgelieferte APK (Windows-Paket) oder aus dem Release – öffentlich, damit das Handy sie direkt laden kann
     if (path === '/download/AirDeck-Android.apk' && req.method === 'GET') {
       const local = app.localApk();
@@ -685,9 +708,14 @@ function serveStatic(req: IncomingMessage, res: ServerResponse, root: string, pa
   const file = resolve(base, normalize(rel));
   if (!isInside(base, file)) return json(res, 403, { error: 'forbidden' });
   if (!existsSync(file) || !statSync(file).isFile()) return json(res, 404, { error: 'not_found' });
+  // Öffentliche Seiten: Statusseite und Player-Widget dürfen fremde Streams abspielen, das Widget auch eingebettet werden
+  const publicPage = rel === 'status.html' || rel === 'widget.html';
+  if (rel === 'widget.html') res.removeHeader('X-Frame-Options');
   res.setHeader(
     'Content-Security-Policy',
-    "default-src 'self'; media-src 'self' blob:; img-src 'self' data: blob: https:; style-src 'self' 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'",
+    publicPage
+      ? `default-src 'self'; media-src 'self' http: https: blob:; img-src 'self' data: http: https:; style-src 'self' 'unsafe-inline'; connect-src 'self'; frame-ancestors ${rel === 'widget.html' ? '*' : "'self'"}`
+      : "default-src 'self'; media-src 'self' blob:; img-src 'self' data: blob: https:; style-src 'self' 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'",
   );
   res.writeHead(200, { 'Content-Type': STATIC_TYPES[extname(file)] ?? 'application/octet-stream', 'Cache-Control': 'no-cache' });
   if (req.method === 'HEAD') return void res.end();

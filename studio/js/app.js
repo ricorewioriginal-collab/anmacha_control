@@ -241,6 +241,7 @@ function onEvent(type, data) {
 const sourceName = (id) => S.sources.find((s) => s.id === id)?.name ?? id;
 
 function applyBranding() {
+  $('nav-status').setAttribute('href', `${api.base ? api.base + '/' : ''}status.html?station=${encodeURIComponent(S.station.id)}`);
   const r = document.documentElement.style;
   r.setProperty('--primary', S.station.primaryColor);
   r.setProperty('--accent', S.station.accentColor);
@@ -1515,6 +1516,8 @@ async function editStation() {
     { name: 'slogan', label: 'Slogan', value: s.slogan },
     { name: 'primaryColor', label: 'Primärfarbe', type: 'color', value: s.primaryColor },
     { name: 'accentColor', label: 'Akzentfarbe', type: 'color', value: s.accentColor },
+    { name: 'genre', label: 'Genre (für Statusseite/Verzeichnisse)', value: s.genre ?? '' },
+    { name: 'publicStatus', label: 'Öffentliche Statusseite & Player-Widget', type: 'checkbox', value: s.publicStatus !== false, hint: 'Zeigt Titel, Hörer und Stream-Adressen ohne Login (wie Icecast)' },
     { name: 'logo', label: `Senderlogo${s.logo ? ' (neu hochladen ersetzt)' : ''}`, type: 'file', value: 'image/png,image/jpeg,image/webp,image/gif', hint: 'PNG, JPG, WebP oder GIF, max. 2 MB – am besten quadratisch' },
     ...(s.logo ? [{ name: 'removeLogo', label: 'Logo entfernen', type: 'checkbox', value: false }] : []),
     ...(S.stations.length > 1 ? [{ name: 'remove', label: 'Diesen Sender löschen (mit Medien, Quellen, Ausgängen)', type: 'checkbox', value: false }] : []),
@@ -1529,7 +1532,7 @@ async function editStation() {
     renderStationSelect();
     return status(`Sender „${s.name}“ gelöscht`);
   }
-  await run(() => api.patch(`/stations/${sid()}`, { name: v.name, slogan: v.slogan, primaryColor: v.primaryColor, accentColor: v.accentColor }));
+  await run(() => api.patch(`/stations/${sid()}`, { name: v.name, slogan: v.slogan, primaryColor: v.primaryColor, accentColor: v.accentColor, genre: v.genre, publicStatus: v.publicStatus }));
   if (v.logo) await run(() => api.req('PUT', `/stations/${sid()}/logo`, v.logo, { 'Content-Type': v.logo.type }));
   else if (v.removeLogo) await run(() => api.del(`/stations/${sid()}/logo`));
 }
