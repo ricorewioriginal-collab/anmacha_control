@@ -85,6 +85,7 @@ footer { text-align: center; color: var(--muted); font-size: 13px; padding: 24px
   <a href="#rezepte">Rezepte</a>
   <a href="#tasten">Tastenkürzel</a>
   <a href="#hilfe">Fehlerbehebung</a>
+  <a href="#haftung">Haftungsausschluss &amp; Mitmachen</a>
 </nav>
 
 <main>
@@ -108,7 +109,10 @@ footer { text-align: center; color: var(--muted); font-size: 13px; padding: 24px
     <li><b>Portable</b> <code>AirDeck-Windows-Portable.zip</code>: entpacken, <code>AirDeck.exe</code> starten, fertig.</li>
     <li>ffmpeg ist enthalten (Encoder für MP3/LAME, AAC, Opus, Monitor-Wiedergabe). Ein eigener Server ist nicht nötig.</li>
     <li>Beim ersten Start warnt SmartScreen eventuell, weil die Datei nicht signiert ist: „Weitere Informationen“ → „Trotzdem ausführen“.</li>
+    <li><b>Hintergrundbetrieb:</b> AirDeck läuft ohne Konsolenfenster. Das Symbol im Infobereich (neben der Uhr) bietet Studio öffnen, Protokoll anzeigen und AirDeck beenden.</li>
   </ul>
+  <h3>Docker</h3>
+  <p><code>docker compose up -d</code> startet AirDeck als Server mit ffmpeg. Das Admin-Token steht im Log (<code>docker compose logs airdeck</code>).</p>
   <h3>Server (Linux, 24/7)</h3>
   <p>Node.js ab 22.18 und ffmpeg installieren, dann <code>npm start</code>. Mit <code>--headless</code> startet AirDeck ohne Fenster. Das Admin-Token erzeugt <code>--new-admin-token</code>.</p>
   <h3>Android</h3>
@@ -340,6 +344,11 @@ footer { text-align: center; color: var(--muted); font-size: 13px; padding: 24px
 </section>
 </main>
 </div>
-<footer>Powered by AnMaCha · Unter Entwicklung von RicoReWi · Haftung ausgeschlossen</footer>
+<section id="haftung" style="max-width:1200px;margin:0 auto 16px;">
+  <h2>Haftungsausschluss &amp; Mitmachen</h2>
+  <p>AirDeck ist ein <b>privates Hobbyprojekt</b> und wird ohne Gewähr bereitgestellt. Die Nutzung erfolgt auf eigene Verantwortung. Für Sendeausfälle, Datenverlust, Kosten bei Drittanbietern (z. B. KI) und für gesendete Inhalte und Musikrechte wird keine Haftung übernommen, soweit gesetzlich zulässig. laut.fm, Nextcloud und die KI-Anbieter sind unabhängige Dienste. Den vollständigen Text findest du in <code>HAFTUNGSAUSSCHLUSS.md</code> im Programmordner bzw. Repository.</p>
+  <p><b>Webentwickler dürfen eigene Features einbauen.</b> Einstieg: <code>CONTRIBUTING.md</code> mit Aufbau, Regeln und Andockpunkten (REST-API, Live-Ereignisse, Webhooks, Studio-Module).</p>
+</section>
+<footer>Powered by AnMaCha · Unter Entwicklung von RicoReWi · Hobbyprojekt, Haftung ausgeschlossen</footer>
 </body>
 </html>

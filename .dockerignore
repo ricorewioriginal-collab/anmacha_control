@@ -1,0 +1,9 @@
+node_modules
+dist
+data
+apps/android/android
+apps/android/www
+apps/android/node_modules
+.git
+test
+*.log

@@ -234,6 +234,8 @@ export class AirDeckApp {
   readonly headless: boolean;
   readonly appRoot: string;
   listenHost = '127.0.0.1';
+  /** Vom Einstiegspunkt gesetzt: sauber beenden (Studio-Knopf „AirDeck beenden“, Tray, --stop) */
+  requestShutdown: (() => void) | null = null;
   listenPort = 8750;
 
   constructor(dataDir: string, opts: { stableMs?: number; cooldownMs?: number; appRoot?: string; ffmpeg?: FfmpegInfo | null; secrets?: SecretStore; sync?: SyncManager; build?: string; packaged?: boolean; headless?: boolean } = {}) {

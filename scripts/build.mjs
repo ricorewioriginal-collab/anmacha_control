@@ -80,10 +80,18 @@ if (sea) {
     '--sentinel-fuse', 'NODE_SEA_FUSE_fce680ab2cc467b6e072b8b5df1996b2',
     ...(process.platform === 'darwin' ? ['--macho-segment-name', 'NODE_SEA'] : [])], { stdio: 'inherit' });
   if (process.platform === 'darwin') execFileSync('codesign', ['--sign', '-', exe]);
+  if (win) {
+    // Windows-Programm statt Konsolenprogramm: kein schwarzes Fenster, läuft im Hintergrund (Tray-Symbol)
+    const { setSubsystem } = await import('./pe-subsystem.mjs');
+    setSubsystem(exe, 2);
+    console.log('✓ Ohne Konsolenfenster (GUI-Subsystem)');
+  }
 
   cpSync(join(root, 'studio'), join(out, 'studio'), { recursive: true, filter: (src) => !src.endsWith('tsconfig.json') });
   writeFileSync(join(out, 'studio', 'build.json'), JSON.stringify({ build: buildId, version, platform: 'windows' }));
-  cpSync(join(root, 'packaging', 'windows'), out, { recursive: true, filter: (src) => !src.endsWith('.iss') });
+  // Hilfsskripte ins Programmverzeichnis – ohne Installer-Quelle und -Grafiken
+  cpSync(join(root, 'packaging', 'windows'), out, { recursive: true, filter: (src) => !src.endsWith('.iss') && !src.includes(join('windows', 'installer')) });
+  copyFileSync(join(root, 'HAFTUNGSAUSSCHLUSS.md'), join(out, 'HAFTUNGSAUSSCHLUSS.md'));
   mkdirSync(join(out, 'icons'), { recursive: true });
   for (const f of ['airdeck-windows.ico', 'airdeck-server.ico']) copyFileSync(join(root, 'assets', 'icons', f), join(out, 'icons', f));
   copyFileSync(join(root, 'README.md'), join(out, 'README.md'));

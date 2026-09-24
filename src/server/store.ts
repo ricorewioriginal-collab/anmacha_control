@@ -13,7 +13,8 @@ export function writeFileAtomic(file: string, content: string, mode = 0o644): vo
 export function readJson<T>(file: string, fallback: T): T {
   if (!existsSync(file)) return fallback;
   try {
-    return JSON.parse(readFileSync(file, 'utf8')) as T;
+    // BOM entfernen (z. B. vom Windows-Installer geschrieben)
+    return JSON.parse(readFileSync(file, 'utf8').replace(/^\uFEFF/, '')) as T;
   } catch (err) {
     // Defekte Datei nicht überschreiben, sondern sichern und mit Default starten.
     renameSync(file, `${file}.corrupt-${Date.now()}`);

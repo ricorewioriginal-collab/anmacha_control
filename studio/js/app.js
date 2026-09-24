@@ -1196,6 +1196,16 @@ function bindStatic() {
   $('btn-listen').addEventListener('click', () => toggleListen());
   $('btn-audio').addEventListener('click', editAudio);
   $('btn-android').addEventListener('click', androidApp);
+  // Beenden nur anbieten, wenn das Studio auf demselben PC läuft (Windows-Programm im Hintergrund)
+  if (!isNativeApp() && ['127.0.0.1', 'localhost', '[::1]'].includes(location.hostname)) {
+    $('btn-quit').hidden = false;
+    $('btn-quit').addEventListener('click', async () => {
+      if (!confirm('AirDeck komplett beenden? Die Automation und alle Streams stoppen.')) return;
+      if (await run(() => api.post('/system/shutdown'))) {
+        document.body.replaceChildren(h('div', { class: 'empty', style: 'padding:40px' }, 'AirDeck wurde beendet. Dieses Fenster kann geschlossen werden.'));
+      }
+    });
+  }
   $('po-start').addEventListener('click', () => {
     if (S.auto) { S.auto = false; $('btn-auto').setAttribute('aria-pressed', 'false'); }
     if (S.streaming) toggleStream();

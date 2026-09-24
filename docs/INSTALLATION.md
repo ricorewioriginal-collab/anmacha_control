@@ -19,11 +19,23 @@ Intern startet AirDeck einen kleinen Dienst, den nur dieser PC erreicht (`127.0.
 ## Windows
 
 ### A) Mit Installer
-1. `AirDeck-Setup.exe` starten. Windows SmartScreen meldet sich, weil die Datei noch nicht signiert ist: **„Weitere Informationen“ → „Trotzdem ausführen“**.
-2. Optionen wählen: Desktop-Verknüpfung, ggf. **Autostart (24/7)**.
-3. Nach der Installation startet AirDeck und öffnet das Studio-Fenster. Eine Anmeldung ist nicht nötig.
+1. `AirDeck-Setup.exe` starten und die Sprache wählen (Deutsch/English).
+2. Den **Haftungsausschluss** lesen und annehmen. AirDeck ist ein Hobbyprojekt.
+3. **Installationsart** wählen:
+   - **Vollständig:** Studio, Server, Audio-Engine ffmpeg (LAME/AAC/Opus) und Android-APK zum Verteilen.
+   - **Nur Studio:** als Fernbedienung, ohne Audio-Engine.
+   - **Benutzerdefiniert.**
+   Im ersten Dialog wählst du außerdem „nur für mich“ (ohne Adminrechte) oder „für alle Benutzer“. Nur bei „für alle Benutzer“ trägt der Installer die Firewall-Freigabe selbst ein.
+4. Optionen: Desktop-Verknüpfung, **im Hintergrund bei der Anmeldung starten (24/7)**, **im Netzwerk erreichbar** (für die Android-App).
+5. Datenspeicher wählen (siehe unten). Danach startet AirDeck. Das Handbuch lässt sich direkt öffnen.
+
+**AirDeck läuft ohne Konsolenfenster im Hintergrund.** Im Infobereich der Taskleiste (neben der Uhr) sitzt das AirDeck-Symbol mit den Einträgen **Studio öffnen**, **Protokoll anzeigen** und **AirDeck beenden**. Beenden geht auch über das Startmenü („AirDeck beenden“) oder im Studio über „AirDeck beenden“. Das Protokoll liegt unter `%LOCALAPPDATA%\AirDeck\data\logs\airdeck.log`.
 
 Deinstallieren geht über *Einstellungen → Apps*. Deine Daten bleiben erhalten.
+
+#### Warnung von Windows (SmartScreen)
+Windows warnt bei Programmen, die nicht mit einem gekauften Code-Signing-Zertifikat signiert sind, und bei Downloads, die noch wenige Nutzer haben. Für ein Hobbyprojekt ohne Zertifikat lässt sich das nicht abschalten. Klicke auf **„Weitere Informationen“ → „Trotzdem ausführen“**.
+Die Build-Pipeline signiert AirDeck.exe und das Setup automatisch, sobald ein Zertifikat hinterlegt ist: GitHub-Secrets `WINDOWS_CERT_PFX_B64` (PFX als Base64) und `WINDOWS_CERT_PASSWORD`. Günstige Wege dazu sind Microsoft *Trusted Signing* (Azure) oder ein Open-Source-Zertifikat, zum Beispiel von Certum.
 
 ### Datenspeicher (im Installer oder später unter „Datenspeicher & Sync“)
 - **Nur lokal** (Standard): keine Einrichtung, läuft offline.
@@ -31,36 +43,38 @@ Deinstallieren geht über *Einstellungen → Apps*. Deine Daten bleiben erhalten
 - **Firebase (Cloud Firestore)**: Service-Account-Schlüssel (JSON) auswählen.
 
 Synchronisiert werden Sender, Quellen, Ausgänge, Bibliothek (Metadaten), Playlists und Planung, damit mehrere Standorte denselben Stand haben.
-Musikdateien werden **nicht** übertragen; sie müssen auf jedem Standort vorhanden sein.
+Musikdateien werden **nicht** übertragen; sie müssen auf jedem Standort vorhanden sein. Die Nextcloud-Brücke hilft dabei.
 Ist die Datenbank nicht erreichbar, startet AirDeck trotzdem lokal und zeigt den Fehler unter „Datenspeicher & Sync“.
 Ändern beide Seiten gleichzeitig, gewinnt der lokale Stand. Der andere Stand wird als `airdeck.remote-conflict-….json` gesichert.
 
 ### B) Ohne Installation (portable)
 1. `AirDeck-Windows-Portable.zip` entpacken, z. B. nach `D:\AirDeck`.
-2. `AirDeck.exe` doppelklicken. Das Studio öffnet sich.
-3. `AirDeck-Headless.cmd` startet AirDeck nur im Hintergrund (24/7 ohne Fenster).
+2. `AirDeck.exe` doppelklicken. Das Studio öffnet sich, AirDeck läuft mit Tray-Symbol im Hintergrund.
+3. `AirDeck-Headless.cmd` startet AirDeck ohne Studio-Fenster (24/7).
 
 In beiden Fällen liegen Musik, Einstellungen und die verschlüsselten Passwörter unter `%LOCALAPPDATA%\AirDeck\data`.
 Soll alles im Programmordner bleiben (z. B. USB-Stick), vorher `set AIRDECK_DATA=.\data` setzen.
 
 ### Erster Test (5 Minuten)
-1. Unter **Playlist / Archiv → „＋ Ordner“** einen Musikordner hochladen.
-2. **AUTO** drücken. Die Browser-Automation spielt jetzt über die PC-Lautsprecher.
-3. Für den Sendebetrieb rechts unter **Stream & Encoder → ＋** deinen Icecast-, SHOUTcast- oder laut.fm-Zugang eintragen.
-4. Für 24/7 ohne offenes Fenster: **Server-Automation 24/7 → Start**. Im Menü **⋯** stellst du Mikrofon, Lautsprecher-Abhören und DSP ein.
+1. Unter **Playlist / Archiv → „＋ Ordner“** einen Musikordner hochladen oder Dateien einfach ins Fenster ziehen.
+2. **Server-Automation 24/7 → Start** (oder **AUTO**). Mit 🎧 hörst du mit, das Ausgabegerät legst du unter **Audio & Geräte** fest.
+3. Für den Sendebetrieb unter **Stream & Encoder → ＋** Icecast, SHOUTcast oder laut.fm eintragen.
+
+## Server (Docker)
+
+Siehe [DOCKER.md](DOCKER.md): `docker compose up -d`. Das Admin-Token steht im Log.
 
 ## Android
 
-Die App ist das Studio für unterwegs: Fernbedienung, **MIC LIVE** (das Handy sendet als Live-Quelle mit Priority 3) und Mithören.
-Sie verbindet sich mit AirDeck auf deinem PC. Die Automation selbst läuft auf dem PC.
+Die App ist das komplette Studio für Touch-Bedienung, MIC LIVE (das Handy sendet als Live-Quelle mit Priorität 3) und Mithören. Die Automation läuft auf dem PC bzw. Server.
 
-1. **Am PC:** AirDeck mit Netzwerkfreigabe starten, damit das Handy es erreicht.
-   - Portable: `AirDeck-Netzwerk.cmd` starten (oder `set AIRDECK_HOST=0.0.0.0` und dann `AirDeck.exe`).
-   - Windows-Firewall-Abfrage für **private Netzwerke** erlauben.
-   - Ein Token für das Handy erzeugen: `AirDeck.exe --new-admin-token` (in der Eingabeaufforderung im AirDeck-Ordner).
-2. **Am Handy:** `AirDeck-Android.apk` öffnen und die Installation aus unbekannten Quellen erlauben.
-   Es ist eine Test-APK; eine signierte Play-Store-Version folgt.
-3. App starten, dann **Server-Adresse** eintragen (z. B. `http://192.168.1.20:8750`, die IP deines PCs) und das Token.
+1. **Am PC:** Im Studio **Android-App** öffnen → „Im Netzwerk erreichbar“ einschalten. Das geht auch schon im Installer. AirDeck einmal neu starten und die Windows-Firewall-Abfrage für **private Netzwerke** erlauben.
+2. **Am Handy (gleiches WLAN):** den angezeigten Link `http://<PC-Adresse>:8750/download/AirDeck-Android.apk` im Browser öffnen, installieren und „Unbekannte Apps installieren“ erlauben.
+3. Im Studio am PC **„Zugang für ein Handy erstellen“** wählen. Den Verbindungslink in der App bei „Mit AirDeck verbinden“ einfügen.
+
+Die offizielle APK ist signiert, sobald im Repository der Android-Signaturschlüssel hinterlegt ist. Die Secrets dafür: `ANDROID_KEYSTORE_B64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD`. Einen Schlüssel erzeugst du einmalig mit:
+`keytool -genkeypair -v -keystore airdeck.jks -alias airdeck -keyalg RSA -keysize 4096 -validity 36500`
+Danach `base64 -w0 airdeck.jks` als `ANDROID_KEYSTORE_B64` eintragen. Den Schlüssel gut aufbewahren, denn nur mit ihm lassen sich Updates über die installierte App spielen.
 
 ## Updates
 

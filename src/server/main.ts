@@ -5,6 +5,8 @@
 //   … --new-admin-token                   neues Admin-Token ausgeben
 
 import { spawn } from 'node:child_process';
+import { createWriteStream, mkdirSync, renameSync, statSync } from 'node:fs';
+import { format } from 'node:util';
 import { createServer } from 'node:net';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -66,7 +68,69 @@ function portInUse(p: number, h: string): Promise<boolean> {
   });
 }
 
+/** Windows-Programm ohne Konsole: Ausgaben zusätzlich in data/logs/airdeck.log (mit einfacher Rotation). */
+function logToFile(): string {
+  const dir = join(dataDir, 'logs');
+  mkdirSync(dir, { recursive: true });
+  const file = join(dir, 'airdeck.log');
+  try {
+    if (statSync(file).size > 5 * 1024 * 1024) renameSync(file, `${file}.1`);
+  } catch {
+    // noch keine Logdatei
+  }
+  const out = createWriteStream(file, { flags: 'a' });
+  for (const level of ['log', 'warn', 'error'] as const) {
+    const orig = console[level].bind(console);
+    console[level] = (...args: unknown[]) => {
+      orig(...args);
+      out.write(`${new Date().toISOString()} ${level === 'log' ? '' : level.toUpperCase() + ' '}${format(...args)}\n`);
+    };
+  }
+  return file;
+}
+
+/** Symbol im Infobereich (Taskleiste): Studio öffnen, Protokoll, Beenden – per PowerShell, ohne Zusatzprogramme. */
+function startTray(logFile: string): void {
+  const q = (s: string) => s.replace(/'/g, "''");
+  const exe = process.execPath;
+  const script = `
+Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+$exe = '${q(exe)}'
+$airdeckPid = ${process.pid}
+$icon = New-Object System.Windows.Forms.NotifyIcon
+$icon.Icon = [System.Drawing.Icon]::ExtractAssociatedIcon($exe)
+$icon.Text = 'AirDeck läuft (Port ${port})'
+$menu = New-Object System.Windows.Forms.ContextMenuStrip
+$open = $menu.Items.Add('Studio öffnen'); $open.add_Click({ Start-Process $exe })
+$log = $menu.Items.Add('Protokoll anzeigen'); $log.add_Click({ Start-Process notepad.exe '${q(logFile)}' })
+[void]$menu.Items.Add('-')
+$quit = $menu.Items.Add('AirDeck beenden'); $quit.add_Click({ $icon.Text = 'AirDeck wird beendet …'; Start-Process $exe -ArgumentList '--stop' })
+$icon.ContextMenuStrip = $menu
+$icon.add_DoubleClick({ Start-Process $exe })
+$icon.Visible = $true
+$timer = New-Object System.Windows.Forms.Timer
+$timer.Interval = 2000
+$timer.add_Tick({ if (-not (Get-Process -Id $airdeckPid -ErrorAction SilentlyContinue)) { $icon.Visible = $false; $icon.Dispose(); [System.Windows.Forms.Application]::Exit() } })
+$timer.Start()
+[System.Windows.Forms.Application]::Run()
+`;
+  const encoded = Buffer.from(script, 'utf16le').toString('base64');
+  const p = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', encoded], { detached: true, stdio: 'ignore', windowsHide: true });
+  p.on('error', (err) => console.warn('Tray-Symbol nicht verfügbar:', err.message));
+  p.unref();
+}
+
 async function main(): Promise<void> {
+  const logFile = packaged ? logToFile() : '';
+
+  // AirDeck.exe --stop: laufende Instanz sauber beenden (Tray, Startmenü „AirDeck beenden“)
+  if (argv.includes('--stop')) {
+    const probe = new AirDeckApp(dataDir, { appRoot: root, ffmpeg: null });
+    const r = await fetch(`http://${localHost}:${port}/api/v1/system/shutdown`, { method: 'POST', headers: { Authorization: `Bearer ${probe.desktopToken()}` }, signal: AbortSignal.timeout(5000) }).catch(() => null);
+    console.log(r?.ok ? 'AirDeck wird beendet.' : 'Keine laufende AirDeck-Instanz gefunden.');
+    process.exit(r?.ok ? 0 : 1);
+  }
+
   // Zweiter Start im Desktop-Modus: nur Fenster öffnen, kein zweiter Server
   if (desktop && (await portInUse(port, host))) {
     const probe = new AirDeckApp(dataDir, { appRoot: root, ffmpeg: null });
@@ -98,6 +162,9 @@ async function main(): Promise<void> {
     console.log(`\n  Studio öffnen: http://${localHost}:${port}/#token=${token}\n`);
   }
 
+  // Gemeinsames Desktop-Token anlegen, damit ein zweiter Start (Studio öffnen, --stop, Tray) die laufende Instanz erreicht
+  app.desktopToken();
+
   const server = createHttpServer(app, join(root, 'studio'));
   server.requestTimeout = 0; // Streams (Ingest, SSE, Listen) laufen dauerhaft
   server.headersTimeout = 15_000;
@@ -105,6 +172,7 @@ async function main(): Promise<void> {
     app.start();
     console.log(`AirDeck läuft auf http://${host}:${port}  (Daten: ${dataDir})`);
     if (desktop) openStudio(`http://${localHost}:${port}/#token=${app.desktopToken()}`);
+    if (packaged && process.platform === 'win32' && !argv.includes('--no-tray')) startTray(logFile);
   });
 
   const stop = () => {
@@ -116,6 +184,7 @@ async function main(): Promise<void> {
     const final = sync.config.backend !== 'local' ? sync.pushNow(app.stateJson()).catch(() => {}) : Promise.resolve();
     void final.then(() => sync.close()).finally(() => process.exit(0));
   };
+  app.requestShutdown = stop;
   process.on('SIGINT', stop);
   process.on('SIGTERM', stop);
 }

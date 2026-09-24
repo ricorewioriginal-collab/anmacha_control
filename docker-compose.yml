@@ -1,0 +1,19 @@
+# AirDeck-Server: docker compose up -d   →   Studio: http://<server>:8750
+# Das Admin-Token steht beim ersten Start im Log:  docker compose logs airdeck | grep -A1 Admin-Token
+services:
+  airdeck:
+    build: .
+    image: airdeck:latest
+    container_name: airdeck
+    restart: unless-stopped
+    ports:
+      - "8750:8750"
+    volumes:
+      - airdeck-data:/data
+    environment:
+      TZ: Europe/Berlin
+      # Optional: eigener Port
+      # AIRDECK_PORT: 8750
+
+volumes:
+  airdeck-data:

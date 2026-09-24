@@ -334,6 +334,14 @@ export function createHttpServer(app: AirDeckApp, studioDir: string): Server {
   });
   add('POST', '/api/v1/stations/:sid/recordings/:id/nextcloud', 'media:write', async (c) => app.nextcloudUploadRecording(sid(c), c.params.id!, String((await c.body()).dir ?? '')));
 
+  // --- Programm beenden (Windows-Hintergrundprozess, Tray, „AirDeck beenden“) ---
+  add('POST', '/api/v1/system/shutdown', null, (c) => {
+    globalAdmin(c);
+    if (!app.requestShutdown) throw new AppError(501, 'unsupported', 'Beenden ist hier nicht möglich');
+    setTimeout(() => app.requestShutdown?.(), 300).unref();
+    return { stopping: true };
+  });
+
   // --- Android-App / Netzwerk ---
   add('GET', '/api/v1/app/connect', null, (c) => (globalAdmin(c), app.appConnect()));
   add('PUT', '/api/v1/app/network', null, async (c) => (globalAdmin(c), app.setNetwork((await c.body()).lan === true)));

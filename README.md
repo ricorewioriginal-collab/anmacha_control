@@ -14,7 +14,12 @@ AirDeck läuft ohne AnMaCha. AnMaCha und laut.fm sind höchstens optionale Adapt
 Der Abgleich mit dem AnMaCha-Dashboard steht in [`docs/FEATURE_PARITY.md`](docs/FEATURE_PARITY.md).
 Die Roadmap steht in [`AIRDECK_PROGRESS.md`](AIRDECK_PROGRESS.md).
 
-**Installieren und testen:** siehe [`docs/INSTALLATION.md`](docs/INSTALLATION.md). Dort steht auch die Variante ohne Installation.
+**Installieren und testen:** siehe [`docs/INSTALLATION.md`](docs/INSTALLATION.md) (Windows, portable, Android) und [`docs/DOCKER.md`](docs/DOCKER.md) (Server).
+**Handbuch:** [`studio/handbuch.html`](studio/handbuch.html). Es ist auch in AirDeck unter „Handbuch“ erreichbar.
+
+> **Hobbyprojekt:** Nutzung auf eigene Verantwortung, siehe [Haftungsausschluss](HAFTUNGSAUSSCHLUSS.md).
+> **Mitmachen:** Webentwickler dürfen eigene Features einbauen, siehe [CONTRIBUTING.md](CONTRIBUTING.md).
+> Powered by AnMaCha · Unter Entwicklung von RicoReWi
 
 ## Plattformen
 
@@ -23,6 +28,7 @@ Die Roadmap steht in [`AIRDECK_PROGRESS.md`](AIRDECK_PROGRESS.md).
 | **Windows** | Installer `AirDeck-Setup.exe`: läuft komplett lokal, ohne eigenen Server (Startmenü, Desktop, optional Autostart 24/7), ffmpeg liegt bei | GitHub Actions → Artefakt `AirDeck-Windows-Installer` |
 | **Android** | App: Studio-Fernbedienung, MIC LIVE (Priority 3), Mithören | GitHub Actions → Artefakt `AirDeck-Android` (APK), siehe [`apps/android`](apps/android/README.md) |
 | **Self-Hosted** | Server unter Linux/macOS, headless 24/7 | `npm start` bzw. `node dist/airdeck.cjs --headless` mit ffmpeg im PATH |
+| **Docker** | Server-Container mit ffmpeg, Daten im Volume | `docker compose up -d`, siehe [`docs/DOCKER.md`](docs/DOCKER.md) |
 
 ## Schnellstart
 

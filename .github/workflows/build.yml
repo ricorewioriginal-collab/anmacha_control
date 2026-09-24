@@ -38,6 +38,8 @@ jobs:
   windows:
     needs: [test, android]
     runs-on: windows-latest
+    env:
+      HAS_CERT: ${{ secrets.WINDOWS_CERT_PFX_B64 != '' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -45,6 +47,21 @@ jobs:
       - run: npm ci
       - name: AirDeck.exe bauen (Node Single Executable)
         run: node scripts/build.mjs --sea
+      - name: AirDeck.exe signieren (nur mit hinterlegtem Zertifikat)
+        if: env.HAS_CERT == 'true'
+        shell: pwsh
+        env:
+          CERT_B64: ${{ secrets.WINDOWS_CERT_PFX_B64 }}
+          CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
+        run: |
+          $pfx = "$env:RUNNER_TEMP/cert.pfx"
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:CERT_B64))
+          $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Recurse -Filter signtool.exe | Where-Object { $_.FullName -match 'x64' } | Select-Object -Last 1
+          foreach ($f in @('dist/AirDeck/AirDeck.exe')) {
+            & $signtool.FullName sign /f $pfx /p $env:CERT_PASSWORD /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /d AirDeck $f
+            if ($LASTEXITCODE -ne 0) { throw "Signieren fehlgeschlagen: $f" }
+          }
+          Remove-Item $pfx
       - name: Android-App beilegen (Download direkt aus AirDeck)
         uses: actions/download-artifact@v4
         with: { name: AirDeck-Android, path: dist/AirDeck/android }
@@ -72,16 +89,22 @@ jobs:
         run: |
           $env:AIRDECK_DATA = "$env:RUNNER_TEMP/airdeck-data"
           $env:AIRDECK_PORT = '8753'
-          $out = & dist/AirDeck/AirDeck.exe --new-admin-token
+          # Windows-Programm ohne Konsole: Ausgabe über Umleitung prüfen
+          Start-Process -FilePath dist/AirDeck/AirDeck.exe -ArgumentList '--new-admin-token' -Wait -NoNewWindow -RedirectStandardOutput "$env:RUNNER_TEMP/out.txt"
+          $out = Get-Content "$env:RUNNER_TEMP/out.txt"
           $out
           if (-not ($out | Select-String 'ffmpeg version')) { throw 'ffmpeg wurde nicht erkannt' }
-          $p = Start-Process -FilePath dist/AirDeck/AirDeck.exe -ArgumentList '--headless' -PassThru
+          if (-not (Test-Path "$env:AIRDECK_DATA/logs/airdeck.log")) { throw 'Logdatei fehlt' }
+          $p = Start-Process -FilePath dist/AirDeck/AirDeck.exe -ArgumentList '--headless', '--no-tray' -PassThru
           Start-Sleep -Seconds 5
           $r = Invoke-RestMethod http://127.0.0.1:8753/api/v1/health
           # Studio-Oberfläche muss wirklich ausgeliefert werden (nicht nur die API)
           $page = Invoke-WebRequest http://127.0.0.1:8753/ -UseBasicParsing
           $js = Invoke-WebRequest http://127.0.0.1:8753/js/app.js -UseBasicParsing
-          Stop-Process -Id $p.Id -Force
+          # sauber beenden wie über das Tray-Symbol
+          Start-Process -FilePath dist/AirDeck/AirDeck.exe -ArgumentList '--stop' -Wait -NoNewWindow
+          $p.WaitForExit(8000) | Out-Null
+          if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force; throw 'AirDeck --stop hat die Instanz nicht beendet' }
           if (-not $r.ok) { throw 'Health-Check fehlgeschlagen' }
           if ($page.StatusCode -ne 200 -or -not ($page.Content -match 'AirDeck')) { throw 'Studio-Startseite wird nicht ausgeliefert' }
           if ($js.StatusCode -ne 200) { throw 'Studio-Skripte werden nicht ausgeliefert' }
@@ -100,6 +123,21 @@ jobs:
           & $iscc "/DAppVersion=$version" packaging/windows/installer.iss
           if ($LASTEXITCODE -ne 0) { throw 'Inno Setup fehlgeschlagen' }
           Get-ChildItem dist/AirDeck-Setup-*.exe
+      - name: Installer signieren (nur mit hinterlegtem Zertifikat)
+        if: env.HAS_CERT == 'true'
+        shell: pwsh
+        env:
+          CERT_B64: ${{ secrets.WINDOWS_CERT_PFX_B64 }}
+          CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
+        run: |
+          $pfx = "$env:RUNNER_TEMP/cert.pfx"
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:CERT_B64))
+          $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Recurse -Filter signtool.exe | Where-Object { $_.FullName -match 'x64' } | Select-Object -Last 1
+          foreach ($f in @((Get-ChildItem dist/AirDeck-Setup-*.exe).FullName)) {
+            & $signtool.FullName sign /f $pfx /p $env:CERT_PASSWORD /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /d AirDeck $f
+            if ($LASTEXITCODE -ne 0) { throw "Signieren fehlgeschlagen: $f" }
+          }
+          Remove-Item $pfx
       - name: Installer-Test (still installieren, starten, deinstallieren)
         shell: pwsh
         run: |
@@ -109,7 +147,7 @@ jobs:
           if (-not (Test-Path $exe)) { throw 'AirDeck.exe nach Installation nicht gefunden' }
           $env:AIRDECK_DATA = "$env:RUNNER_TEMP/airdeck-inst"
           $env:AIRDECK_PORT = '8755'
-          $p = Start-Process $exe -ArgumentList '--headless' -PassThru
+          $p = Start-Process $exe -ArgumentList '--headless', '--no-tray' -PassThru
           Start-Sleep -Seconds 5
           $r = Invoke-RestMethod http://127.0.0.1:8755/api/v1/health
           $page = Invoke-WebRequest http://127.0.0.1:8755/ -UseBasicParsing
@@ -128,6 +166,25 @@ jobs:
           name: AirDeck-Windows
           path: dist/AirDeck
           retention-days: 30
+
+  docker:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Image bauen
+        run: docker build -t airdeck:ci .
+      - name: Container starten und prüfen
+        run: |
+          docker run -d --name airdeck -p 8750:8750 airdeck:ci
+          for i in $(seq 1 30); do curl -fs http://127.0.0.1:8750/api/v1/health && break; sleep 1; done
+          curl -fs http://127.0.0.1:8750/api/v1/health
+          curl -fs http://127.0.0.1:8750/ | grep -q AirDeck
+          docker logs airdeck | tee log.txt
+          grep -q "ffmpeg version" log.txt || (echo "ffmpeg fehlt im Container" && exit 1)
+          grep -q "Admin-Token" log.txt || (echo "Admin-Token wird nicht ausgegeben" && exit 1)
+          docker stop -t 10 airdeck
+          test "$(docker inspect -f '{{.State.ExitCode}}' airdeck)" = "0" || (echo "Container wurde nicht sauber beendet" && exit 1)
 
   android:
     needs: test
