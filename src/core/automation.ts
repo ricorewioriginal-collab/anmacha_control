@@ -43,6 +43,8 @@ export interface MediaItem {
   album?: string;
   genre?: string;
   year?: number;
+  /** Von der KI erzeugt (Moderation/Nachrichten) – wird automatisch aufgeräumt */
+  generatedBy?: 'ai';
 }
 
 export interface QueueEntry {

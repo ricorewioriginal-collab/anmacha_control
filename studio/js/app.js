@@ -871,8 +871,8 @@ async function editOutput(o) {
   const isNew = !o;
   const v = await formDialog(isNew ? 'Ausgang anlegen' : `Ausgang: ${o.name}`, [
     { name: 'name', label: 'Name', value: o?.name ?? 'Hauptstream', required: true },
-    { name: 'type', label: 'Typ', value: o?.type ?? 'icecast', options: [['icecast', 'Icecast (HTTP PUT)'], ['shoutcast', 'SHOUTcast v1/v2 (nur MP3/AAC)']] },
-    { name: 'host', label: 'Host', value: o?.host ?? '', required: true },
+    { name: 'type', label: 'Typ', value: o?.type ?? 'icecast', options: [['icecast', 'Icecast (HTTP PUT)'], ['shoutcast', 'SHOUTcast v1/v2 (nur MP3/AAC)'], ...(isNew ? /** @type {[string,string][]} */ ([['lautfm', 'laut.fm (Zugang automatisch aus dem Radioadmin)']]) : [])], hint: isNew ? 'laut.fm: nur Name und Priority nötig – Server, Mount und Passwort holt AirDeck über die laut.fm-Verbindung.' : '' },
+    { name: 'host', label: 'Host', value: o?.host ?? '' },
     { name: 'port', label: 'Port', type: 'number', value: o?.port ?? 8000 },
     { name: 'mount', label: 'Mountpoint', value: o?.mount ?? '/stream' },
     { name: 'username', label: 'Benutzer', value: o?.username ?? 'source' },
@@ -887,6 +887,10 @@ async function editOutput(o) {
   if (!v) return;
   if (v.remove) {
     await run(() => api.del(url(`/outputs/${encodeURIComponent(o.id)}`)));
+  } else if (v.type === 'lautfm') {
+    const r = await run(() => api.post(url('/lautfm/live-output'), { priority: v.priority }));
+    if (r) status('laut.fm-Ausgang angelegt – sendet, sobald eine Quelle auf Sendung ist');
+    else status('laut.fm-Ausgang: zuerst unter „laut.fm“ verbinden (Token + Station)', true);
   } else {
     /** @type {Record<string, any>} */
     const body = { ...v, priority: v.priority ?? null };

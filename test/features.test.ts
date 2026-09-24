@@ -146,9 +146,9 @@ test('laut.fm: nur erlaubte Pfade, Token bleibt serverseitig', async () => {
   assert.equal(allowedPublicPath('/station/x/../../etc'), false);
 
   // forward() gegen einen lokalen Upstream: Authorization wird ergänzt, Upload-Body gestreamt
-  const seen: { auth?: string; body: string; method?: string }[] = [];
+  const seen: { auth?: string; origin?: string; body: string; method?: string }[] = [];
   const upstream = createServer((req, res) => {
-    const e = { auth: req.headers.authorization, body: '', method: req.method };
+    const e = { auth: req.headers.authorization, origin: req.headers.origin, body: '', method: req.method };
     seen.push(e);
     req.on('data', (d) => (e.body += d));
     req.on('end', () => {
@@ -158,7 +158,7 @@ test('laut.fm: nur erlaubte Pfade, Token bleibt serverseitig', async () => {
   });
   await new Promise<void>((r) => upstream.listen(0, '127.0.0.1', r));
   const up = `http://127.0.0.1:${(upstream.address() as { port: number }).port}`;
-  const proxy = createServer((req, res) => void forward(req, res, up + req.url, 'geheim'));
+  const proxy = createServer((req, res) => void forward(req, res, up + req.url, 'geheim', 60_000, 'airdeck'));
   await new Promise<void>((r) => proxy.listen(0, '127.0.0.1', r));
   const port = (proxy.address() as { port: number }).port;
   const result = await new Promise<{ status: number; body: string; cookie?: string[] }>((ok) => {
@@ -170,6 +170,7 @@ test('laut.fm: nur erlaubte Pfade, Token bleibt serverseitig', async () => {
     r.end('hallo');
   });
   assert.equal(result.status, 201);
+  assert.equal(seen[0]!.origin, 'airdeck', 'Radioadmin verlangt den Origin der callback_url');
   assert.equal(result.body, '{"ok":true}');
   assert.equal(result.cookie, undefined);
   assert.equal(seen[0]!.auth, 'Bearer geheim');

@@ -10,7 +10,20 @@ import { Readable } from 'node:stream';
 export const RADIOADMIN = 'https://api.radioadmin.laut.fm';
 export const PUBLIC_API = 'https://api.laut.fm';
 
+/**
+ * Radioadmin-Tokens gehören zu einer „callback_url“. Bei jeder Anfrage muss derselbe Wert als
+ * Origin-Header mitgeschickt werden (Auskunft laut.fm). AirDeck nutzt standardmäßig „airdeck“.
+ */
+export const DEFAULT_ORIGIN = 'airdeck';
+export const ORIGIN_RE = /^[A-Za-z0-9][A-Za-z0-9_.:/-]{0,119}$/;
+
+export function loginUrl(origin = DEFAULT_ORIGIN): string {
+  return `https://radioadmin.laut.fm/login?callback_url=${encodeURIComponent(origin)}`;
+}
+
 export interface LautfmConfig {
+  /** callback_url, mit der das Token erzeugt wurde (= Origin-Header) */
+  origin?: string;
   /** Numerische Station-ID im Radioadmin */
   stationId?: number;
   /** Stationsname (URL-Name, z. B. "80er-radio") für die öffentliche API */
@@ -42,10 +55,12 @@ export async function forward(
   url: string,
   token: string | undefined,
   timeoutMs = 60_000,
+  origin?: string,
 ): Promise<void> {
   const method = req.method ?? 'GET';
   const headers: Record<string, string> = { Accept: String(req.headers.accept ?? 'application/json'), 'User-Agent': 'AirDeck/0.3' };
   if (token) headers.Authorization = `Bearer ${token}`;
+  if (origin) headers.Origin = origin;
   if (req.headers['content-type']) headers['Content-Type'] = String(req.headers['content-type']);
   // DELETE kann laut Spezifikation einen Body haben (z. B. Tags entfernen)
   const hasBody = !['GET', 'HEAD'].includes(method) && (!!req.headers['transfer-encoding'] || Number(req.headers['content-length'] ?? 0) > 0);

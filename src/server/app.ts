@@ -46,7 +46,7 @@ import {
 } from '../core/scheduler.ts';
 import { pickNext as pickFromPool } from '../core/automation.ts';
 import type { RelayTap } from './relay.ts';
-import { RADIOADMIN, type LautfmConfig } from './lautfm.ts';
+import { DEFAULT_ORIGIN, ORIGIN_RE, RADIOADMIN, loginUrl, type LautfmConfig } from './lautfm.ts';
 import { SyncManager } from './sync.ts';
 import { DEFAULT_SOURCE, Updater, type UpdateSource } from './update.ts';
 import { readFileSync } from 'node:fs';
@@ -1696,9 +1696,10 @@ export class AirDeckApp {
 
   // ---------- laut.fm ----------
 
-  lautfmConfig(stationId: string): LautfmConfig & { hasToken: boolean } {
+  lautfmConfig(stationId: string): LautfmConfig & { origin: string; hasToken: boolean; loginUrl: string } {
     const cfg = this.rt(stationId).data.lautfm ?? {};
-    return { ...cfg, hasToken: this.secrets.has(`lautfm:${stationId}`) };
+    const origin = cfg.origin ?? DEFAULT_ORIGIN;
+    return { ...cfg, origin, hasToken: this.secrets.has(`lautfm:${stationId}`), loginUrl: loginUrl(origin) };
   }
 
   lautfmToken(stationId: string): string | undefined {
@@ -1711,6 +1712,11 @@ export class AirDeckApp {
     if (input.stationId !== undefined) {
       const n = Number(input.stationId);
       cfg.stationId = input.stationId === null || input.stationId === '' ? undefined : Number.isSafeInteger(n) && n > 0 ? n : cfg.stationId;
+    }
+    if (typeof input.origin === 'string') {
+      const o = input.origin.trim();
+      if (o && !ORIGIN_RE.test(o)) throw new AppError(400, 'invalid_origin', 'Callback/Origin: nur Buchstaben, Ziffern und . _ : / -');
+      cfg.origin = o && o !== DEFAULT_ORIGIN ? o : undefined;
     }
     if (typeof input.stationName === 'string') cfg.stationName = input.stationName.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '') || undefined;
     if (typeof input.token === 'string') {
@@ -1729,7 +1735,7 @@ export class AirDeckApp {
     if (!token) throw new AppError(409, 'no_token', 'Kein laut.fm-Radioadmin-Token hinterlegt');
     const r = await fetch(RADIOADMIN + path, {
       method,
-      headers: { Authorization: `Bearer ${token}`, Accept: 'application/json', ...(body ? { 'Content-Type': 'application/json' } : {}) },
+      headers: { Authorization: `Bearer ${token}`, Origin: this.lautfmConfig(stationId).origin, Accept: 'application/json', ...(body ? { 'Content-Type': 'application/json' } : {}) },
       body: body ? JSON.stringify(body) : undefined,
       signal: AbortSignal.timeout(20_000),
     }).catch(() => {

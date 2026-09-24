@@ -43,14 +43,20 @@ export function mountLautfm(root, ctx) {
     root.replaceChildren(head, content);
     if (connected) renderTab();
     else content.replaceChildren(card('Mit laut.fm verbinden',
-      h('p', {}, 'AirDeck verwaltet deine laut.fm-Station direkt über die offizielle Radioadmin-API – ohne eigenen Server. Du brauchst dein Radioadmin-API-Token (radioadmin.laut.fm → API).'),
+      h('p', {}, 'AirDeck verwaltet deine laut.fm-Station direkt über die offizielle Radioadmin-API – ohne eigenen Server.'),
+      h('ol', {},
+        h('li', {}, 'Auf „Token bei laut.fm holen“ klicken und bei laut.fm anmelden – der Zugriff für „', h('code', {}, cfg?.origin ?? 'airdeck'), '“ wird bestätigt und das Token angezeigt.'),
+        h('li', {}, 'Token kopieren, hier unter „Token eingeben“ einfügen, Station wählen – fertig.')),
       h('p', { class: 'muted' }, 'Das Token wird verschlüsselt auf diesem Gerät gespeichert und nie an den Browser zurückgegeben.'),
-      h('button', { class: 'btn primary', onclick: configure }, 'Token eingeben …')));
+      h('div', { class: 'row' },
+        h('button', { class: 'btn', onclick: () => window.open(cfg?.loginUrl ?? 'https://radioadmin.laut.fm/login?callback_url=airdeck', '_blank', 'noopener') }, 'Token bei laut.fm holen'),
+        h('button', { class: 'btn primary', onclick: configure }, 'Token eingeben …'))));
   }
 
   async function configure() {
     const v = await formDialog('laut.fm-Verbindung', [
-      { name: 'token', label: cfg?.hasToken ? 'Radioadmin-Token (leer = unverändert)' : 'Radioadmin-Token', type: 'password', value: '' },
+      { name: 'token', label: cfg?.hasToken ? 'Radioadmin-Token (leer = unverändert)' : 'Radioadmin-Token', type: 'password', value: '', hint: `Token holen: ${cfg?.loginUrl ?? ''} · Übersicht: radioadmin.laut.fm/tokens` },
+      { name: 'origin', label: 'Callback / Origin des Tokens', value: cfg?.origin ?? 'airdeck', hint: 'Muss exakt der callback_url entsprechen, mit der das Token erzeugt wurde (Standard: airdeck)' },
       ...(cfg?.hasToken ? [{ name: 'remove', label: 'Token entfernen', type: 'checkbox', value: false }] : []),
     ], 'Weiter');
     if (!v) return;
@@ -58,12 +64,12 @@ export function mountLautfm(root, ctx) {
       cfg = await run(() => ctx.api.put(ctx.url('/lautfm'), { token: '', stationId: null }));
       return render();
     }
-    if (v.token) cfg = await run(() => ctx.api.put(ctx.url('/lautfm'), { token: v.token }));
+    cfg = (await run(() => ctx.api.put(ctx.url('/lautfm'), { origin: v.origin, ...(v.token ? { token: v.token } : {}) }))) ?? cfg;
     if (!cfg?.hasToken) return render();
     // Stationen des Tokens abrufen und auswählen
     const list = await run(() => ra('GET', '/stations'));
     if (!Array.isArray(list) || !list.length) {
-      status('Token ungültig oder keine Station zugeordnet', true);
+      if (Array.isArray(list)) status('Token gültig, aber keine Station zugeordnet', true);
       return render();
     }
     const pick = list.length === 1 ? { stationId: String(list[0].id) } : await formDialog('Station wählen', [
