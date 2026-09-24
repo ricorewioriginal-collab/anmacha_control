@@ -1,19 +1,25 @@
 {
   "name": "airdeck",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "AirDeck – unabhängige Radio-Automation (Windows, Android, Self-Hosted)",
   "type": "module",
-  "engines": { "node": ">=22.18" },
+  "engines": {
+    "node": ">=22.18"
+  },
   "scripts": {
     "start": "node src/server/main.ts",
     "token": "node src/server/main.ts --new-admin-token",
     "test": "node --test \"test/**/*.test.ts\"",
     "typecheck": "tsc -p tsconfig.json && tsc -p studio/tsconfig.json",
-    "check": "npm run typecheck && npm test"
+    "check": "npm run typecheck && npm test",
+    "build": "node scripts/build.mjs",
+    "build:win": "node scripts/build.mjs --sea"
   },
   "devDependencies": {
     "@types/node": "^22.18.0",
+    "esbuild": "^0.25.12",
+    "postject": "^1.0.0-alpha.6",
     "typescript": "^5.9.0"
   }
 }

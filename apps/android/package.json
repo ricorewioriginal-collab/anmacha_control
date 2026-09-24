@@ -1,0 +1,17 @@
+{
+  "name": "airdeck-android",
+  "version": "0.1.0",
+  "private": true,
+  "description": "AirDeck Studio für Android (Capacitor-Hülle um studio/)",
+  "scripts": {
+    "setup": "node prepare.mjs",
+    "build:debug": "node prepare.mjs && cd android && ./gradlew assembleDebug"
+  },
+  "dependencies": {
+    "@capacitor/android": "^7.0.0",
+    "@capacitor/core": "^7.0.0"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^7.0.0"
+  }
+}

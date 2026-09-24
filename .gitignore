@@ -3,3 +3,6 @@ data/
 *.tmp
 .env*
 !.env.example
+dist/
+apps/android/android/
+apps/android/node_modules/

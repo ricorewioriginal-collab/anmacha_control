@@ -1,0 +1,15 @@
+AirDeck für Windows
+===================
+
+Start:            AirDeck.exe  (startet den Server und öffnet das Studio als App-Fenster)
+Nur Server:       AirDeck-Headless.cmd  (ohne Fenster, für 24/7)
+Autostart:        Autostart-einrichten.cmd  (startet AirDeck bei jeder Anmeldung)
+Neues Token:      AirDeck.exe --new-admin-token  (z. B. für die Android-App)
+
+Daten liegen in %LOCALAPPDATA%\AirDeck\data (Medien, Einstellungen, verschlüsselte Passwörter).
+ffmpeg (für Server-Automation 24/7) liegt im Ordner ffmpeg\.
+
+Android-App im selben Netzwerk verbinden:
+  1. AirDeck mit Netzwerkfreigabe starten:  set AIRDECK_HOST=0.0.0.0 && AirDeck.exe
+     (Windows-Firewall-Abfrage für "private Netzwerke" erlauben)
+  2. In der App die Adresse http://<PC-IP>:8750 und ein Token eingeben.

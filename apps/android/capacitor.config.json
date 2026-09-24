@@ -1,0 +1,7 @@
+{
+  "appId": "app.airdeck.studio",
+  "appName": "AirDeck",
+  "webDir": "www",
+  "server": { "androidScheme": "https", "cleartext": true },
+  "android": { "allowMixedContent": true, "backgroundColor": "#070d18" }
+}
