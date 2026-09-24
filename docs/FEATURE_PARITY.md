@@ -55,3 +55,25 @@ Legende: ✅ vorhanden · 🟡 teilweise · ⏳ geplant
 Voice Studio, KI-Assistent, Musik-Studio (Suno), Spot-Werkstatt, Sendeablauf-Planer, Transkription und Office-Studio
 kommen in die AirDeck-AI-Schicht (Phase 8 der Roadmap). Dort gelten eigene Provider-Keys, lokale bzw. kostenlose Engines
 (Piper/Whisper) zuerst und ein Kosten-Ledger. AI darf nie Single Point of Failure sein.
+
+## LunarCaster DJ 1.2 Beta 5 (Funktionsvorlage für den lokalen Betrieb)
+
+LunarCaster wird nicht mehr gepflegt und darf frei verwendet werden. Übernommen wurden **nur Funktionsideen**.
+Die mitgelieferten Fremdbibliotheken (BASS/Bass.Net von un4seen, Winamp-DSP-Plugins, Encoder-EXEs) sind eigenständige
+Drittsoftware mit eigenen Lizenzen und sind **nicht** Teil von AirDeck. AirDeck nutzt stattdessen ffmpeg.
+
+| LunarCaster | Status | AirDeck |
+|---|---|---|
+| Decks A/B, Auto-Crossfade, Fade-In/Fade-Out/Next-Start | ✅ | Überblendung, Einblenden, Segue pro Titel |
+| Mikrofon + Voice-Over-Lautstärke, Aux-Eingänge in den Stream | ✅ | Server-Automation: Mikrofon/Line-In am PC mit Ducking (🎙 Mikro) |
+| Lokale Lautstärke / Mithören | ✅ | Programm über PC-Lautsprecher (ffplay) oder 🎧 |
+| 10-Band-EQ, DSP | ✅ | Master-DSP: 10-Band-EQ, Kompressor, Limiter |
+| Encoder MP3/AAC/OGG/OPUS | ✅ | MP3, AAC, Ogg/Opus |
+| Server: Icecast, SHOUTcast v1, SHOUTcast v2, mehrere, Auto-Reconnect | ✅ | Ausgänge inkl. SHOUTcast v1/v2 (Stream-ID) |
+| Hörerzahl vom Server | ✅ | Icecast status-json, SHOUTcast 7.html bzw. stats |
+| Songdatenbank mit ID3-Tags, Vorschau, Suche, Historie | ✅ | ffprobe liest Titel, Interpret, Album, Genre, Jahr und BPM |
+| Zufallstitel, Queue mischen, M3U öffnen/speichern | ✅ | |
+| Sound-FX-Ordner | ✅ | Cardwall und Ordner |
+| Event-Kalender (Wochentage, URL-Events, Wiederholung) | ✅ | Zeitplan, Stunden-Uhr, Sendeplan |
+| Nachricht senden (Titelanzeige) | ✅ | Titelanzeige senden |
+| Winamp-DSP-Plugins | ✗ | bewusst nicht: proprietär und nur für Windows |
