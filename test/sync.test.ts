@@ -48,10 +48,12 @@ test('MySQL: zwei Standorte teilen den Senderzustand, Konflikte werden gesichert
   const mysqlCfg = { host, port: Number(port), user, password, database };
   const dirA = mkdtempSync(join(tmpdir(), 'airdeck-a-'));
   const dirB = mkdtempSync(join(tmpdir(), 'airdeck-b-'));
+  let syncA: SyncManager | undefined;
+  let syncB: SyncManager | undefined;
   try {
     // Standort A legt den gemeinsamen Stand an
     const secA = new SecretStore(dirA);
-    const syncA = new SyncManager(dirA, secA);
+    syncA = new SyncManager(dirA, secA);
     await syncA.configure({ backend: 'mysql', mysql: mysqlCfg, firstSync: 'push' }, true);
     const appA = new AirDeckApp(dirA, { ffmpeg: null, secrets: secA, sync: syncA });
     appA.svc.stations.updateStation('main', { name: 'Studio Hannover' });
@@ -62,7 +64,7 @@ test('MySQL: zwei Standorte teilen den Senderzustand, Konflikte werden gesichert
 
     // Standort B (frisch installiert) holt den Stand
     const secB = new SecretStore(dirB);
-    const syncB = new SyncManager(dirB, secB);
+    syncB = new SyncManager(dirB, secB);
     await syncB.configure({ backend: 'mysql', mysql: mysqlCfg }, true);
     assert.equal(await syncB.startup(), 'take_remote');
     const appB = new AirDeckApp(dirB, { ffmpeg: null, secrets: secB, sync: syncB });
@@ -74,13 +76,16 @@ test('MySQL: zwei Standorte teilen den Senderzustand, Konflikte werden gesichert
     const b2 = new AirDeckApp(dirB, { ffmpeg: null, secrets: secB, sync: syncB });
     b2.svc.stations.updateStation('main', { name: 'Studio Berlin' });
     b2.persistNow();
+    // wie main.ts: der lokale Stand kommt aus der Datenbank, nicht mehr aus airdeck.json
+    const localB = b2.stateJson();
     b2.shutdown();
     await syncA.pushNow(JSON.stringify({ ...JSON.parse(appA.stateJson()), marker: 1 }));
-    assert.equal(await syncB.startup(), 'conflict');
+    assert.equal(await syncB.startup(localB), 'conflict');
     assert.ok(readdirSync(dirB).some((f) => f.startsWith('airdeck.remote-conflict-')));
-    await syncA.close();
-    await syncB.close();
   } finally {
+    // Verbindungen immer schließen – sonst hält ein fehlgeschlagener Test den Prozess (und die CI) offen
+    await syncA?.close();
+    await syncB?.close();
     rmSync(dirA, { recursive: true, force: true });
     rmSync(dirB, { recursive: true, force: true });
   }

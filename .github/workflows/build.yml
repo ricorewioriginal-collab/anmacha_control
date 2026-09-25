@@ -12,6 +12,8 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
+    # hängende Tests (z. B. offene Datenbankverbindungen) nicht stundenlang laufen lassen
+    timeout-minutes: 15
     services:
       mysql:
         image: mysql:8.4
