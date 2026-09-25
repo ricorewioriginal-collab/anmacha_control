@@ -1,0 +1,61 @@
+name: Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Branch/Tag, das ausgerollt werden soll"
+        required: false
+        default: "AirDeck-Radio-Automation-&-Broadcast"
+
+# Manueller Rollout per Knopfdruck auf einen eigenen Server per SSH/Docker Compose (siehe docs/DEPLOY.md).
+# Läuft nur mit vollständig hinterlegten Secrets (siehe unten) – ohne die bricht der Job sauber mit
+# einer klaren Meldung ab, statt sich falsch/unsicher zu verhalten.
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Secrets prüfen
+        run: |
+          missing=""
+          [ -z "${{ secrets.DEPLOY_HOST }}" ] && missing="$missing DEPLOY_HOST"
+          [ -z "${{ secrets.DEPLOY_USER }}" ] && missing="$missing DEPLOY_USER"
+          [ -z "${{ secrets.DEPLOY_SSH_KEY }}" ] && missing="$missing DEPLOY_SSH_KEY"
+          [ -z "${{ secrets.DEPLOY_PATH }}" ] && missing="$missing DEPLOY_PATH"
+          if [ -n "$missing" ]; then
+            echo "::error::Fehlende Secrets:$missing – siehe docs/DEPLOY.md"
+            exit 1
+          fi
+      - name: SSH-Schlüssel einrichten
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          if [ -n "${{ secrets.DEPLOY_HOST_KEY }}" ]; then
+            printf '%s\n' "${{ secrets.DEPLOY_HOST_KEY }}" > ~/.ssh/known_hosts
+          else
+            ssh-keyscan -p "${{ secrets.DEPLOY_PORT || '22' }}" -H "${{ secrets.DEPLOY_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null
+          fi
+      - name: Rollout per SSH (git fetch + docker compose up -d --build)
+        run: |
+          ssh -i ~/.ssh/deploy_key -p "${{ secrets.DEPLOY_PORT || '22' }}" \
+            "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}" bash -se -- "${{ inputs.ref }}" "${{ secrets.DEPLOY_PATH }}" <<'REMOTE'
+            set -e
+            ref="$1"
+            path="$2"
+            cd "$path"
+            git fetch origin "$ref"
+            git checkout "$ref"
+            git reset --hard "origin/$ref"
+            docker compose up -d --build
+            docker compose ps
+          REMOTE
+      - name: Health-Check
+        if: ${{ secrets.DEPLOY_HEALTH_URL != '' }}
+        run: |
+          for i in $(seq 1 30); do
+            curl -fs "${{ secrets.DEPLOY_HEALTH_URL }}" > /dev/null 2>&1 && exit 0
+            sleep 2
+          done
+          echo "::error::Health-Check unter DEPLOY_HEALTH_URL nach 60 s nicht erreicht."
+          exit 1
