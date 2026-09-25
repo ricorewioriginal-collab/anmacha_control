@@ -14,32 +14,42 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    env:
+      DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+      DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+      DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+      DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+      DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
+      DEPLOY_HOST_KEY: ${{ secrets.DEPLOY_HOST_KEY }}
+      DEPLOY_HEALTH_URL: ${{ secrets.DEPLOY_HEALTH_URL }}
+      DEPLOY_REF: ${{ inputs.ref }}
     steps:
-      - name: Secrets prüfen
+      - name: Secrets pruefen
         run: |
           missing=""
-          [ -z "${{ secrets.DEPLOY_HOST }}" ] && missing="$missing DEPLOY_HOST"
-          [ -z "${{ secrets.DEPLOY_USER }}" ] && missing="$missing DEPLOY_USER"
-          [ -z "${{ secrets.DEPLOY_SSH_KEY }}" ] && missing="$missing DEPLOY_SSH_KEY"
-          [ -z "${{ secrets.DEPLOY_PATH }}" ] && missing="$missing DEPLOY_PATH"
+          [ -z "$DEPLOY_HOST" ] && missing="$missing DEPLOY_HOST"
+          [ -z "$DEPLOY_USER" ] && missing="$missing DEPLOY_USER"
+          [ -z "$DEPLOY_SSH_KEY" ] && missing="$missing DEPLOY_SSH_KEY"
+          [ -z "$DEPLOY_PATH" ] && missing="$missing DEPLOY_PATH"
           if [ -n "$missing" ]; then
-            echo "::error::Fehlende Secrets:$missing – siehe docs/DEPLOY.md"
+            echo "::error::Fehlende Secrets:$missing - siehe docs/DEPLOY.md"
             exit 1
           fi
-      - name: SSH-Schlüssel einrichten
+      - name: SSH-Schluessel einrichten
         run: |
+          port="${DEPLOY_PORT:-22}"
           install -m 700 -d ~/.ssh
-          printf '%s\n' "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/deploy_key
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
-          if [ -n "${{ secrets.DEPLOY_HOST_KEY }}" ]; then
-            printf '%s\n' "${{ secrets.DEPLOY_HOST_KEY }}" > ~/.ssh/known_hosts
+          if [ -n "$DEPLOY_HOST_KEY" ]; then
+            printf '%s\n' "$DEPLOY_HOST_KEY" > ~/.ssh/known_hosts
           else
-            ssh-keyscan -p "${{ secrets.DEPLOY_PORT || '22' }}" -H "${{ secrets.DEPLOY_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null
+            ssh-keyscan -p "$port" -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts 2>/dev/null
           fi
       - name: Rollout per SSH (git fetch + docker compose up -d --build)
         run: |
-          ssh -i ~/.ssh/deploy_key -p "${{ secrets.DEPLOY_PORT || '22' }}" \
-            "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}" bash -se -- "${{ inputs.ref }}" "${{ secrets.DEPLOY_PATH }}" <<'REMOTE'
+          port="${DEPLOY_PORT:-22}"
+          ssh -i ~/.ssh/deploy_key -p "$port" "$DEPLOY_USER@$DEPLOY_HOST" bash -se -- "$DEPLOY_REF" "$DEPLOY_PATH" <<'REMOTE'
             set -e
             ref="$1"
             path="$2"
@@ -51,10 +61,13 @@ jobs:
             docker compose ps
           REMOTE
       - name: Health-Check
-        if: ${{ secrets.DEPLOY_HEALTH_URL != '' }}
         run: |
+          if [ -z "$DEPLOY_HEALTH_URL" ]; then
+            echo "DEPLOY_HEALTH_URL nicht gesetzt - Health-Check uebersprungen."
+            exit 0
+          fi
           for i in $(seq 1 30); do
-            curl -fs "${{ secrets.DEPLOY_HEALTH_URL }}" > /dev/null 2>&1 && exit 0
+            curl -fs "$DEPLOY_HEALTH_URL" > /dev/null 2>&1 && exit 0
             sleep 2
           done
           echo "::error::Health-Check unter DEPLOY_HEALTH_URL nach 60 s nicht erreicht."
