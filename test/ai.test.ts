@@ -106,14 +106,14 @@ test('KI-Automation: Moderation, Fallback, Kosten, Budget, Freigabe, Musikplanun
     assert.deepEqual(await app.ai.models('primary'), ['mock-large', 'mock-small']);
     assert.throws(() => app.ai.update({ providers: [{ id: 'y', role: 'voice', kind: 'google' }] }), /passt nicht/);
 
-    assert.throws(() => app.setAiConfig(admin, 'main', { enabled: true }), /Text-Provider/);
+    assert.throws(() => app.svc.ai.setAiConfig(admin, 'main', { enabled: true }), /Text-Provider/);
     const add = (title: string, artist: string, category: 'music' | 'station_id') =>
       app.addMedia('main', { id: `m-${title}`, title, artist, category, file: `${title}.mp3`, durationMs: 180_000, addedAt: Date.now() });
     const kygo = add('Firestone', 'Kygo', 'music');
     add('Wake Me Up', 'Avicii', 'music');
     add('Believer', 'Imagine Dragons', 'music');
     add('ID', 'Sender', 'station_id');
-    app.setAiConfig(admin, 'main', {
+    app.svc.ai.setAiConfig(admin, 'main', {
       enabled: true, everySongs: 1, maxWords: 30,
       text: { providerId: 'primary', model: 'mock-large', fallback: { providerId: 'backup', model: 'mock-small' } },
       voice: { providerId: 'tts', voice: 'alloy', model: 'tts-1' },
@@ -159,7 +159,7 @@ test('KI-Automation: Moderation, Fallback, Kosten, Budget, Freigabe, Musikplanun
     app.ai.update({ budgets: { providers: {}, stations: {} } });
 
     // Freigabe-Modus: nichts landet ungeprüft auf Sendung
-    app.setAiConfig(admin, 'main', { approval: true });
+    app.svc.ai.setAiConfig(admin, 'main', { approval: true });
     const lenBefore = (app.queueView('main') as { items: unknown[] }).items.length;
     const pending = await app.director.produce('main', 'break');
     assert.ok(pending && 'text' in pending);
@@ -170,7 +170,7 @@ test('KI-Automation: Moderation, Fallback, Kosten, Budget, Freigabe, Musikplanun
 
     // Musikplanung: nur gültige, freie Titel; Rückfall bleibt möglich
     app.queueClear('main');
-    app.setAiConfig(admin, 'main', { approval: false, everySongs: 0, music: { enabled: true, lookahead: 2, jingleEvery: 0 } });
+    app.svc.ai.setAiConfig(admin, 'main', { approval: false, everySongs: 0, music: { enabled: true, lookahead: 2, jingleEvery: 0 } });
     const added = await app.director.maintainMusic('main', true);
     assert.ok(added >= 1 && added <= 2);
     const picked = (app.queueView('main') as { items: { origin: string; media: { category: string; id: string } }[] }).items;
@@ -180,8 +180,8 @@ test('KI-Automation: Moderation, Fallback, Kosten, Budget, Freigabe, Musikplanun
     // Konfiguration überlebt den Neustart
     app.shutdown();
     const again = new AirDeckApp(dir, { stableMs: 0, ffmpeg: null });
-    assert.equal(again.aiConfig('main').enabled, true);
-    assert.equal(again.aiConfig('main').text.fallback?.providerId, 'backup');
+    assert.equal(again.svc.ai.aiConfig('main').enabled, true);
+    assert.equal(again.svc.ai.aiConfig('main').text.fallback?.providerId, 'backup');
     again.shutdown();
   } finally {
     app.shutdown();

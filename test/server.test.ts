@@ -64,7 +64,7 @@ before(async () => {
   icePort = (icecast.address() as { port: number }).port;
 
   app = new AirDeckApp(dir, { stableMs: 0 });
-  token = app.createToken({ name: 't', scopes: ['*'], roles: ['admin'], stationIds: ['*'] }).token;
+  token = app.svc.auth.createToken({ name: 't', scopes: ['*'], roles: ['admin'], stationIds: ['*'] }).token;
   server = createHttpServer(app, join(import.meta.dirname, '../studio'));
   await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
   base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
@@ -100,10 +100,10 @@ test('ohne Token kein Zugriff, Health öffentlich', async () => {
 });
 
 test('Scopes werden durchgesetzt', async () => {
-  const ro = app.createToken({ name: 'ro', scopes: ['now_playing:read'], roles: [], stationIds: ['main'] }).token;
+  const ro = app.svc.auth.createToken({ name: 'ro', scopes: ['now_playing:read'], roles: [], stationIds: ['main'] }).token;
   assert.equal((await api('GET', '/api/v1/stations/main/now-playing', undefined, ro)).status, 200);
   assert.equal((await api('GET', '/api/v1/stations/main/sources', undefined, ro)).status, 403);
-  const other = app.createToken({ name: 'o', scopes: ['*'], roles: ['dj'], stationIds: ['other'] }).token;
+  const other = app.svc.auth.createToken({ name: 'o', scopes: ['*'], roles: ['dj'], stationIds: ['other'] }).token;
   assert.equal((await api('GET', '/api/v1/stations/main/sources', undefined, other)).status, 403);
 });
 
@@ -252,7 +252,7 @@ test('Persistenz: Neustart stellt Konfiguration ohne aktive Quellen wieder her',
   assert.ok(list.every((s) => s.state === 'disconnected'));
   assert.equal(again.listOutputs('main').length, 1);
   assert.equal(again.library('main').length, 3);
-  assert.ok(again.authenticate(token));
+  assert.ok(again.svc.auth.authenticate(token));
   again.shutdown();
 });
 

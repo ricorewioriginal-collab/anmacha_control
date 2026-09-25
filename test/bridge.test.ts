@@ -107,7 +107,7 @@ test('Pull-Relay: bestehender Stream wird AirDeck-Quelle mit Priorität, geht an
 test('Bridge-API: gleicher Schlüssel = gleicher Sender, Now Playing erscheint im Status', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'airdeck-bapi-'));
   const app = new AirDeckApp(dir, { stableMs: 0, ffmpeg: null });
-  const token = app.createToken({ name: 'bridge', scopes: ['bridge:write'], roles: [], stationIds: ['*'] }).token;
+  const token = app.svc.auth.createToken({ name: 'bridge', scopes: ['bridge:write'], roles: [], stationIds: ['*'] }).token;
   const server = createHttpServer(app, join(import.meta.dirname, '../studio'));
   await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
   const base = `http://127.0.0.1:${(server.address() as { port: number }).port}/api/v1`;

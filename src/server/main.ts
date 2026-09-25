@@ -179,7 +179,7 @@ async function main(): Promise<void> {
   console.log(app.ffmpeg ? `ffmpeg: ${app.ffmpeg.version} (${app.ffmpeg.source})` : 'ffmpeg nicht gefunden – neuer Versuch im Hintergrund, bis dahin kein Server-Playout');
 
   if (argv.includes('--new-admin-token')) {
-    const { token } = app.createToken({ name: 'admin (neu)', scopes: ['*'], roles: ['admin'], stationIds: ['*'] });
+    const { token } = app.svc.auth.createToken({ name: 'admin (neu)', scopes: ['*'], roles: ['admin'], stationIds: ['*'] });
     console.log(`\n  Neues Admin-Token: ${token}\n`);
     process.exit(0);
   }
@@ -190,15 +190,15 @@ async function main(): Promise<void> {
     console.log('\n  Anmeldung im Studio – Benutzer: admin  Einmal-Passwort (bitte beim ersten Login ändern):');
     console.log(`  ${pw}1\n`);
   }
-  if (!app.hasTokens() && !desktop) {
-    const { token } = app.createToken({ name: 'admin', scopes: ['*'], roles: ['admin'], stationIds: ['*'] });
+  if (!app.svc.auth.hasTokens() && !desktop) {
+    const { token } = app.svc.auth.createToken({ name: 'admin', scopes: ['*'], roles: ['admin'], stationIds: ['*'] });
     console.log('\n  Admin-Token (wird nur jetzt angezeigt, sicher aufbewahren):');
     console.log(`  ${token}`);
     console.log(`\n  Studio öffnen: http://${localHost}:${port}/#token=${token}\n`);
   }
 
   // Gemeinsames Desktop-Token anlegen, damit ein zweiter Start (Studio öffnen, --stop, Tray) die laufende Instanz erreicht
-  app.desktopToken();
+  app.svc.auth.desktopToken();
 
   const server = createHttpServer(app, join(root, 'studio'));
   server.requestTimeout = 0; // Streams (Ingest, SSE, Listen) laufen dauerhaft
@@ -206,7 +206,7 @@ async function main(): Promise<void> {
   server.listen(port, host, () => {
     app.start();
     console.log(`AirDeck läuft auf http://${host}:${port}  (Daten: ${dataDir})`);
-    if (desktop) openStudio(`http://${localHost}:${port}/#token=${app.desktopToken()}`);
+    if (desktop) openStudio(`http://${localHost}:${port}/#token=${app.svc.auth.desktopToken()}`);
     if (packaged && process.platform === 'win32' && !argv.includes('--no-tray')) startTray(logFile);
   });
 

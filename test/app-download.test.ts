@@ -13,7 +13,7 @@ test('APK-Download aus dem Windows-Paket, Netzwerk-Einstellung und Verbindungsin
   const apk = Buffer.from('PK\x03\x04fake-apk');
   writeFileSync(join(root, 'android', 'AirDeck-Android.apk'), apk);
   const app = new AirDeckApp(data, { stableMs: 0, ffmpeg: null, appRoot: root });
-  const token = app.createToken({ name: 'a', scopes: ['*'], roles: ['admin'], stationIds: ['*'] }).token;
+  const token = app.svc.auth.createToken({ name: 'a', scopes: ['*'], roles: ['admin'], stationIds: ['*'] }).token;
   const server = createHttpServer(app, join(import.meta.dirname, '../studio'));
   await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
   const base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
@@ -32,7 +32,7 @@ test('APK-Download aus dem Windows-Paket, Netzwerk-Einstellung und Verbindungsin
     assert.equal(c2.lan, true);
     assert.equal(c2.restartNeeded, !process.env.AIRDECK_HOST, 'Umschalten wirkt nach Neustart');
     // ohne Admin-Rechte kein Zugriff
-    const dj = app.createToken({ name: 'dj', scopes: ['*'], roles: ['dj'], stationIds: ['main'] }).token;
+    const dj = app.svc.auth.createToken({ name: 'dj', scopes: ['*'], roles: ['dj'], stationIds: ['main'] }).token;
     assert.equal((await fetch(`${base}/api/v1/app/connect`, { headers: { Authorization: `Bearer ${dj}` } })).status, 403);
   } finally {
     app.shutdown();

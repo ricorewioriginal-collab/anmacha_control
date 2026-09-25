@@ -130,12 +130,12 @@ export function createHttpServer(app: AirDeckApp, studioDir: string): Server {
   });
   add('GET', '/api/v1/capabilities', null, () => ({ outputs: OUTPUT_CAPABILITIES, mediaTypes: Object.keys(AUDIO_EXT), categories: MEDIA_CATEGORIES }));
   add('GET', '/api/v1/audit', 'audit:read', (c) => app.audit.tail(Math.min(Number(c.url.searchParams.get('limit') ?? 100), 500)));
-  add('GET', '/api/v1/tokens', 'tokens:write', () => app.listTokens());
+  add('GET', '/api/v1/tokens', 'tokens:write', () => app.svc.auth.listTokens());
   add('POST', '/api/v1/tokens', 'tokens:write', async (c) => {
     const b = await c.body();
-    return app.createToken({ name: String(b.name ?? ''), scopes: arr(b.scopes), roles: arr(b.roles), stationIds: arr(b.stationIds) });
+    return app.svc.auth.createToken({ name: String(b.name ?? ''), scopes: arr(b.scopes), roles: arr(b.roles), stationIds: arr(b.stationIds) });
   });
-  add('DELETE', '/api/v1/tokens/:id', 'tokens:write', (c) => app.revokeToken(c.params.id!));
+  add('DELETE', '/api/v1/tokens/:id', 'tokens:write', (c) => app.svc.auth.revokeToken(c.params.id!));
 
   // --- Sender / Branding ---
   add('GET', '/api/v1/stations', 'branding:read', (c) => app.listStations(c.p));
@@ -469,8 +469,8 @@ export function createHttpServer(app: AirDeckApp, studioDir: string): Server {
   add('GET', '/api/v1/ai/usage', null, (c) => (globalAdmin(c), app.ai.usageView()));
   add('GET', '/api/v1/ai/providers/:id/models', null, (c) => (globalAdmin(c), aiCall(() => app.ai.models(c.params.id!))));
   add('GET', '/api/v1/ai/providers/:id/voices', null, (c) => (globalAdmin(c), aiCall(() => app.ai.voices(c.params.id!))));
-  add('GET', '/api/v1/stations/:sid/ai', 'ai:read', (c) => ({ config: app.aiConfig(sid(c)), state: app.director.view(sid(c)) }));
-  add('PUT', '/api/v1/stations/:sid/ai', 'ai:write', async (c) => app.setAiConfig(c.p, sid(c), await c.body()));
+  add('GET', '/api/v1/stations/:sid/ai', 'ai:read', (c) => ({ config: app.svc.ai.aiConfig(sid(c)), state: app.director.view(sid(c)) }));
+  add('PUT', '/api/v1/stations/:sid/ai', 'ai:write', async (c) => app.svc.ai.setAiConfig(c.p, sid(c), await c.body()));
   add('POST', '/api/v1/stations/:sid/ai/moderation', 'ai:write', async (c) => {
     const kind = (await c.body()).kind === 'news' ? 'news' : 'break';
     const r = await app.director.produce(sid(c), kind);
@@ -482,9 +482,9 @@ export function createHttpServer(app: AirDeckApp, studioDir: string): Server {
   add('POST', '/api/v1/stations/:sid/ai/pending/:id/reject', 'ai:write', (c) => aiCall(() => app.director.reject(sid(c), c.params.id!)));
   add('POST', '/api/v1/stations/:sid/ai/text', 'ai:write', async (c) => {
     const b = await c.body();
-    return app.aiText(sid(c), String(b.prompt ?? ''), typeof b.system === 'string' ? b.system : undefined);
+    return app.svc.ai.aiText(sid(c), String(b.prompt ?? ''), typeof b.system === 'string' ? b.system : undefined);
   });
-  add('POST', '/api/v1/stations/:sid/ai/speech', 'ai:write', async (c) => app.aiSpeech(sid(c), await c.body()));
+  add('POST', '/api/v1/stations/:sid/ai/speech', 'ai:write', async (c) => app.svc.ai.aiSpeech(sid(c), await c.body()));
 
   // --- Benachrichtigungen / Webhooks / Now-Playing-Export ---
   add('GET', '/api/v1/stations/:sid/integrations', 'stations:write', (c) => app.svc.notifications.integrations(sid(c)));
@@ -754,7 +754,7 @@ function auth(app: AirDeckApp, req: IncomingMessage, url: URL): Principal | null
   const h = /^Bearer (.+)$/i.exec(String(req.headers.authorization ?? ''));
   // Query-Token nur für GET (EventSource, <audio>), damit Tokens nicht in schreibenden Requests landen.
   const token = h?.[1] ?? (req.method === 'GET' ? url.searchParams.get('token') ?? undefined : undefined);
-  return app.authenticate(token);
+  return app.svc.auth.authenticate(token);
 }
 
 function setSecurityHeaders(res: ServerResponse): void {
