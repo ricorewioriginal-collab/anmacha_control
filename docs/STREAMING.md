@@ -49,6 +49,7 @@ Im Windows-Paket und im Docker-Image ist ffmpeg samt LAME und Opus enthalten.
 ## Automatische Klangoptimierung
 
 - **Lautheitsangleich pro Titel (EBU R128):** Jeder neue Titel wird im Hintergrund gemessen (integrierte Lautheit und True Peak), immer ein Titel nach dem anderen, damit der Sendebetrieb nicht leidet. Beim Abspielen gleicht AirDeck auf das Ziel an (Standard −16 LUFS), höchstens ±12 dB. Die Spitzen bleiben dabei unter −1 dBTP, mit Limiter gibt es 3 dB Reserve. Ein manuell gesetzter Gain hat Vorrang. Sprachbeiträge bleiben unverändert. Unter „Server-Automation → Einstellungen“ lässt sich die ganze Bibliothek neu messen.
+- **Track-Check (im selben Durchlauf):** Digitale Stille am Anfang und Ende (unter −60 dB, mindestens 0,25 s bzw. 0,5 s) wird automatisch als Cue-In/Cue-Out gesetzt. Leise Einblendungen bleiben unangetastet, von Hand gesetzte Cue-Punkte ebenso. Dazu kommen Hinweise auf Übersteuerung, niedrige Bitrate und stille Dateien (⚠ in der Bibliothek, ✂ für automatisch gekürzte Stille). Bestehende Bibliotheken werden einmalig im Hintergrund nachgeprüft.
 - **Klangprofile:** Neutral, Musik ausgewogen, Pop/Dance (laut & dicht, Multiband), Wort & Moderation, Klassik/Jazz. Ein Profil setzt EQ und Dynamik als Startpunkt, danach ist alles frei anpassbar.
 - **AGC:** Die Summe wird mit `loudnorm` in Echtzeit auf die Ziel-Lautheit geregelt (EBU R128, TP −1,5 dB). Das bringt ein paar Sekunden Verzögerung im Stream, die Pegel bleiben aber gleichmäßig.
 - **Multiband:** 5 Bänder (`mcompand`) für einen dichten Radio-Sound.

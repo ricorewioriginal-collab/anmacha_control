@@ -53,6 +53,8 @@ export interface MediaItem {
   source?: string;
   /** Eingebundener Ordner: absoluter Pfad der Originaldatei (wird nie kopiert und nie gelöscht) */
   linkedPath?: string;
+  /** Track-Check: Übersteuerung, Bitrate, stille Datei, automatisch gesetzte Cue-Punkte */
+  check?: { at: number; clipped: number; bitrateKbps: number | null; silent: boolean; autoCueIn?: number; autoCueOut?: number };
 }
 
 export interface QueueEntry {

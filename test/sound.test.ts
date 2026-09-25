@@ -47,7 +47,7 @@ test('Titel werden automatisch gemessen (EBU R128)', { skip: !ff && 'ffmpeg nich
     for (let i = 0; i < 100 && m.lufs == null; i++) await new Promise((r) => setTimeout(r, 50));
     assert.equal(m.lufs, direct!.lufs);
     assert.ok(m.truePeakDb! < 0);
-    assert.deepEqual(app.svc.media.loudnessStatus('main'), { total: 1, measured: 1, pending: 0, running: false });
+    assert.deepEqual(app.svc.media.loudnessStatus('main'), { total: 1, measured: 1, warnings: 0, pending: 0, running: false });
     app.shutdown();
   } finally {
     rmSync(dir, { recursive: true, force: true });

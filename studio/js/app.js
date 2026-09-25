@@ -932,7 +932,7 @@ function renderLibrary() {
     ondblclick: () => run(() => api.post(url('/queue'), { mediaId: m.id })),
     title: 'Doppelklick: in Queue · Ziehen: auf Deck, Cart oder Queue',
   },
-    h('td', {}, coverEl(m, 'cover small')), h('td', {}, m.title), h('td', {}, m.artist), h('td', { class: 'num muted' }, m.bpm ? String(m.bpm) : ''),
+    h('td', {}, coverEl(m, 'cover small')), h('td', {}, m.title, ...checkBadge(m)), h('td', {}, m.artist), h('td', { class: 'num muted' }, m.bpm ? String(m.bpm) : ''),
     h('td', {}, h('span', { class: 'tag cat', style: `--c:${CATEGORY_STYLE[m.category]?.color ?? '#2f8cff'}` }, CATEGORY_LABEL[m.category] ?? m.category)),
     h('td', { class: 'num' }, fmt(m.durationMs)),
     h('td', { class: 'act' },
@@ -941,6 +941,21 @@ function renderLibrary() {
       h('button', { title: 'Bearbeiten', onclick: () => editMedia(m) }, '✎'),
       h('button', { title: 'Löschen', onclick: () => confirm(`„${m.title}“ löschen?`) && run(() => api.del(url(`/media/${encodeURIComponent(m.id)}`))) }, '✕')),
   )));
+}
+
+/** Hinweise des Track-Checks (vom Server gemessen) als kleines Warnzeichen. @param {any} m */
+function checkBadge(m) {
+  const c = m.check;
+  if (!c) return [];
+  const w = [];
+  if (c.silent) w.push('Datei ist still');
+  if (c.clipped > 1000) w.push('übersteuert (Clipping)');
+  if (c.bitrateKbps != null && c.bitrateKbps < 128 && /\.(mp3|aac|m4a)$/i.test(m.linkedPath ?? m.file ?? '')) w.push(`niedrige Bitrate (${c.bitrateKbps} kbit/s)`);
+  const auto = [c.autoCueIn != null ? `Cue-In ${(c.autoCueIn / 1000).toFixed(2)} s` : '', c.autoCueOut != null ? `Cue-Out ${(c.autoCueOut / 1000).toFixed(2)} s` : ''].filter(Boolean);
+  return [
+    w.length ? h('span', { class: 'track-warn', title: `Track-Check: ${w.join(', ')}` }, ' ⚠') : null,
+    auto.length ? h('span', { class: 'muted', title: `Stille automatisch abgeschnitten: ${auto.join(', ')}` }, ' ✂') : null,
+  ];
 }
 
 /** @param {any} m */

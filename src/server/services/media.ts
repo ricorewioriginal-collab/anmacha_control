@@ -8,7 +8,7 @@ import { readdir } from 'node:fs/promises';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { MEDIA_CATEGORIES, parseFileName, type MediaCategory, type MediaItem } from '../../core/automation.ts';
 import { parseM3U, toM3U } from '../../core/scheduler.ts';
-import { analyzeLoudness, probeMedia } from '../ffmpeg.ts';
+import { analyzeTrack, probeMedia, type TrackAnalysis } from '../ffmpeg.ts';
 import { AUDIO_FILE_RE, AppError, newId, type LinkedFolder } from '../model.ts';
 
 const MAX_LINKED_FILES = 20_000;
@@ -59,7 +59,7 @@ export class MediaService {
         if (Object.keys(patch).length || tags.album || tags.genre || tags.year) this.updateMedia(stationId, item.id, patch);
       });
     }
-    if (!item.url && item.lufs == null) this.queueLoudness(stationId, item.id);
+    if (!item.url && !item.check) this.queueLoudness(stationId, item.id);
     return item;
   }
 
@@ -78,7 +78,7 @@ export class MediaService {
     if (!this.app.ffmpeg) throw new AppError(501, 'unsupported', 'Lautheitsanalyse benötigt ffmpeg');
     let queued = 0;
     for (const m of this.app.rt(stationId).data.library) {
-      if (m.url || (!force && m.lufs != null)) continue;
+      if (m.url || (!force && m.check)) continue;
       this.queueLoudness(stationId, m.id);
       queued++;
     }
@@ -87,7 +87,7 @@ export class MediaService {
 
   loudnessStatus(stationId: string): unknown {
     const lib = this.app.rt(stationId).data.library.filter((m) => !m.url);
-    return { total: lib.length, measured: lib.filter((m) => m.lufs != null).length, pending: this.loudQueue.filter((x) => x.stationId === stationId).length, running: this.loudBusy };
+    return { total: lib.length, measured: lib.filter((m) => m.check || m.lufs != null).length, warnings: lib.filter((m) => trackWarnings(m).length).length, pending: this.loudQueue.filter((x) => x.stationId === stationId).length, running: this.loudBusy };
   }
 
   async runLoudness(): Promise<void> {
@@ -98,10 +98,10 @@ export class MediaService {
         const rt = this.app.stations.get(job.stationId);
         const m = rt?.data.library.find((x) => x.id === job!.id);
         if (!m || m.url) continue;
-        const r = await analyzeLoudness(this.app.ffmpeg.ffmpeg, this.mediaPath(job.stationId, m));
+        // Track-Check in einem Durchlauf: Lautheit, Stille am Anfang/Ende, Übersteuerung, Bitrate
+        const r = await analyzeTrack(this.app.ffmpeg.ffmpeg, this.mediaPath(job.stationId, m));
         if (!r || !rt!.data.library.includes(m)) continue;
-        m.lufs = r.lufs;
-        m.truePeakDb = r.truePeakDb;
+        applyTrackCheck(m, r);
         this.app.publish('library.changed', job.stationId, { updated: m });
         this.app.changed();
       }
@@ -109,6 +109,7 @@ export class MediaService {
       this.loudBusy = false;
     }
   }
+
 
   updateMedia(stationId: string, id: string, patch: Record<string, unknown>): MediaItem {
     const m = this.media(stationId, id);
@@ -332,3 +333,50 @@ export class MediaService {
   }
 
 }
+
+/** Mindestlängen, ab denen Stille als Cue-Punkt übernommen wird */
+const LEAD_MIN_MS = 250;
+const TAIL_MIN_MS = 500;
+
+/**
+ * Ergebnis des Track-Checks übernehmen. Von Hand gesetzte Cue-Punkte bleiben immer unangetastet;
+ * automatisch gesetzte werden bei einer erneuten Messung aktualisiert.
+ */
+export function applyTrackCheck(m: MediaItem, r: TrackAnalysis): void {
+  if (r.lufs !== null) {
+    m.lufs = r.lufs;
+    m.truePeakDb = r.truePeakDb;
+  }
+  if (m.durationMs == null && r.durationMs) m.durationMs = r.durationMs;
+  const prev = m.check;
+  const check: NonNullable<MediaItem['check']> = { at: Date.now(), clipped: r.clippedSamples, bitrateKbps: r.bitrateKbps, silent: r.silent };
+  const manualIn = m.cueInMs != null && m.cueInMs !== prev?.autoCueIn;
+  const manualOut = m.cueOutMs != null && m.cueOutMs !== prev?.autoCueOut;
+  if (!manualIn) {
+    if (r.leadSilenceMs !== null && r.leadSilenceMs >= LEAD_MIN_MS) {
+      // kleine Reserve, damit kein Anschlag abgeschnitten wird
+      m.cueInMs = Math.max(0, r.leadSilenceMs - 20);
+      check.autoCueIn = m.cueInMs;
+    } else if (prev?.autoCueIn !== undefined) delete m.cueInMs;
+  }
+  const end = r.durationMs;
+  if (!manualOut) {
+    if (r.tailSilenceMs !== null && end !== null && end - r.tailSilenceMs >= TAIL_MIN_MS) {
+      m.cueOutMs = Math.min(end, r.tailSilenceMs + 20);
+      check.autoCueOut = m.cueOutMs;
+    } else if (prev?.autoCueOut !== undefined) delete m.cueOutMs;
+  }
+  m.check = check;
+}
+
+/** Hinweise des Track-Checks in Klartext (Studio, API) */
+export function trackWarnings(m: MediaItem): string[] {
+  const c = m.check;
+  if (!c) return [];
+  const w: string[] = [];
+  if (c.silent) w.push('Datei ist still');
+  if (c.clipped > 1000) w.push('übersteuert (Clipping)');
+  if (c.bitrateKbps !== null && c.bitrateKbps < 128 && /\.(mp3|aac|m4a)$/i.test(m.linkedPath ?? m.file)) w.push(`niedrige Bitrate (${c.bitrateKbps} kbit/s)`);
+  return w;
+}
+

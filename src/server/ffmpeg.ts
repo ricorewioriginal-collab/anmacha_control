@@ -148,26 +148,90 @@ export function inputDeviceArgs(id: string): string[] {
 }
 
 /** Lautheit eines Titels messen (EBU R128): integrierte Lautheit (LUFS) und True-Peak (dBTP). */
-export function analyzeLoudness(ffmpeg: string, file: string, timeoutMs = 180_000): Promise<{ lufs: number; truePeakDb: number } | null> {
+export interface TrackAnalysis {
+  lufs: number | null;
+  truePeakDb: number;
+  durationMs: number | null;
+  /** Ende der digitalen Stille am Anfang (ms), null = keine */
+  leadSilenceMs: number | null;
+  /** Beginn der digitalen Stille am Ende (ms), null = keine */
+  tailSilenceMs: number | null;
+  /** Vollausgesteuerte Samples (Hinweis auf Übersteuerung) */
+  clippedSamples: number;
+  bitrateKbps: number | null;
+  /** Die ganze Datei ist digital still */
+  silent: boolean;
+}
+
+/** Stille-Schwelle: nur echte digitale Stille, leise Ein-/Ausblendungen bleiben unangetastet */
+export const SILENCE_DB = -60;
+
+/**
+ * Track-Check in EINEM Durchlauf: Lautheit (EBU R128), True Peak, Stille am Anfang/Ende, Übersteuerung, Bitrate.
+ * Liefert null, wenn die Datei nicht dekodierbar ist.
+ */
+export function analyzeTrack(ffmpeg: string, file: string, timeoutMs = 180_000): Promise<TrackAnalysis | null> {
   return new Promise((resolve) => {
-    const p = spawn(ffmpeg, ['-hide_banner', '-nostats', '-nostdin', '-i', file, '-vn', '-af', 'ebur128=peak=true:framelog=quiet', '-f', 'null', '-'], { stdio: ['ignore', 'ignore', 'pipe'], windowsHide: true });
-    let err = '';
+    const af = `ebur128=peak=true:framelog=quiet,silencedetect=n=${SILENCE_DB}dB:d=0.25,astats=measure_perchannel=none:measure_overall=Peak_level+Peak_count`;
+    const p = spawn(ffmpeg, ['-hide_banner', '-nostats', '-nostdin', '-i', file, '-vn', '-af', af, '-f', 'null', '-'], { stdio: ['ignore', 'ignore', 'pipe'], windowsHide: true });
+    // Kopf (Dauer, Bitrate) und Stille-Meldungen merken, vom Rest nur das Ende (Zusammenfassungen)
+    let head = '';
+    let tail = '';
+    const silences: { start: number; end: number | null }[] = [];
     const timer = setTimeout(() => p.kill('SIGKILL'), timeoutMs);
-    p.stderr!.on('data', (d: Buffer) => (err = (err + d.toString()).slice(-4000)));
+    p.stderr!.on('data', (d: Buffer) => {
+      const t = d.toString();
+      if (head.length < 4000) head += t;
+      tail = (tail + t).slice(-8000);
+      for (const m of t.matchAll(/silence_start: (-?\d+(?:\.\d+)?)/g)) silences.push({ start: Math.max(0, Number(m[1])), end: null });
+      for (const m of t.matchAll(/silence_end: (\d+(?:\.\d+)?)/g)) {
+        const open = silences.findLast((x) => x.end === null);
+        if (open) open.end = Number(m[1]);
+      }
+    });
     p.on('error', () => {
       clearTimeout(timer);
       resolve(null);
     });
     p.on('close', (code) => {
       clearTimeout(timer);
-      const summary = err.slice(err.lastIndexOf('Summary:'));
+      if (code !== 0) return resolve(null);
+      const summary = tail.slice(tail.lastIndexOf('Summary:'));
       const i = /I:\s+(-?\d+(?:\.\d+)?)\s+LUFS/.exec(summary);
       const tp = /True peak:\s+Peak:\s+(-?\d+(?:\.\d+)?|-inf)\s+dBFS/.exec(summary);
-      if (code !== 0 || !i) return resolve(null);
-      const lufs = Number(i[1]);
-      // Stille/zu kurz: ebur128 meldet −70 LUFS – dann keine Anpassung
-      if (!Number.isFinite(lufs) || lufs <= -69) return resolve(null);
-      resolve({ lufs, truePeakDb: tp && tp[1] !== '-inf' ? Number(tp[1]) : -90 });
+      const dur = /Duration: (\d+):(\d+):(\d+(?:\.\d+)?)/.exec(head);
+      const durationMs = dur ? Math.round((Number(dur[1]) * 3600 + Number(dur[2]) * 60 + Number(dur[3])) * 1000) : null;
+      const br = /bitrate: (\d+) kb\/s/.exec(head);
+      const peakLevel = /Peak level dB:\s*(-?\d+(?:\.\d+)?|-inf)/.exec(tail);
+      const peakCount = /Peak count:\s*(\d+(?:\.\d+)?)/.exec(tail);
+      const lufsRaw = i ? Number(i[1]) : NaN;
+      // Stille am Anfang: beginnt bei 0; am Ende: bis zum Dateiende (ohne silence_end oder end ≈ Dauer)
+      const first = silences[0];
+      const leadEnd = first && first.start < 0.05 && first.end !== null ? Math.round(first.end * 1000) : null;
+      // Stille bis (fast) zum Dateiende: die ganze Datei ist still – keine Cue-Punkte, sondern ein Hinweis
+      const silent = leadEnd !== null && durationMs !== null && leadEnd >= durationMs - 100;
+      const leadSilenceMs = silent ? null : leadEnd;
+      const last = silences[silences.length - 1];
+      const tailOpen = !!last && (last.end === null || (durationMs !== null && last.end * 1000 >= durationMs - 50));
+      // eine einzige Stille vom Anfang bis zum Ende (ganz stille Datei) ist weder Anfang noch Ende eines Titels
+      const tailSilenceMs = tailOpen && !(last === first && first.start < 0.05) ? Math.round(last!.start * 1000) : null;
+      resolve({
+        // Stille/zu kurz: ebur128 meldet −70 LUFS – dann keine Anpassung
+        lufs: Number.isFinite(lufsRaw) && lufsRaw > -69 ? lufsRaw : null,
+        truePeakDb: tp && tp[1] !== '-inf' ? Number(tp[1]) : -90,
+        durationMs,
+        leadSilenceMs,
+        tailSilenceMs,
+        clippedSamples: peakLevel && peakLevel[1] !== '-inf' && Number(peakLevel[1]) >= -0.05 && peakCount ? Math.round(Number(peakCount[1])) : 0,
+        bitrateKbps: br ? Number(br[1]) : null,
+        silent: silent || (!!first && first.start < 0.05 && first.end === null),
+      });
     });
   });
+}
+
+/** Nur Lautheit (für bestehende Aufrufer) */
+export async function analyzeLoudness(ffmpeg: string, file: string, timeoutMs = 180_000): Promise<{ lufs: number; truePeakDb: number } | null> {
+  const r = await analyzeTrack(ffmpeg, file, timeoutMs);
+  return r && r.lufs !== null ? { lufs: r.lufs, truePeakDb: r.truePeakDb } : null;
 }
