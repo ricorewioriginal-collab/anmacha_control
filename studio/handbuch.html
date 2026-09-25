@@ -184,7 +184,16 @@ footer { text-align: center; color: var(--muted); font-size: 13px; padding: 24px
   <h3>Mikrofon am AirDeck-PC</h3>
   <p>Unter „Audio &amp; Geräte“ Mikrofon oder Line-In wählen, dann in der Server-Automation auf <b>Mic</b>. Die Stimme wird über die laufende Musik gemischt, die Musik wird abgesenkt.</p>
   <h3>MIC LIVE (Browser/App)</h3>
-  <p>Oben auf <b>MIC LIVE</b> klicken. Das Studio sendet dein Mikrofon als Live-Quelle. Nach der Prioritätsregel übernimmt es die Automation (2 s Anti-Flapping). Beim Beenden kehrt die Automation zurück.</p>
+  <p>Oben auf <b>MIC LIVE</b> klicken. Das Studio sendet dein Mikrofon als Live-Quelle. Nach der Prioritätsregel übernimmt es die Automation (2 s Anti-Flapping). Beim Beenden kehrt die Automation zurück. Das Mikrofon läuft durch denselben Mixer wie die Musik: Der Stream bleibt MP3 (bzw. das eingestellte Format), die Hörer bleiben verbunden. Läuft die Automation gerade nicht, startet AirDeck den Sendebus für die Live-Sendung automatisch.</p>
+  <h3>Betriebsarten</h3>
+  <p>Der Knopf neben ON AIR zeigt die Betriebsart und schaltet per Klick zwischen <b>AUTO</b> und <b>MANUELL</b>.</p>
+  <ul>
+    <li><b>AUTO:</b> Die Automation spielt Queue, Sendeuhr und Sendeplan.</li>
+    <li><b>MANUELL:</b> Die Automation pausiert. Titel startest du in der Bibliothek mit <b>▶ Jetzt senden</b>, Jingles über die Cartwall. Die Queue bleibt, wie sie ist.</li>
+    <li><b>LIVE</b> (automatisch): Eine Live-Quelle ist auf Sendung. Die Automation pausiert und verbraucht keine Titel. Titelanzeige: „Live: &lt;Quelle&gt;“.</li>
+    <li><b>NOTFALL</b> (automatisch): Es gibt nichts Reguläres mehr zu spielen, der Notfall-Ordner läuft.</li>
+  </ul>
+  <p>Stille auf der Live-Quelle: AirDeck fällt auf die Automation zurück. Die Live-Quelle muss sich danach neu verbinden.</p>
   <h3>Externe Live-Quellen (z. B. BUTT, Mixxx, OBS)</h3>
   <p>In „Quellen · Priorität“ ein Passwort für die Quelle setzen und im Programm eintragen: Server = AirDeck-Adresse, Mount <code>/ingest/&lt;sender&gt;/live</code>, Benutzer = Quellen-ID bzw. <code>source</code>. Icecast-kompatibel (PUT/SOURCE).</p>
   <div class="tip">Die kleinere Zahl gewinnt: Live-Studio 1, Remote 2, Android 3, Automation 10. „Freigeben“ gibt eine Übernahme wieder ab.</div>

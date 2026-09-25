@@ -227,7 +227,9 @@ jobs:
           for i in $(seq 1 60); do curl -fs http://127.0.0.1:8750/api/v1/health && break; sleep 1; done
           docker compose logs airdeck | tee log.txt
           grep -q "Datenbank: postgres" log.txt || (echo "PostgreSQL wird nicht genutzt" && exit 1)
-          TOKEN=$(grep -A1 "Admin-Token" log.txt | tail -1 | tr -d ' \r')
+          # compose setzt „airdeck  | “ vor jede Zeile – Token direkt am Muster erkennen
+          TOKEN=$(grep -A1 "Admin-Token" log.txt | grep -o 'ad_[A-Za-z0-9_-]*' | head -1)
+          test -n "$TOKEN" || (echo "Admin-Token nicht gefunden" && exit 1)
           curl -fs -X POST -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{"id":"ci","name":"CI Radio"}' http://127.0.0.1:8750/api/v1/stations > /dev/null
           # Neustart: Daten müssen aus PostgreSQL kommen
           docker compose restart airdeck

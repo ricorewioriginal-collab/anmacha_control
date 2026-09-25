@@ -53,6 +53,24 @@ export class PcmFifo {
     return { samples, got };
   }
 
+  /** Die ältesten n Frames verwerfen, ohne sie zu kopieren (Jitter-Puffer von Live-Quellen). */
+  drop(n: number): void {
+    let left = Math.min(n, this.frames) * BYTES_PER_FRAME;
+    this.bytes -= left;
+    while (left > 0) {
+      const c = this.chunks[0]!;
+      const avail = c.length - this.head;
+      if (avail <= left) {
+        left -= avail;
+        this.chunks.shift();
+        this.head = 0;
+      } else {
+        this.head += left;
+        left = 0;
+      }
+    }
+  }
+
   clear(): void {
     this.chunks = [];
     this.head = 0;

@@ -36,3 +36,16 @@ test('busRmsDb', () => {
   assert.equal(busRmsDb(new Float32Array(10)), -90);
   assert.ok(Math.abs(busRmsDb(new Float32Array([1, 1, 1, 1]))) < 1e-9);
 });
+
+test('PcmFifo.drop verwirft die ältesten Frames über Chunk-Grenzen hinweg', async () => {
+  const { PcmFifo, BYTES_PER_FRAME } = await import('../src/core/pcm.ts');
+  const f = new PcmFifo();
+  const frame = (v: number) => { const b = Buffer.alloc(BYTES_PER_FRAME); b.writeInt16LE(v, 0); b.writeInt16LE(v, 2); return b; };
+  f.push(Buffer.concat([frame(1), frame(2)]));
+  f.push(Buffer.concat([frame(3), frame(4), frame(5)]));
+  f.drop(3);
+  assert.equal(f.frames, 2);
+  assert.equal(f.read(1).samples[0], 4);
+  f.drop(99);
+  assert.equal(f.frames, 0);
+});

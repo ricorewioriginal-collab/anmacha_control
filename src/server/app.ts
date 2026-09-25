@@ -10,6 +10,7 @@ import {
   type CartSlot, type ClockTemplate, type DeckId, type DeckState, type MediaItem,
 } from '../core/automation.ts';
 import { activeWindow } from '../core/scheduler.ts';
+import { ModeState, automationRuns, type BaseMode, type Mode as BroadcastMode } from '../core/mode.ts';
 import {
   AppError, SYSTEM_PRINCIPAL, newId, normalizeMount, posInt, publicOutput, publicSource, relayKey, safeColor, timingSafeEqualStr, wrap,
   type HubEvent, type NowPlaying, type PersistedState, type PlayLogEntry, type PlayoutConfig, type Principal, type Station, type StationData, type StationRuntime,
@@ -49,7 +50,12 @@ export class AirDeckApp {
   readonly stations = new Map<string, StationRuntime>();
   readonly outputs = new Map<string, BroadcastOutput>();
   readonly relays = new Map<string, RelayTarget>();
-  readonly playouts = new Map<string, { playout: Playout; source: SourceConfig }>();
+  /** Sendebus je Sender; forLive = nur für eine Live-Sendung gestartet (endet mit ihr) */
+  readonly playouts = new Map<string, { playout: Playout; source: SourceConfig; forLive?: boolean }>();
+  /** Mode-Manager je Sender */
+  readonly modes = new Map<string, ModeState>();
+  /** Quelle, die wegen Stille als ungesund markiert wurde (je Sender) */
+  readonly silenced = new Map<string, string>();
   /** kann sich im Betrieb ändern: fehlgeschlagene Erkennung wird im Hintergrund wiederholt */
   ffmpeg: FfmpegInfo | null;
   readonly health: HealthManager;
@@ -239,6 +245,7 @@ export class AirDeckApp {
   }
 
   shutdown(): void {
+    this.stopping = true;
     if (this.ffmpegRetry) clearTimeout(this.ffmpegRetry);
     this.ai.flush();
     this.users.flush();
@@ -283,8 +290,7 @@ export class AirDeckApp {
     if (e.type !== 'SOURCE_HEALTH_CHANGED' || e.data?.healthy === false) {
       this.audit.write({ kind: 'source', ...e });
     }
-    if (e.type === 'TAKEOVER_COMPLETED') this.relayFor(e.stationId, e.target).setActive(e.sourceId ?? null);
-    if (e.type === 'OFF_AIR') this.relayFor(e.stationId, e.target).setActive(null);
+    if (e.type === 'TAKEOVER_COMPLETED' || e.type === 'OFF_AIR') this.applyProgram(e.stationId, e.target, e.type.toLowerCase());
     this.publish('source.' + e.type.toLowerCase(), e.stationId, e);
     this.publish('sources.changed', e.stationId, this.engine.list(e.stationId));
   }
@@ -451,21 +457,168 @@ export class AirDeckApp {
   ingestOpen(src: SourceConfig, contentType: string): void {
     const relay = this.relayFor(src.stationId, src.target);
     relay.open(src.id, contentType);
+    // Neue Verbindung einer zuvor wegen Stille abgeschalteten Live-Quelle: wieder zulassen
+    if (this.silenced.get(src.stationId) === src.id && this.busOf(src)?.source.id !== src.id) {
+      this.silenced.delete(src.stationId);
+      this.engine.setHealth(src.id, true);
+    }
+    this.busOf(src)?.playout.liveOpen(src.id, contentType);
     try {
       this.engine.connect(src.id, { id: `ingest:${src.id}`, roles: ['admin'], stationIds: [src.stationId] });
     } catch (err) {
       relay.close(src.id);
+      this.busOf(src)?.playout.liveClose(src.id);
       throw err;
     }
   }
 
   ingestData(src: SourceConfig, chunk: Buffer): void {
     this.relayFor(src.stationId, src.target).data(src.id, chunk);
+    this.busOf(src)?.playout.liveData(src.id, chunk);
   }
 
   ingestClose(src: SourceConfig): void {
+    this.busOf(src)?.playout.liveClose(src.id);
     this.relayFor(src.stationId, src.target).close(src.id);
     if (this.engine.get(src.id)) this.engine.disconnect(src.id);
+  }
+
+  /** Sendebus, der eine Live-Quelle aufnimmt (gleiches Target, nicht die eigene Automation-Quelle) */
+  busOf(src: SourceConfig): { playout: Playout; source: SourceConfig; forLive?: boolean } | undefined {
+    const po = this.playouts.get(src.stationId);
+    return po && po.source.id !== src.id && po.source.target === src.target ? po : undefined;
+  }
+
+  // ---------- Programm und Mode-Manager ----------
+
+  /** Mode-Manager des Senders (angelegt beim ersten Zugriff mit der gespeicherten Grundbetriebsart). */
+  modeOf(stationId: string): ModeState {
+    let m = this.modes.get(stationId);
+    if (!m) {
+      m = new ModeState(this.rt(stationId).data.mode ?? 'AUTO', (c) => {
+        this.playouts.get(stationId)?.playout.setAutomation(automationRuns(c.to));
+        this.audit.write({ kind: 'mode', event: 'changed', stationId, from: c.from, to: c.to, base: c.base, reason: c.reason });
+        this.publish('MODE_CHANGED', stationId, { mode: c.to, from: c.from, base: c.base, reason: c.reason });
+        if (c.to === 'LIVE') this.sendLiveMetadata(stationId);
+      });
+      this.modes.set(stationId, m);
+    }
+    return m;
+  }
+
+  modeView(stationId: string): { mode: BroadcastMode; base: BaseMode; program: string | null; bus: boolean; live: string | null } {
+    const m = this.modeOf(stationId);
+    const po = this.playouts.get(stationId);
+    const program = po?.playout.status().program ?? null;
+    return { mode: m.mode, base: m.base, program, bus: !!po, live: program ? this.engine.get(program)?.name ?? program : null };
+  }
+
+  /** Grundbetriebsart setzen (Operator): AUTO = Automation läuft, MANUAL = Automation pausiert. */
+  setBaseMode(p: Principal, stationId: string, base: string): unknown {
+    if (base !== 'AUTO' && base !== 'MANUAL') throw new AppError(400, 'invalid_mode', 'Betriebsart AUTO oder MANUAL');
+    const rt = this.rt(stationId);
+    rt.data.mode = base;
+    this.modeOf(stationId).update({ base }, `operator:${p.id}`);
+    this.changed();
+    return this.modeView(stationId);
+  }
+
+  /** MANUAL/AUTO: Titel sofort auf Sendung (über den Sendebus). */
+  playNow(p: Principal, stationId: string, mediaId: string): unknown {
+    const po = this.playouts.get(stationId);
+    if (!po) throw new AppError(409, 'not_running', 'Der Sendebus läuft nicht – zuerst Automation/Senden starten');
+    if (this.modeOf(stationId).mode === 'LIVE') throw new AppError(409, 'live_on_air', 'Live-Quelle ist auf Sendung – für Einspieler die Cartwall nutzen');
+    const m = this.svc.media.media(stationId, mediaId);
+    po.playout.playNow(m);
+    this.audit.write({ kind: 'mode', event: 'play_now', actor: p.id, stationId, mediaId });
+    return this.modeView(stationId);
+  }
+
+  /**
+   * Welche Quelle ist hörbar? Läuft der Sendebus, hören die Ausgänge immer den Bus (festes Format) und der Mixer
+   * blendet auf die laut Source Priority aktive Quelle über. Ohne Bus (kein ffmpeg) wird wie bisher der Strom der
+   * aktiven Quelle unverändert weitergegeben.
+   */
+  applyProgram(stationId: string, target: string, reason: string): void {
+    const relay = this.relayFor(stationId, target);
+    const active = this.engine.activeFor(stationId, target);
+    const po = this.playouts.get(stationId);
+    const mode = this.modes.has(stationId) || this.stations.has(stationId) ? this.modeOf(stationId) : null;
+    if (po && po.source.target === target) {
+      if (relay.hasSession(po.source.id)) relay.setActive(po.source.id);
+      const live = active && active.id !== po.source.id ? active : null;
+      // Live-Quelle ohne Kanal (verband sich vor dem Start des Busses): Kanal aus der Relay-Sitzung nachziehen
+      if (live && !po.playout.hasLive(live.id)) {
+        const sess = relay.sessionInfo(live.id);
+        if (sess) po.playout.liveOpen(live.id, sess.contentType, sess.init);
+      }
+      po.playout.setProgram(live && po.playout.hasLive(live.id) ? live.id : null);
+      const autoOk = active?.id === po.source.id || (!!this.engine.get(po.source.id)?.healthy && !active);
+      mode?.update({ liveOnAir: !!live, emergency: !live && (!autoOk || this.rt(stationId).emergencyPlaying === true) }, reason);
+      // nur für eine Live-Sendung gestartet: endet mit ihr
+      if (po.forLive && !live) setImmediate(() => this.stopBusForLive(stationId));
+      return;
+    }
+    // Live-Quelle auf Sendung, aber kein Bus: Bus automatisch starten, damit das Format fest bleibt
+    if (active && this.canStartBusForLive(stationId, target)) {
+      relay.setActive(null);
+      setImmediate(() => this.startBusForLive(stationId, target));
+      return;
+    }
+    relay.setActive(active?.id ?? null);
+    mode?.update({ liveOnAir: !!active && active.type !== 'automation', emergency: false }, reason);
+  }
+
+  /** Quellentypen, die als Live-Sendung gelten (Automation/Backup/Notfall sind keine) */
+  static readonly LIVE_TYPES = new Set<string>(['live_studio', 'remote_studio', 'mobile', 'relay', 'url_stream']);
+  private busStoppedAt = new Map<string, number>();
+  private stopping = false;
+
+  private canStartBusForLive(stationId: string, target: string): boolean {
+    if (this.stopping || !this.ffmpeg || !this.ffmpeg.encoders.mp3 || this.playouts.has(stationId)) return false;
+    const active = this.engine.activeFor(stationId, target);
+    // nur echte Live-Quellen mit tatsächlichem Audiostrom
+    if (!active || !AirDeckApp.LIVE_TYPES.has(active.type) || !this.relayFor(stationId, target).hasSession(active.id)) return false;
+    // Schutz vor Start/Stopp-Wechselspiel
+    if (Date.now() - (this.busStoppedAt.get(stationId) ?? 0) < 5000) return false;
+    const auto = this.engine.list(stationId).find((s) => s.type === 'automation' && s.target === target);
+    // Browser-Automation sendet gerade selbst: nicht dazwischengehen (bisheriger Weg)
+    return !!auto && auto.state === 'disconnected';
+  }
+
+  private startBusForLive(stationId: string, target: string): void {
+    if (this.stopping || this.playouts.has(stationId) || !this.stations.has(stationId)) return;
+    const active = this.engine.activeFor(stationId, target);
+    if (!active || !AirDeckApp.LIVE_TYPES.has(active.type)) return;
+    try {
+      this.startPlayout(SYSTEM_PRINCIPAL, stationId, {}, { forLive: true });
+      this.audit.write({ kind: 'mode', event: 'bus_started_for_live', stationId, sourceId: active.id });
+    } catch (err) {
+      this.audit.write({ kind: 'mode', event: 'bus_start_failed', stationId, message: (err as Error).message });
+      this.relayFor(stationId, target).setActive(active.id);
+    }
+  }
+
+  private stopBusForLive(stationId: string): void {
+    const po = this.playouts.get(stationId);
+    if (!po?.forLive) return;
+    const active = this.engine.activeFor(stationId, po.source.target);
+    if (active && active.id !== po.source.id) return;
+    this.playouts.delete(stationId);
+    this.busStoppedAt.set(stationId, Date.now());
+    po.playout.stop();
+    this.audit.write({ kind: 'mode', event: 'bus_stopped_after_live', stationId });
+    this.applyProgram(stationId, po.source.target, 'live_ended');
+  }
+
+  /** Titelanzeige während LIVE: „Live: <Quelle>“ */
+  private sendLiveMetadata(stationId: string): void {
+    const po = this.playouts.get(stationId);
+    const program = po?.playout.status().program;
+    const src = program ? this.engine.get(program) : undefined;
+    const song = `Live: ${src?.name ?? this.rt(stationId).station.name}`;
+    for (const o of this.outputs.values()) if (o.cfg.stationId === stationId) o.updateMetadata(song);
+    this.publish('now_playing.live', stationId, { source: src?.name ?? null, title: song });
   }
 
   /** Chunk-Upload der Studio-Automation (Browser-MediaRecorder). */
@@ -480,15 +633,22 @@ export class AirDeckApp {
     const relay = this.relayFor(stationId, src.target);
     if (start || !relay.hasSession(id)) {
       // Neuer Stream (neuer Container-Header): Sitzung komplett neu aufbauen.
+      this.busOf(src)?.playout.liveClose(id);
       relay.close(id);
       this.engine.disconnect(id);
       relay.open(id, contentType);
+      if (this.silenced.get(stationId) === id) {
+        this.silenced.delete(stationId);
+        this.engine.setHealth(id, true);
+      }
+      this.busOf(src)?.playout.liveOpen(id, contentType);
       wrap(() => this.engine.connect(id, p));
     } else if (['disconnected', 'failed'].includes(this.engine.get(id)!.state) && this.engine.get(id)!.healthy) {
       // Nach Erholung (z. B. Stille vorbei) wieder anmelden, Header der Sitzung bleibt erhalten.
       wrap(() => this.engine.connect(id, p));
     }
     relay.data(id, chunk);
+    this.busOf(src)?.playout.liveData(id, chunk);
   }
 
   addListener(stationId: string, mount: string, res: import('node:http').ServerResponse): boolean {
@@ -699,7 +859,7 @@ export class AirDeckApp {
     };
   }
 
-  startPlayout(p: Principal, stationId: string, input: Partial<PlayoutConfig>): unknown {
+  startPlayout(p: Principal, stationId: string, input: Partial<PlayoutConfig>, opts: { forLive?: boolean } = {}): unknown {
     const rt = this.rt(stationId);
     if (!this.ffmpeg) throw new AppError(501, 'unsupported', 'Server-Playout benötigt ffmpeg (AIRDECK_FFMPEG, ./ffmpeg/ oder PATH)');
     const cfg = this.savePlayoutConfig(stationId, input);
@@ -714,39 +874,65 @@ export class AirDeckApp {
     if (this.engine.get(source.id)?.state !== 'disconnected') this.engine.disconnect(source.id);
 
     const playout = new Playout(this.ffmpeg.ffmpeg, {
-      nextTrack: () => this.queueNext(stationId) ?? this.emergencyPick(stationId),
+      nextTrack: () => {
+        const regular = this.queueNext(stationId);
+        const rtNow = this.rt(stationId);
+        const m = regular ?? this.emergencyPick(stationId);
+        const was = rtNow.emergencyPlaying === true;
+        rtNow.emergencyPlaying = !regular && !!m;
+        if (was !== rtNow.emergencyPlaying) this.applyProgram(stationId, source.target, rtNow.emergencyPlaying ? 'emergency_material' : 'regular_material');
+        return m;
+      },
       mediaPath: (m) => this.svc.media.mediaPath(stationId, m),
       onNowPlaying: (m) => this.setNowPlaying(stationId, m.id, 'A'),
       onStreamStart: (type) => {
         try {
           this.relayFor(stationId, source.target).close(source.id);
-          this.ingestOpen(source, type);
+          // nur für eine Live-Sendung: Bus-Sitzung im Relay, aber keine Anmeldung als Automation-Quelle
+          if (opts.forLive) this.relayFor(stationId, source.target).open(source.id, type);
+          else this.ingestOpen(source, type);
         } catch (err) {
           this.audit.write({ kind: 'playout', event: 'source_rejected', stationId, message: (err as Error).message });
         }
+        // Ausgänge hören ab jetzt den Bus; bereits verbundene Live-Quellen werden übernommen
+        this.applyProgram(stationId, source.target, 'bus_started');
       },
       onStreamData: (chunk) => this.ingestData(source, chunk),
-      onStreamStop: () => this.ingestClose(source),
+      onStreamStop: () => (opts.forLive ? this.relayFor(stationId, source.target).close(source.id) : this.ingestClose(source)),
       onSilence: (silent) => {
         if (!silent) this.publish('playout.log', stationId, { event: 'silence_recovered' });
-        // Stille → Quelle ungesund → Fallback nach Priorität; bei Erholung wieder anmelden
-        this.engine.setHealth(source.id, !silent, silent ? 'silence' : undefined);
-        if (!silent && this.engine.get(source.id)?.state === 'disconnected' && this.relayFor(stationId, source.target).hasSession(source.id)) {
+        // Stille auf dem Programm → die Quelle auf Sendung gilt als ungesund → Fallback nach Priorität
+        // (Live-Quelle → Automation; Automation → Backup-Quelle bzw. Notfall). Bei Erholung wieder anmelden.
+        if (silent) {
+          const program = this.playouts.get(stationId)?.playout.status().program ?? source.id;
+          this.silenced.set(stationId, program);
+          this.engine.setHealth(program, false, 'silence');
+          return;
+        }
+        // Eine stille Live-Quelle bleibt abgeschaltet, bis sie neu verbindet (sonst Wechselspiel alle paar Sekunden)
+        const was = this.silenced.get(stationId);
+        if (was && was !== source.id) return;
+        this.silenced.delete(stationId);
+        this.engine.setHealth(source.id, true);
+        if (this.engine.get(source.id)?.state === 'disconnected' && this.relayFor(stationId, source.target).hasSession(source.id)) {
           try {
             this.engine.connect(source.id);
           } catch {
             // gesperrt o. ä. – bleibt getrennt
           }
         }
+        this.applyProgram(stationId, source.target, 'silence_recovered');
       },
       log: (event, data) => {
         this.audit.write({ kind: 'playout', event, stationId, ...data });
         this.publish('playout.log', stationId, { event, ...data });
       },
     }, cfg, { ffplay: this.ffmpeg.ffplay, inputArgs: inputDeviceArgs });
-    this.playouts.set(stationId, { playout, source });
+    this.playouts.set(stationId, { playout, source, forLive: opts.forLive });
+    playout.setAutomation(automationRuns(this.modeOf(stationId).mode));
     playout.start();
-    rt.data.playout = { ...cfg, autostart: input.autostart ?? true };
+    // nur für eine Live-Sendung gestartet: Autostart-Einstellung nicht verändern
+    if (!opts.forLive) rt.data.playout = { ...cfg, autostart: input.autostart ?? true };
     this.audit.write({ kind: 'playout', event: 'start', actor: p.id, stationId, sourceId: source.id });
     this.changed();
     return this.playoutView(stationId);
@@ -759,6 +945,8 @@ export class AirDeckApp {
       this.playouts.delete(stationId);
       po.playout.stop();
       this.engine.setHealth(po.source.id, true);
+      this.silenced.delete(stationId);
+      this.applyProgram(stationId, po.source.target, 'bus_stopped');
     }
     // Bewusst gestoppt → nach Neustart nicht automatisch wieder senden
     if (rt.data.playout) rt.data.playout.autostart = false;

@@ -90,12 +90,16 @@ Nachvollzogen auf dem Weg App → Anmeldedialog → `POST /api/v1/auth/login` �
 
 **Ziel:** Jede Quelle wird dekodiert und läuft durch denselben Mixer, dieselbe DSP und denselben Encoder. Nach außen gibt es ein festes Format pro Ausgang.
 
+**Behoben (Schritt 4):** Sendebus mit Live-Kanälen. Test `test/live-bus.test.ts`: Ogg- und WebM-Live-Quellen werden gemischt, der Ausgang bleibt MP3 und wird nicht neu verbunden.
+
 ### 5.3 AUTO/MANUAL/LIVE ohne Mode-Manager
 Reproduziert im Kern mit echtem ffmpeg (AUTO → LIVE → AUTO):
 - Der Quellenwechsel funktioniert: Automation aktiv, dann Live aktiv und Automation in Bereitschaft, dann wieder Automation.
 - **Während LIVE spielt die Automation im Hintergrund weiter.** Titel werden „verbraucht“ (im Test startete „Ton 550“ während der Live-Phase). Ihre Titelanzeigen gehen an die Ausgänge, obwohl Live auf Sendung ist.
 - **MANUAL existiert im Kern nicht.** Es gibt keine API „diesen Titel jetzt auf Sendung“ und keine Pause der Automation. Die Deck-Knöpfe im Studio spielen lokal im Browser und nicht über den Sender, wenn der Kern sendet.
 - Im Studio hat AUTO zwei Bedeutungen: Kern-Playout starten/stoppen, oder ohne ffmpeg die Browser-Automation. Der Knopf STREAM schickt die Browser-Mischung als Automation-Quelle. Beides konkurriert mit dem Kern-Playout um dieselbe Quelle.
+
+**Behoben (Schritt 4):** Mode-Manager mit AUTO/MANUELL/LIVE/NOTFALL. Während LIVE und MANUELL verbraucht die Automation keine Titel (im Test geprüft). Neu: „Jetzt senden“ über den Kern.
 
 ### 5.4 ffmpeg-Erkennung einmalig und ohne Rückmeldung
 Die Erkennung läuft nur beim Start, mit bis zu vier aufeinanderfolgenden Aufrufen und je 5 s Zeitlimit. In der Testumgebung hat sie **einmal unter Last fehlgeschlagen** („ffmpeg nicht gefunden“), bei drei Wiederholungen dann nicht. Danach bleibt die Automation bis zum Neustart „nicht unterstützt“, ohne Hinweis im Studio und ohne erneuten Versuch. Unter Windows kann der erste Start einer frisch entpackten `ffmpeg.exe` durch den Virenscanner länger dauern. *(Unter Windows nicht gemessen.)*

@@ -13,6 +13,7 @@ import type { AiStationConfig } from './ai/director.ts';
 import type { RelayTap } from './relay.ts';
 import type { BroadcastOutput, OutputConfig } from './icecast.ts';
 import type { SecretStore } from './secrets.ts';
+import type { BaseMode } from '../core/mode.ts';
 
 export const AUDIO_FILE_RE = /\.(mp3|ogg|opus|wav|flac|m4a|aac|webm)$/i;
 
@@ -72,6 +73,8 @@ export interface StationData {
   integrations?: IntegrationsConfig;
   ai?: AiStationConfig;
   bridges?: BridgeConfig[];
+  /** Grundbetriebsart des Mode-Managers (AUTO/MANUAL); LIVE/EMERGENCY ergeben sich aus dem Sendezustand */
+  mode?: BaseMode;
 }
 
 export interface Playlist {
@@ -153,6 +156,8 @@ export interface StationRuntime {
   queue: PlayQueue;
   decks: Record<DeckId, DeckState>;
   nowPlaying: NowPlaying;
+  /** Sendebus spielt Notfall-Material (Queue, Sendeuhr und Sendeplan lieferten nichts) */
+  emergencyPlaying?: boolean;
 }
 
 export type HubEvent = { type: string; stationId?: string; payload: unknown };

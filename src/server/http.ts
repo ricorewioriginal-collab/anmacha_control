@@ -73,6 +73,7 @@ function applyCors(req: IncomingMessage, res: ServerResponse): boolean {
 export const ON_AIR_OPS = new RegExp('^/api/v1/(?:' + [
   'stations/[^/]+/sources/[^/]+/(?:chunks|health|release|takeover)',
   'stations/[^/]+/playout/(?:mic|skip|start|stop)',
+  'stations/[^/]+/(?:mode|onair)',
   'stations/[^/]+/(?:decks/[^/]+|now-playing|metadata)',
   'stations/[^/]+/queue(?:/.*)?',
   'stations/[^/]+/(?:cardwall/[^/]+/trigger|quick/[^/]+)',
@@ -296,6 +297,10 @@ export function createHttpServer(app: AirDeckApp, studioDir: string): Server {
   add('GET', '/api/v1/audio-devices', 'automation:read', () => app.inputDevices());
   add('POST', '/api/v1/stations/:sid/queue/shuffle', 'queue:write', (c) => app.shuffleQueue(sid(c)));
   add('POST', '/api/v1/stations/:sid/playout/skip', 'automation:write', (c) => app.skipPlayout(sid(c)));
+  // Mode-Manager: AUTO/MANUAL setzt der Operator; LIVE/EMERGENCY ergeben sich aus dem Sendezustand
+  add('GET', '/api/v1/stations/:sid/mode', 'automation:read', (c) => app.modeView(sid(c)));
+  add('PUT', '/api/v1/stations/:sid/mode', 'automation:write', async (c) => app.setBaseMode(c.p, sid(c), String((await c.body()).mode ?? '')));
+  add('POST', '/api/v1/stations/:sid/onair', 'automation:write', async (c) => app.playNow(c.p, sid(c), String((await c.body()).mediaId ?? '')));
 
   // --- Ordner, URL-Streams, M3U, Titelanzeige, Verlauf ---
   add('GET', '/api/v1/stations/:sid/folders', 'media:read', (c) => app.svc.media.folders(sid(c)));

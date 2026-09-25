@@ -54,6 +54,8 @@ const S = {
   cartGroup: 'Alle',
   auto: false,
   streaming: false,
+  /** Mode-Manager des Kerns: { mode, base, program, bus, live } */
+  /** @type {any} */ mode: null,
   busyNext: false,
   /** @type {string|null} */ lastAutoDeck: null,
   /** @type {any} */ playout: null,
@@ -176,11 +178,13 @@ let es = null;
 async function loadStation() {
   localStorage.setItem('airdeck.station', S.station.id);
   applyBranding();
-  const [library, queue, carts, sources, outputs, np, playout] = await Promise.all([
+  const [library, queue, carts, sources, outputs, np, playout, mode] = await Promise.all([
     api.get(url('/media')), api.get(url('/queue')), api.get(url('/cardwall')),
     api.get(url('/sources')), api.get(url('/outputs')), api.get(url('/now-playing')), api.get(url('/playout')),
+    api.get(url('/mode')).catch(() => null),
   ]);
   S.playout = playout;
+  S.mode = mode;
   setLibrary(library);
   S.queue = queue;
   S.carts = carts;
@@ -251,6 +255,10 @@ function onEvent(type, data) {
       }
       break;
     case 'schedule.fired': status(`Zeitplan: ${data.label ?? data.kind} (${data.origin})`); break;
+    case 'MODE_CHANGED':
+      status(`Betriebsart: ${MODE_LABEL[data.mode] ?? data.mode}`, data.mode === 'EMERGENCY');
+      run(async () => { S.mode = await api.get(url('/mode')); renderMode(); renderSources(); renderLibrary(); });
+      break;
     case 'metadata.sent': status(`Titelanzeige gesendet: ${data.artist ? data.artist + ' – ' : ''}${data.title}`); break;
     case 'sources.changed':
       // Server liefert Engine-Sicht; Relay-/Passwortinfos einmal nachladen
@@ -265,7 +273,7 @@ function onEvent(type, data) {
     case 'playout.level': S.srvLevel = data; break;
     case 'playout.log':
       if (['encoder_crashed', 'silence_detected', 'decode_failed', 'autostart_failed'].includes(data.event)) status(`Server-Playout: ${data.event}${data.mediaId ? ` (${data.mediaId})` : ''}`, true);
-      if (['playout_started', 'playout_stopped'].includes(data.event)) run(async () => { S.playout = await api.get(url('/playout')); renderPlayout(); });
+      if (['playout_started', 'playout_stopped'].includes(data.event)) run(async () => { S.playout = await api.get(url('/playout')); S.mode = await api.get(url('/mode')); renderPlayout(); renderMode(); renderLibrary(); });
       break;
     case 'stream.state_changed': {
       const o = S.outputs.find((x) => x.id === data.id);
@@ -314,6 +322,7 @@ function renderStationSelect() {
 
 function renderAll() {
   renderPlayout();
+  renderMode();
   renderLibrary();
   renderQueue();
   renderCarts();
@@ -886,6 +895,7 @@ function renderLibrary() {
     h('td', { class: 'num' }, fmt(m.durationMs)),
     h('td', { class: 'act' },
       h('button', { title: 'In Queue', onclick: () => run(() => api.post(url('/queue'), { mediaId: m.id })) }, '＋'),
+      S.mode?.bus && S.mode.mode !== 'LIVE' ? h('button', { title: 'Jetzt senden (sofort auf Sendung, laufender Titel wird ausgeblendet)', onclick: () => run(() => api.post(url('/onair'), { mediaId: m.id })) }, '▶') : null,
       h('button', { title: 'Bearbeiten', onclick: () => editMedia(m) }, '✎'),
       h('button', { title: 'Löschen', onclick: () => confirm(`„${m.title}“ löschen?`) && run(() => api.del(url(`/media/${encodeURIComponent(m.id)}`))) }, '✕')),
   )));
@@ -973,11 +983,35 @@ async function queueDrop(dt, index) {
 
 // ---------- Render: Quellen / Ausgänge / Now Playing ----------
 
+const MODE_LABEL = /** @type {Record<string, string>} */ ({ AUTO: 'AUTO', MANUAL: 'MANUELL', LIVE: 'LIVE', EMERGENCY: 'NOTFALL' });
+const MODE_HINT = /** @type {Record<string, string>} */ ({
+  AUTO: 'Automation spielt Queue, Sendeuhr und Sendeplan. Klick: auf MANUELL umschalten.',
+  MANUAL: 'Automation pausiert – Titel mit ▶ „Jetzt senden“ starten. Klick: zurück auf AUTO.',
+  LIVE: 'Live-Quelle auf Sendung, Automation pausiert. Nach dem Live-Ende gilt wieder die Grundbetriebsart.',
+  EMERGENCY: 'Notfall: Automation hat nichts Reguläres (Notfall-Ordner) oder die Quelle ist ausgefallen.',
+});
+
+function renderMode() {
+  const chip = $('mode-chip');
+  const m = S.mode;
+  chip.dataset.mode = m?.bus ? m.mode : 'OFF';
+  chip.textContent = m?.bus ? MODE_LABEL[m.mode] ?? m.mode : `Grundart: ${MODE_LABEL[m?.base ?? 'AUTO']}`;
+  chip.title = m?.bus ? `${MODE_HINT[m.mode] ?? ''}${m.live ? ` Auf Sendung: ${m.live}.` : ''}` : 'Der Sendebus läuft nicht. Klick wechselt die Grundbetriebsart (AUTO/MANUELL) für den nächsten Start.';
+}
+
+async function toggleBaseMode() {
+  const next = (S.mode?.base ?? 'AUTO') === 'AUTO' ? 'MANUAL' : 'AUTO';
+  if (next === 'MANUAL' && S.mode?.bus && !confirm('Auf MANUELL umschalten? Die Automation startet dann keine Titel mehr selbst.')) return;
+  S.mode = (await run(() => api.put(url('/mode'), { mode: next }))) ?? S.mode;
+  renderMode();
+  renderLibrary();
+}
+
 function renderSources() {
   const active = S.sources.find((s) => s.state === 'active' && s.target === '/live') ?? S.sources.find((s) => s.state === 'active');
   const onair = $('onair');
   onair.dataset.state = !active ? 'off' : ['live_studio', 'remote_studio', 'mobile'].includes(active.type) ? 'live' : 'on';
-  $('onair-text').textContent = active ? `${active.type === 'automation' ? 'AUTO' : 'LIVE'} • PRIORITY ${active.priority} · ${active.name}` : 'OFF AIR';
+  $('onair-text').textContent = active ? `${S.mode?.bus ? MODE_LABEL[S.mode.mode] ?? S.mode.mode : active.type === 'automation' ? 'AUTO' : 'LIVE'} • PRIORITY ${active.priority} · ${active.name}` : 'OFF AIR';
 
   $('sources').replaceChildren(...S.sources.map((s) => h('li', { class: `src${s.state === 'active' ? ' active' : ''}` },
     h('span', { class: 'prio', title: 'Priorität (kleiner = wichtiger)' }, `P${s.priority}`),
@@ -1260,6 +1294,7 @@ function bindStatic() {
     }
   });
   $('btn-stream').addEventListener('click', toggleStream);
+  $('mode-chip').addEventListener('click', () => void toggleBaseMode());
   $('btn-mic').addEventListener('click', toggleMic);
   $('btn-listen').addEventListener('click', () => toggleListen());
   $('btn-audio').addEventListener('click', editAudio);

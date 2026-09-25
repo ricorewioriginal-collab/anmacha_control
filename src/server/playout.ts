@@ -1,5 +1,7 @@
-// Server-Playout (24/7, headless): ffmpeg dekodiert, AirDeck mischt (Crossfade, Carts,
-// Ducking, Limiter, Stilleerkennung), ffmpeg kodiert den Sendestream.
+// Sendebus (24/7, headless): ffmpeg dekodiert, AirDeck mischt (Crossfade, Carts, Ducking, Limiter,
+// Stilleerkennung), ffmpeg kodiert den Sendestream in EINEM festen Format.
+// Neben den Titeln der Automation werden auch alle Live-Quellen (Encoder, Studio-Mikrofon, App, Relay)
+// dekodiert und hier gemischt – ein Quellenwechsel ändert das Format der Ausgänge nie (AUDIT 5.2).
 // Läuft ohne Browser und startet nach einem Neustart automatisch wieder.
 
 import { spawn, type ChildProcess } from 'node:child_process';
@@ -64,6 +66,8 @@ export interface PlayoutOptions {
   duckDb: number;
   silenceThresholdDb: number;
   silenceMs: number;
+  /** Überblendzeit beim Wechsel zwischen Automation und Live-Quelle in ms */
+  liveFadeMs?: number;
 }
 
 export const DEFAULT_PLAYOUT: PlayoutOptions = {
@@ -122,6 +126,38 @@ export interface PlayoutExtras {
 }
 
 const BLOCK_MS = 20;
+/** Live-Quellen: so viel puffern, bevor sie hörbar werden (Netzwerk-Jitter) … */
+const LIVE_PREBUFFER_MS = 300;
+/** … und höchstens so viel Verzögerung zulassen, danach Älteres verwerfen */
+const LIVE_MAX_MS = 1500;
+
+/** Eingangsformat für den Decoder aus dem Content-Type (kürzere Erkennung = weniger Verzögerung) */
+function inputFormat(contentType: string): string[] {
+  const t = contentType.toLowerCase();
+  if (t.includes('mpeg') || t.includes('mp3')) return ['-f', 'mp3'];
+  if (t.includes('webm') || t.includes('matroska')) return ['-f', 'matroska'];
+  if (t.includes('ogg') || t.includes('opus')) return ['-f', 'ogg'];
+  if (t.includes('aac')) return ['-f', 'aac'];
+  return [];
+}
+
+/** Eine Live-Quelle im Mixer: eigener Decoder, eigener Puffer, eigene Überblendung. */
+class LiveChannel {
+  readonly id: string;
+  readonly contentType: string;
+  readonly fifo = new PcmFifo();
+  proc: ChildProcess | null = null;
+  gain = 0;
+  primed = false;
+  closing = false;
+  bytesIn = 0;
+  error: string | null = null;
+
+  constructor(id: string, contentType: string) {
+    this.id = id;
+    this.contentType = contentType;
+  }
+}
 const MAX_BUFFER_BYTES = 10 * SAMPLE_RATE * BYTES_PER_FRAME; // 10 s Vorlauf pro Stimme
 const RESUME_BYTES = 5 * SAMPLE_RATE * BYTES_PER_FRAME;
 
@@ -186,6 +222,11 @@ export interface PlayoutStatus {
   micOn: boolean;
   input: 'off' | 'running' | 'error';
   monitor: boolean;
+  /** Programm: null = Automation, sonst ID der Live-Quelle */
+  program: string | null;
+  /** Automation startet selbstständig Titel (AUTO/EMERGENCY) */
+  automation: boolean;
+  live: { id: string; contentType: string; buffered: number; primed: boolean; bytesIn: number; error: string | null }[];
 }
 
 export class Playout {
@@ -218,6 +259,9 @@ export class Playout {
   private levelPeak = 0;
   private levelSum = 0;
   private levelN = 0;
+  private readonly live = new Map<string, LiveChannel>();
+  private program: string | null = null;
+  private automationOn = true;
 
   constructor(ffmpeg: string, hooks: PlayoutHooks, opts: Partial<PlayoutOptions> = {}, extras: PlayoutExtras = {}) {
     this.ffmpeg = ffmpeg;
@@ -260,6 +304,9 @@ export class Playout {
     this.monitorProc?.kill('SIGKILL');
     this.monitorProc = null;
     this.stopInput();
+    for (const ch of this.live.values()) this.killLive(ch);
+    this.live.clear();
+    this.program = null;
     this.hooks.onStreamStop();
     if (this.silent) this.hooks.onSilence(false);
     this.silent = false;
@@ -287,6 +334,133 @@ export class Playout {
     if (on && this.inputState !== 'running') throw new Error('Kein Aufnahmegerät aktiv');
     this.micOn = on;
     this.hooks.log(on ? 'mic_on' : 'mic_off');
+  }
+
+  // ---------- Live-Quellen im Mixer ----------
+
+  /** Live-Quelle verbunden: Decoder starten (Daten folgen über liveData). */
+  liveOpen(id: string, contentType: string, init?: Buffer): void {
+    if (!this.running) return;
+    const old = this.live.get(id);
+    if (old) this.killLive(old);
+    const ch = new LiveChannel(id, contentType);
+    const p = spawn(this.ffmpeg, [
+      '-hide_banner', '-loglevel', 'error', '-nostdin', '-fflags', 'nobuffer', '-probesize', '32768', '-analyzeduration', '0',
+      ...inputFormat(contentType), '-i', 'pipe:0', '-vn', '-f', 's16le', '-ar', String(SAMPLE_RATE), '-ac', String(CHANNELS), 'pipe:1',
+    ], { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
+    ch.proc = p;
+    p.stdout!.on('data', (d: Buffer) => ch.fifo.push(d));
+    let err = '';
+    p.stderr!.on('data', (d) => (err = (err + d).slice(-300)));
+    p.stdin!.on('error', () => {});
+    p.on('error', (e) => (ch.error = e.message));
+    p.on('close', (code) => {
+      if (ch.proc !== p) return;
+      ch.proc = null;
+      if (code && !ch.closing) {
+        ch.error = err.trim() || `Decoder beendet (${code})`;
+        this.hooks.log('live_decode_failed', { sourceId: id, contentType, stderr: ch.error });
+      }
+    });
+    this.live.set(id, ch);
+    if (init) this.liveData(id, init);
+    this.hooks.log('live_open', { sourceId: id, contentType });
+  }
+
+  liveData(id: string, chunk: Buffer): void {
+    const ch = this.live.get(id);
+    const stdin = ch?.proc?.stdin;
+    if (!ch || !stdin || ch.closing) return;
+    ch.bytesIn += chunk.length;
+    // Echtzeit: staut sich der Decoder, lieber Daten verwerfen als Speicher volllaufen lassen
+    if (stdin.writableLength < 1024 * 1024) stdin.write(chunk);
+  }
+
+  liveClose(id: string): void {
+    const ch = this.live.get(id);
+    if (!ch) return;
+    ch.closing = true;
+    ch.proc?.stdin?.end();
+    // ausblenden lassen; entfernt wird der Kanal im Mixer, sobald er stumm ist
+    if (this.program === id) this.program = null;
+  }
+
+  hasLive(id: string): boolean {
+    return this.live.has(id) && !this.live.get(id)!.closing;
+  }
+
+  /**
+   * Programm wählen: null = Automation, sonst eine Live-Quelle. Beim Wechsel auf Live werden laufende Titel
+   * ausgeblendet (die Automation pausiert, siehe setAutomation); Carts laufen weiter.
+   */
+  setProgram(id: string | null): void {
+    if (this.program === id) return;
+    this.program = id;
+    if (id !== null) for (const v of this.voices) if (v.kind === 'track' && v.fadeTo !== 0) v.fade(0, msToFrames(this.opts.liveFadeMs ?? 400));
+    this.hooks.log('program', { program: id ?? 'automation' });
+  }
+
+  /** Automation darf selbstständig Titel starten (AUTO/EMERGENCY) oder nicht (MANUAL/LIVE). */
+  setAutomation(on: boolean): void {
+    this.automationOn = on;
+  }
+
+  /** Titel sofort auf Sendung (MANUAL „jetzt senden“): laufender Titel wird kurz ausgeblendet. */
+  playNow(media: MediaItem): void {
+    if (!this.running) return;
+    for (const v of this.voices) if (v.kind === 'track' && v.fadeTo !== 0) v.fade(0, msToFrames(500));
+    const v = new Voice(media, 'track', false, trackGainDb(media, this.opts.loudness, this.opts.dsp.limiter));
+    this.deckOf.set(v, this.trackCounter++ % 2 === 0 ? 'A' : 'B');
+    this.startVoice(v);
+    this.hooks.onNowPlaying(media);
+  }
+
+  private killLive(ch: LiveChannel): void {
+    ch.closing = true;
+    const p = ch.proc;
+    ch.proc = null;
+    p?.stdin?.end();
+    p?.kill('SIGKILL');
+    ch.fifo.clear();
+  }
+
+  /** Live-Kanäle in den Bus mischen (Jitter-Puffer, Überblendung, Entfernen beendeter Kanäle). */
+  private mixLive(bus: Float32Array, due: number): void {
+    const pre = msToFrames(LIVE_PREBUFFER_MS);
+    const max = msToFrames(LIVE_MAX_MS);
+    const fadeFrames = msToFrames(this.opts.liveFadeMs ?? 400);
+    for (const ch of [...this.live.values()]) {
+      const target = this.program === ch.id && !ch.closing ? 1 : 0;
+      // nicht auf Sendung: nur aktuell halten, damit ein Wechsel ohne Verzögerung klingt
+      if (target === 0 && ch.gain === 0) {
+        if (ch.fifo.frames > pre) ch.fifo.drop(ch.fifo.frames - pre);
+        if (ch.closing && (!ch.proc || ch.fifo.frames === 0)) this.removeLive(ch);
+        continue;
+      }
+      if (ch.fifo.frames > max) ch.fifo.drop(ch.fifo.frames - pre);
+      if (!ch.primed) {
+        if (ch.fifo.frames < pre && !ch.closing) continue;
+        ch.primed = true;
+      }
+      const { samples, got } = ch.fifo.read(due);
+      if (got < due) {
+        this.underruns++;
+        // leergelaufen: neu puffern statt stotternd weiterzuspielen
+        if (!ch.closing) ch.primed = false;
+      }
+      const from = ch.gain;
+      const to = from + Math.sign(target - from) * Math.min(Math.abs(target - from), due / fadeFrames);
+      ch.gain = to;
+      mixInto(bus, samples, from, to);
+      if (ch.closing && ch.gain === 0) this.removeLive(ch);
+    }
+  }
+
+  private removeLive(ch: LiveChannel): void {
+    if (this.live.get(ch.id) !== ch) return;
+    this.killLive(ch);
+    this.live.delete(ch.id);
+    this.hooks.log('live_closed', { sourceId: ch.id });
   }
 
   playCart(media: MediaItem, duck: boolean): void {
@@ -320,6 +494,9 @@ export class Playout {
       micOn: this.micOn,
       input: this.inputState,
       monitor: !!this.monitorProc,
+      program: this.program,
+      automation: this.automationOn,
+      live: [...this.live.values()].filter((c) => !c.closing).map((c) => ({ id: c.id, contentType: c.contentType, buffered: framesToMs(c.fifo.frames), primed: c.primed, bytesIn: c.bytesIn, error: c.error })),
     };
   }
 
@@ -487,6 +664,8 @@ export class Playout {
       v.played += got;
       if (v.proc && v.fifo.bytes < RESUME_BYTES) v.proc.stdout?.resume();
     }
+    this.mixLive(bus, due);
+
     // Mikrofon/Line-In: Latenz klein halten (max. ~200 ms Vorlauf), Ein-/Ausblenden weich
     if (this.inputProc) {
       const maxFrames = msToFrames(200) + due;
@@ -537,9 +716,12 @@ export class Playout {
     if (this.skipRequested) {
       this.skipRequested = false;
       cur?.fade(0, msToFrames(500));
-      this.startNextTrack();
+      // MANUAL/LIVE: nur ausblenden, die Automation verbraucht keinen Titel
+      if (this.automationOn && this.program === null) this.startNextTrack();
       return;
     }
+    // Pausiert (MANUAL/LIVE): kein selbstständiger nächster Titel, Queue bleibt unangetastet
+    if (!this.automationOn || this.program !== null) return;
     if (!cur || cur.finished) {
       // Leerlauf: höchstens alle 2 s neu versuchen (z. B. Queue/Archiv leer)
       if (now - this.lastNextAttempt < 2000) return;

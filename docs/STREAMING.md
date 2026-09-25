@@ -2,12 +2,39 @@
 
 ## Sendeweg
 
-Quellen (Automation, Live, Remote, Android) → **Source Priority Engine** → aktive Quelle → **Ausgänge** (Icecast, SHOUTcast v1/v2, laut.fm) und **Recorder**. Die Server-Automation mischt selbst, die Kette läuft so:
+Alle Quellen laufen durch **einen Sendebus** je Sender. Nach außen gibt es damit ein festes Format: Wechselt die Quelle (Automation → Live → Automation), bleiben Format und Verbindung der Ausgänge gleich. Hörer-Player brechen nicht ab, und SHOUTcast oder laut.fm bekommen nie plötzlich WebM.
 
 ```
-Titel (ffmpeg-Decoder) → Lautheitsangleich pro Titel → Mixer (Crossfade, Carts, Ducking, Mikrofon)
-  → Master-DSP (Rumpelfilter, 10-Band-EQ, Multiband, Kompressor, AGC, Limiter) → Encoder (LAME/AAC/Opus) → Ausgänge
+Automation (Titel)      ─ffmpeg-Decoder─┐
+Carts/Jingles           ─ffmpeg-Decoder─┤
+Live-Encoder (BUTT …)   ─ffmpeg-Decoder─┤─► Mixer (Überblendung nach Source Priority, Crossfade, Ducking)
+Studio-Mikrofon, App    ─ffmpeg-Decoder─┤     → Master-DSP (Rumpelfilter, EQ, Multiband, Kompressor, AGC, Limiter)
+Relay/Stream (Brücke)   ─ffmpeg-Decoder─┘     → Encoder (LAME/AAC/Opus) → Ausgänge (Icecast, SHOUTcast, laut.fm), Recorder, Mithören
 ```
+
+- Die **Source Priority Engine** entscheidet, welche Quelle hörbar ist. Der Mixer blendet über (Standard 400 ms), statt Rohdaten umzuschalten.
+- Live-Quellen werden kurz gepuffert (300 ms gegen Netzwerk-Jitter, höchstens 1,5 s Verzögerung). Formate: MP3, Ogg/Opus, WebM/Opus (Browser-Mikrofon, Android-App), AAC.
+- **Live ohne laufende Automation:** Verbindet sich eine Live-Quelle, während der Sendebus aus ist, startet AirDeck ihn automatisch (Betriebsart LIVE, Automation pausiert) und beendet ihn mit der Live-Sendung wieder.
+- Ohne ffmpeg gibt es keinen Sendebus. Dann wird wie früher der Strom der aktiven Quelle unverändert weitergereicht (Notbetrieb). Mit dem mitgelieferten ffmpeg tritt das nicht auf.
+
+## Betriebsarten (Mode-Manager)
+
+| Betriebsart | Wer bestimmt den Ton | Automation | Titelanzeige |
+|---|---|---|---|
+| **AUTO** | Automation | spielt Queue, Sendeuhr und Sendeplan | laufender Titel |
+| **MANUELL** | Operator: Titel mit ▶ „Jetzt senden“, Cartwall | pausiert, startet keinen Titel selbst, die Queue bleibt unangetastet | manuell gestarteter Titel |
+| **LIVE** | Live-Quelle (automatisch, sobald sie laut Priorität auf Sendung ist) | pausiert, verbraucht keine Titel. Der laufende Titel wird ausgeblendet | „Live: <Quelle>“ |
+| **NOTFALL** | Notfall-Ordner | nur Notfall-Material, weil Queue, Sendeuhr und Sendeplan nichts liefern oder die Automation-Quelle wegen Stille ausfiel | Notfall-Titel |
+
+- AUTO und MANUELL wählt der Operator (Studio: Knopf neben ON AIR, API `PUT /api/v1/stations/<sender>/mode`). LIVE und NOTFALL ergeben sich aus dem Sendezustand. Danach gilt wieder die gewählte Grundbetriebsart.
+- **Stille:** Ist das Programm eine Live-Quelle, fällt der Sender auf die Automation zurück. Die stille Live-Quelle bleibt abgeschaltet, bis sie neu verbindet. Ist das Programm die Automation, folgt der nächste Titel, sonst eine Backup-Quelle bzw. der Notfall-Ordner.
+- Jeder Wechsel löst das Ereignis `MODE_CHANGED` aus (`{ mode, from, base, reason }`) und landet im Audit-Log.
+
+| API | Zweck |
+|---|---|
+| `GET /api/v1/stations/<sender>/mode` | `{ mode, base, program, bus, live }` |
+| `PUT /api/v1/stations/<sender>/mode` `{ "mode": "AUTO" \| "MANUAL" }` | Grundbetriebsart |
+| `POST /api/v1/stations/<sender>/onair` `{ "mediaId": "…" }` | Titel sofort senden (nicht während LIVE, dafür gibt es die Cartwall) |
 
 ## Encoder
 

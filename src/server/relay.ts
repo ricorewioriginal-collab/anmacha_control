@@ -51,6 +51,12 @@ export class RelayTarget {
     if (this.activeId === sourceId) this.setActive(null);
   }
 
+  /** Format und Container-Header einer Sitzung (für Decoder, die später dazukommen) */
+  sessionInfo(sourceId: string): { contentType: string; init?: Buffer } | undefined {
+    const s = this.sessions.get(sourceId);
+    return s ? { contentType: s.contentType, init: s.init } : undefined;
+  }
+
   hasSession(sourceId: string): boolean {
     return this.sessions.has(sourceId);
   }
