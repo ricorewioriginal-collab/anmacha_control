@@ -19,8 +19,7 @@ ohne dass daraus eine echte, dauerhafte Radiosendung wird.
 2. **Reverse Proxy**: Je nachdem, was auf dem Server schon läuft, das passende Snippet einfügen:
    - nginx: [`nginx.demo.conf`](nginx.demo.conf)
    - Caddy: [`Caddyfile.demo`](Caddyfile.demo)
-   - Apache: analog als `ProxyPass`/`ProxyPassReverse` auf `http://127.0.0.1:8751/`, mit
-     `SSEEnabled Off`-Puffer-Vermeidung (`ProxyIOBufferSize` niedrig halten) für die Live-Ereignisse.
+   - Apache: [`apache.demo.conf`](apache.demo.conf) (braucht `a2enmod proxy proxy_http`)
 
    Der Container selbst ist **nicht öffentlich erreichbar** (`127.0.0.1:8751`, siehe
    [`docker-compose.demo.yml`](docker-compose.demo.yml)) - HTTPS und der öffentliche Zugriff laufen
