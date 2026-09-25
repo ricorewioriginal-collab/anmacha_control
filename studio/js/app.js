@@ -3,6 +3,7 @@
 // Sämtlicher Nutzerinhalt wird per textContent gesetzt (kein innerHTML) → kein XSS.
 
 import { Api, ApiError, isNativeApp, readToken, saveServer, saveToken, serverBase } from './api.js';
+import { deviceName, loadProfiles, removeProfile, saveProfile, testConnection } from './connect.js';
 import { AudioEngine, DECKS, SilenceDetector, openMic, recordStream } from './audio.js';
 import { $, CATEGORY_STYLE, clockTime, download, fmt, formDialog, h, hydrateIcons, icon, mediaTitle, run, status } from './ui.js';
 import { mountPlanning, mountRecorder } from './planning.js';
@@ -111,40 +112,64 @@ async function boot() {
   clock();
 }
 
-/** @param {string} [msg] */
-/** Anmeldung: Benutzer + Passwort (Eigenbetrieb) oder Verbindungslink/API-Token (App, Integrationen). @param {string} [msg] */
-async function askToken(msg) {
-  const needServer = isNativeApp() || !!serverBase();
-  const v = await formDialog('Bei AirDeck anmelden', [
-    ...(needServer ? [{ name: 'server', label: 'Server-Adresse', value: serverBase() || 'http://192.168.', hint: 'z. B. http://192.168.1.20:8750 – entfällt beim Verbindungslink' }] : []),
-    { name: 'username', label: 'Benutzername', value: '', hint: msg ?? '' },
+/**
+ * Mit AirDeck verbinden: Adresse + Kopplungscode (Standard), Benutzer/Passwort oder Verbindungslink.
+ * Der Verbindungstest läuft in Stufen; bei einem Fehler zeigt AirDeck, welche Stufe scheiterte und was zu tun ist.
+ * @param {string} [msg] @param {Record<string, any>} [prev]
+ */
+async function askToken(msg, prev) {
+  const native = isNativeApp();
+  const needServer = native || !!serverBase();
+  const profiles = loadProfiles();
+  const v = await formDialog('Mit AirDeck verbinden', [
+    ...(msg ? [{ name: 'msg', label: 'Hinweis', type: 'info', value: msg }] : []),
+    ...(needServer ? [{ name: 'server', label: 'Server-Adresse', value: prev?.server ?? (serverBase() || profiles[0]?.base || ''), suggest: profiles.map((p) => p.base), hint: 'z. B. 192.168.1.20 (Port 8750 wird ergänzt) oder https://radio.example.org' }] : []),
+    { name: 'code', label: 'Kopplungscode (6 Ziffern)', value: '', hint: 'Am PC/Server unter „Android-App → Gerät koppeln“ erzeugen – geht auch ohne Benutzerkonto' },
+    { name: 'username', label: 'oder Benutzername', value: prev?.username ?? '' },
     { name: 'password', label: 'Passwort', type: 'password', value: '' },
-    { name: 'token', label: 'oder Verbindungslink / API-Token', type: 'password', value: '', hint: 'Aus „Android-App → Zugang erstellen“ oder ein API-Token' },
-  ], 'Anmelden');
+    { name: 'token', label: 'oder Verbindungslink / API-Token', type: 'password', value: '', hint: 'Für Integrationen; ein Link „http://…:8750/#token=…“ setzt auch die Adresse' },
+  ], 'Verbinden');
   if (!v) return;
-  const raw = String(v.token ?? '').trim();
-  // Verbindungslink aus dem Studio („http://…:8750/#token=…“) direkt einfügen
-  const link = /^(https?:\/\/[^#\s]+?)\/?#token=([^&\s]+)/.exec(raw);
+  let server = String(v.server ?? '');
+  let token = String(v.token ?? '').trim();
+  const link = /^(https?:\/\/[^#\s]+?)\/?#token=([^&\s]+)/.exec(token);
   if (link) {
-    saveServer(link[1]);
-    saveToken(decodeURIComponent(link[2]));
-    return location.reload();
+    server = link[1];
+    token = decodeURIComponent(link[2]);
   }
-  if (needServer) saveServer(v.server);
-  if (raw) {
-    saveToken(raw);
-    return location.reload();
+  status('Verbindung wird geprüft …');
+  const r = await testConnection(needServer || link ? server : '', { code: String(v.code ?? '').trim(), username: v.username, password: v.password, token }, { native, deviceName: deviceName(native) });
+  if (!r.ok) {
+    const failed = r.steps.find((x) => !x.ok);
+    await formDialog('Verbindung nicht möglich', r.steps.map((x) => ({
+      name: `s_${x.id}`, label: `${x.ok ? '✔' : '✖'} ${x.label}`, type: 'info', value: [x.detail, x.hint].filter(Boolean).join(' – '),
+    })), 'Erneut versuchen');
+    return askToken(failed?.hint ?? failed?.detail ?? 'Verbindung nicht möglich', { server, username: v.username });
   }
-  if (!v.username || !v.password) return askToken('Benutzername und Passwort eingeben');
-  try {
-    const r = await fetch(`${serverBase()}/api/v1/auth/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: v.username, password: v.password }) });
-    const d = await r.json().catch(() => ({}));
-    if (!r.ok) return askToken(d.message ?? 'Anmeldung fehlgeschlagen');
-    saveToken(d.token);
-    location.reload();
-  } catch {
-    askToken('Server nicht erreichbar – Adresse prüfen');
+  if (needServer || link) saveServer(r.base);
+  saveToken(r.token ?? null);
+  if (r.base) saveProfile({ base: r.base, name: r.serverName ?? 'AirDeck', token: r.token ?? '', lastConnected: new Date().toISOString() });
+  location.reload();
+}
+
+/** Gespeicherten Server wählen oder neuen hinzufügen (App / entfernter Server). */
+async function switchServer() {
+  const profiles = loadProfiles();
+  const v = await formDialog('Server wechseln', [
+    { name: 'base', label: 'Gespeicherte Server', value: serverBase(), options: [...profiles.map((p) => /** @type {[string, string]} */ ([p.base, `${p.name} · ${p.base}`])), ['__new', '+ Server hinzufügen …']] },
+    { name: 'forget', label: 'Gewählten Server aus der Liste entfernen', type: 'checkbox', value: false },
+  ], 'Wechseln');
+  if (!v) return;
+  if (v.base === '__new') return askToken();
+  if (v.forget) {
+    removeProfile(v.base);
+    return status('Server entfernt');
   }
+  const p = profiles.find((x) => x.base === v.base);
+  if (!p) return;
+  saveServer(p.base);
+  saveToken(p.token || null);
+  location.reload();
 }
 
 /** Erstanmeldung/zurückgesetztes Passwort: eigenes Passwort festlegen. @param {string} [msg] */
@@ -1303,6 +1328,8 @@ function bindStatic() {
   const isAdmin = S.me?.roles?.includes('admin') && S.me?.stationIds?.includes('*');
   $('nav-users').hidden = !isAdmin;
   $('btn-logout').hidden = !S.me?.user;
+  $('btn-server').hidden = !(isNativeApp() || serverBase());
+  $('btn-server').addEventListener('click', () => void switchServer());
   $('btn-password').hidden = !S.me?.user;
   $('btn-logout').addEventListener('click', () => confirm('Abmelden?') && logout());
   $('btn-password').addEventListener('click', () => forcePasswordChange('Neues Passwort festlegen. Alle anderen Sitzungen werden beendet.'));
@@ -1495,22 +1522,41 @@ async function androidApp() {
     { name: 'info', label: 'Offizielle AirDeck-App', type: 'info', value: 'Die App steuert diesen AirDeck per Touch und sendet mit MIC LIVE als Live-Quelle. Auf dem Handy im selben WLAN öffnen:' },
     { name: 'dl', label: 'APK herunterladen (im Handy-Browser öffnen)', type: 'info', value: c.listening ? `${base}/download/AirDeck-Android.apk` : 'Erst „Im Netzwerk erreichbar“ einschalten und AirDeck neu starten' },
     { name: 'lan', label: 'Im Netzwerk erreichbar (nötig für Handy und andere PCs)', type: 'checkbox', value: c.lan, hint: c.restartNeeded ? '⚠ Wird nach einem Neustart von AirDeck aktiv. Windows fragt einmalig nach der Firewall-Freigabe.' : c.listening ? `Erreichbar unter: ${c.addresses.join(' · ') || '–'}` : 'Zurzeit nur auf diesem PC erreichbar' },
-    { name: 'token', label: 'Zugang für ein Handy erstellen (Verbindungslink anzeigen)', type: 'checkbox', value: false },
+    { name: 'pair', label: 'Gerät koppeln (Kopplungscode anzeigen)', type: 'checkbox', value: c.listening, hint: 'In der App bei „Mit AirDeck verbinden“ Adresse und Code eingeben – ein Benutzerkonto ist nicht nötig' },
+    { name: 'role', label: 'Rechte des Geräts', value: 'operator', options: [['operator', 'Sendeleitung (alles im Sendebetrieb)'], ['dj', 'Moderation (live gehen, Carts, Queue)'], ['editor', 'Redaktion'], ['viewer', 'Nur ansehen']] },
+    { name: 'devices', label: 'Gekoppelte Geräte verwalten', type: 'checkbox', value: false },
   ], 'Übernehmen');
   if (!v) return;
   if (v.lan !== c.lan) {
     const r = await run(() => api.put('/app/network', { lan: v.lan }));
     if (r?.restartNeeded) status('Netzwerk-Einstellung gespeichert – bitte AirDeck neu starten (Tray/Fenster schließen und neu öffnen)');
   }
-  if (v.token) {
-    const t = await run(() => api.post('/tokens', { name: `Android ${new Date().toLocaleDateString('de-DE')}`, scopes: ['*'], roles: ['operator', 'dj'], stationIds: [S.station.id] }));
-    if (!t) return;
-    const link = `${base}/#token=${t.token}`;
-    await formDialog('Verbindungslink für die App', [
-      { name: 'link', label: 'In der App bei „Mit AirDeck verbinden“ einfügen', type: 'textarea', value: link, hint: 'Gilt für diesen Sender. Widerrufen jederzeit über die Token-Verwaltung der API.' },
+  if (v.pair) {
+    const p = await run(() => api.post('/pairing', { role: v.role, stationIds: [S.station.id] }));
+    if (!p) return;
+    const until = new Date(p.expiresAt).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
+    await formDialog('Gerät koppeln', [
+      { name: 'code', label: 'Kopplungscode', type: 'info', value: `${p.code.slice(0, 3)} ${p.code.slice(3)}` },
+      { name: 'addr', label: 'Server-Adresse in der App', type: 'info', value: p.listening ? (p.addresses.join(' · ') || base) : 'Erst „Im Netzwerk erreichbar“ einschalten und AirDeck neu starten' },
+      { name: 'info', label: 'Gültig', type: 'info', value: `einmalig, bis ${until} Uhr · Sender „${S.station.name}“` },
     ], 'Fertig');
-    try { await navigator.clipboard.writeText(link); status('Verbindungslink kopiert'); } catch {}
   }
+  if (v.devices) await manageDevices();
+}
+
+/** Gekoppelte Geräte anzeigen und einzeln widerrufen. */
+async function manageDevices() {
+  const list = await run(() => api.get('/devices'));
+  if (!list) return;
+  if (!list.length) return status('Noch keine Geräte gekoppelt');
+  const fmtTime = (/** @type {string|undefined} */ t) => (t ? new Date(t).toLocaleString('de-DE') : 'noch nie');
+  const v = await formDialog('Gekoppelte Geräte', list.map((/** @type {any} */ d) => ({
+    name: `rm_${d.id}`, label: `${d.name} · ${d.roles.join(', ')} · ${d.device.platform}`, type: 'checkbox', value: false,
+    hint: `gekoppelt ${fmtTime(d.device.pairedAt)} · zuletzt gesehen ${fmtTime(d.device.lastSeenAt)} – anhaken zum Widerrufen`,
+  })), 'Ausgewählte widerrufen');
+  if (!v) return;
+  for (const d of list) if (v[`rm_${d.id}`]) await run(() => api.del(`/devices/${encodeURIComponent(d.id)}`));
+  status('Geräte aktualisiert');
 }
 
 // ---------- Fenster & Layout ----------

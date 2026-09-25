@@ -311,10 +311,13 @@ footer { text-align: center; color: var(--muted); font-size: 13px; padding: 24px
   <ol>
     <li>Im Studio am PC: <b>Android-App</b> → „Im Netzwerk erreichbar“ einschalten und AirDeck einmal neu starten. Windows fragt dann einmalig nach der Firewall-Freigabe, bitte zulassen.</li>
     <li>Den angezeigten Download-Link (<code>http://&lt;PC-Adresse&gt;:8750/download/AirDeck-Android.apk</code>) im Browser des Handys öffnen. Das Handy muss im selben WLAN sein. Beim ersten Mal „Unbekannte Apps installieren“ erlauben.</li>
-    <li>Im Studio „Zugang für ein Handy erstellen“ wählen. Den Verbindungslink in der App bei „Mit AirDeck verbinden“ einfügen, fertig.</li>
+    <li>Im Studio am PC: <b>Android-App</b> → „Gerät koppeln“. AirDeck zeigt einen <b>Kopplungscode</b> (6 Ziffern, 5 Minuten gültig, einmalig) und die Adresse des PCs.</li>
+    <li>In der App bei „Mit AirDeck verbinden“ die Adresse (z. B. <code>192.168.1.20</code>, der Port 8750 wird ergänzt) und den Code eingeben. Ein Benutzerkonto ist nicht nötig.</li>
+    <li>Klappt es nicht, zeigt die App Schritt für Schritt, woran es liegt (Adresse, erreichbar, AirDeck erkannt, Version, Anmeldung, Rechte), und sagt, was zu tun ist. Beispiel: <code>localhost</code> auf dem Handy ist das Handy selbst.</li>
   </ol>
   <div class="warn">Die offizielle, signierte APK entsteht, sobald im GitHub-Repository der Signaturschlüssel hinterlegt ist (Secrets <code>ANDROID_KEYSTORE_B64</code>, <code>ANDROID_KEYSTORE_PASSWORD</code>, <code>ANDROID_KEY_ALIAS</code>, <code>ANDROID_KEY_PASSWORD</code>). Ohne Schlüssel entsteht eine Test-APK. Wechselst du von der Test- zur offiziellen APK, musst du die App einmal neu installieren.</div>
   <p>Die App bietet das komplette Studio mit Touch-Bedienung und MIC LIVE als Live-Quelle (Priorität 3).</p>
+  <p><b>Geräte verwalten:</b> Unter „Android-App → Gekoppelte Geräte verwalten“ siehst du jedes Gerät mit Rechten und „zuletzt gesehen“ und kannst es einzeln widerrufen. <b>Mehrere Server:</b> Die App merkt sich jeden verbundenen Server. Wechseln geht über „Server wechseln“ im Menü.</p>
   <div class="todo">In Arbeit: direktes Senden aus der App an Icecast/laut.fm ohne AirDeck-Server (Standalone-Live).</div>
 </section>
 

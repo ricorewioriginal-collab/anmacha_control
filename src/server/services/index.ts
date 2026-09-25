@@ -6,6 +6,7 @@ import type { AirDeckApp } from '../app.ts';
 import { AiToolsService } from './ai.ts';
 import { AuthService } from './auth.ts';
 import { BridgeService } from './bridges.ts';
+import { DeviceService } from './devices.ts';
 import { LautfmService } from './lautfm.ts';
 import { MediaService } from './media.ts';
 import { NextcloudService } from './nextcloud.ts';
@@ -19,6 +20,7 @@ import { SystemService } from './system.ts';
 export function createServices(app: AirDeckApp) {
   return {
     auth: new AuthService(app),
+    devices: new DeviceService(app),
     stations: new StationService(app),
     media: new MediaService(app),
     nextcloud: new NextcloudService(app),

@@ -32,7 +32,7 @@ test('Benutzerverwaltung: Login/Logout, Rollen, Passwortwechsel, Sperre, letzter
     return { status: r.status, body: text ? JSON.parse(text) : null };
   };
   try {
-    assert.deepEqual((await call('GET', '/auth/status')).body, { users: false });
+    assert.deepEqual((await call('GET', '/auth/status')).body, { users: false, pairing: true });
     await app.users.create({ username: 'Chef', password: 'Start-Passwort1', roles: ['admin'], mustChangePassword: true });
     assert.ok(!storedText(app).includes('Start-Passwort1'), 'kein Klartext');
 

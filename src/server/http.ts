@@ -472,6 +472,18 @@ export function createHttpServer(app: AirDeckApp, studioDir: string): Server {
 
   // --- Android-App / Netzwerk ---
   add('GET', '/api/v1/app/connect', null, (c) => (globalAdmin(c), app.svc.system.appConnect()));
+  // Geräte koppeln und verwalten
+  add('POST', '/api/v1/pairing', 'tokens:write', async (c) => {
+    const b = await c.body();
+    return { ...app.svc.devices.createPairing(c.p, { role: b.role as string, stationIds: b.stationIds }), ...(app.svc.system.appConnect() as object) };
+  });
+  add('GET', '/api/v1/devices', 'tokens:write', () => app.svc.devices.list());
+  add('DELETE', '/api/v1/devices/:id', 'tokens:write', (c) => app.svc.devices.revoke(c.p, c.params.id!));
+  // andere AirDeck-Server im Netz finden (für „Server hinzufügen“ auf dem Desktop)
+  add('GET', '/api/v1/discover', null, async () => {
+    const { discover } = await import('./discovery.ts');
+    return (await discover()).filter((f) => f.id !== app.sync.instance);
+  });
   add('PUT', '/api/v1/app/network', null, async (c) => (globalAdmin(c), app.svc.system.setNetwork((await c.body()).lan === true)));
 
   // --- KI-Automation ---
@@ -578,7 +590,18 @@ export function createHttpServer(app: AirDeckApp, studioDir: string): Server {
       return json(res, h.status === 'error' ? 503 : 200, { ok: h.status !== 'error', ...h });
     }
     // Anmeldung (öffentlich): Benutzername + Passwort → Sitzungs-Token; Sperre nach Fehlversuchen im UserStore
-    if (path === '/api/v1/auth/status' && req.method === 'GET') return json(res, 200, { users: app.users.count > 0 });
+    // pairing: Geräte können sich immer per Kopplungscode verbinden (auch ohne Benutzerkonten, z. B. Desktop)
+    if (path === '/api/v1/auth/status' && req.method === 'GET') return json(res, 200, { users: app.users.count > 0, pairing: true });
+    // Kopplungscode einlösen (öffentlich; Sperre nach wiederholten Fehlversuchen je Adresse)
+    if (path === '/api/v1/pair' && req.method === 'POST') {
+      try {
+        const b = JSON.parse((await readRaw(req, 4 * 1024)).toString('utf8') || '{}') as { code?: string; name?: string; platform?: string };
+        return json(res, 200, app.svc.devices.redeem(String(b.code ?? ''), b, String(req.socket.remoteAddress ?? '')));
+      } catch (err) {
+        if (err instanceof AppError) return json(res, err.status, { error: err.code, message: err.message });
+        return json(res, 400, { error: 'invalid', message: 'Ungültige Anfrage' });
+      }
+    }
     if (path === '/api/v1/auth/login' && req.method === 'POST') {
       try {
         const b = JSON.parse((await readRaw(req, 16 * 1024)).toString('utf8') || '{}') as { username?: string; password?: string };

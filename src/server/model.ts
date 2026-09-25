@@ -135,6 +135,8 @@ export interface ApiToken {
   roles: string[];
   stationIds: string[];
   createdAt: string;
+  /** Gekoppeltes Gerät (Handy, weiterer PC) statt frei erzeugtem API-Token */
+  device?: { platform: string; pairedAt: string; lastSeenAt?: string; ip?: string };
 }
 
 export interface Principal extends Actor {

@@ -72,7 +72,10 @@ export class AuthService {
     if (!token) return null;
     const h = hashToken(token);
     const t = this.tokens.find((x) => x.hash === h);
-    if (t) return { id: t.id, tokenId: t.id, roles: t.roles, stationIds: t.stationIds, scopes: t.scopes };
+    if (t) {
+      this.app.svc.devices.seen(t);
+      return { id: t.id, tokenId: t.id, roles: t.roles, stationIds: t.stationIds, scopes: t.scopes };
+    }
     const u = this.app.users.session(token);
     if (!u) return null;
     return {

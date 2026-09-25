@@ -16,7 +16,7 @@ Gestartet werden zwei Container: `airdeck` und `airdeck-postgres` (PostgreSQL 17
 
 **Ohne PostgreSQL** (kleine Installation): in `docker-compose.yml` den Dienst `postgres`, den Abschnitt `depends_on` und die drei `AIRDECK_DB`-Zeilen entfernen. AirDeck nutzt dann SQLite im Datenordner.
 
-Danach das Studio unter `http://<server>:8750/#token=<Admin-Token>` öffnen. Die Android-App verbindet sich mit derselben Adresse. Einen Verbindungslink erzeugst du im Studio unter „Android-App → Zugang erstellen“.
+Danach das Studio unter `http://<server>:8750/#token=<Admin-Token>` öffnen. Die Android-App verbindet sich mit derselben Adresse. Handys koppelst du im Studio unter „Android-App → Gerät koppeln“ (Adresse + Kopplungscode).
 
 ## Daten & Updates
 

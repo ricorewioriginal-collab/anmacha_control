@@ -70,7 +70,7 @@ Die App ist das komplette Studio für Touch-Bedienung, MIC LIVE (das Handy sende
 
 1. **Am PC:** Im Studio **Android-App** öffnen → „Im Netzwerk erreichbar“ einschalten. Das geht auch schon im Installer. AirDeck einmal neu starten und die Windows-Firewall-Abfrage für **private Netzwerke** erlauben.
 2. **Am Handy (gleiches WLAN):** den angezeigten Link `http://<PC-Adresse>:8750/download/AirDeck-Android.apk` im Browser öffnen, installieren und „Unbekannte Apps installieren“ erlauben.
-3. Im Studio am PC **„Zugang für ein Handy erstellen“** wählen. Den Verbindungslink in der App bei „Mit AirDeck verbinden“ einfügen.
+3. Im Studio am PC **Android-App → „Gerät koppeln“** wählen. In der App bei „Mit AirDeck verbinden“ die angezeigte Adresse und den **Kopplungscode** eingeben (6 Ziffern, 5 Minuten gültig, einmalig). Ein Benutzerkonto ist nicht nötig. Gekoppelte Geräte lassen sich dort einzeln widerrufen.
 
 Die offizielle APK ist signiert, sobald im Repository der Android-Signaturschlüssel hinterlegt ist. Die Secrets dafür: `ANDROID_KEYSTORE_B64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD`. Einen Schlüssel erzeugst du einmalig mit:
 `keytool -genkeypair -v -keystore airdeck.jks -alias airdeck -keyalg RSA -keysize 4096 -validity 36500`

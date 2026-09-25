@@ -82,6 +82,8 @@ Nachvollzogen auf dem Weg App → Anmeldedialog → `POST /api/v1/auth/login` �
 4. **„Lokal“ auf dem Handy:** Gibt man in der App `127.0.0.1`/`localhost` ein, zeigt das auf das Handy selbst, nicht auf den PC. Es gibt weder Erkennung noch Hinweis.
 5. Es fehlen Verbindungstest, Versionsprüfung und gespeicherte Serverprofile. Ein Fehler wird erst nach dem Neuladen sichtbar.
 
+**Behoben (Schritt 5):** Kopplung per Code (ohne Benutzerkonto, eigenes Geräte-Token, einzeln widerrufbar). Verbindungstest in sechs Stufen mit gezielten Hinweisen, zum Beispiel für „localhost auf dem Handy“, „LAN aus/Firewall“ und „keine Benutzerkonten, bitte koppeln“. Dazu Versionsprüfung über die API-Hauptversion, Serverprofile und LAN-Erkennung (UDP 8751). Tests: `test/devices.test.ts`, `test/connect.test.ts`.
+
 ### 5.2 LIVE bricht Stream-Format und Ausgänge (Ursache für „Live senden geht nicht“)
 `relay.ts` gibt beim Quellenwechsel den **Rohstrom** der neuen Quelle weiter. Hat sie ein anderes Format, werden die Ausgänge mit dem neuen `Content-Type` neu verbunden (Zeile 86). MIC LIVE aus Browser oder App sendet **WebM/Opus**, die Automation **MP3**. Folgen:
 - Der Icecast-Mount wechselt mitten in der Sendung von MP3 zu WebM, und laufende Hörer-Player brechen ab.

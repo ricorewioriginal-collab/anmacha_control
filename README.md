@@ -57,7 +57,7 @@ Windows kann bei nicht signierten Dateien warnen: „Weitere Informationen“ �
 
 **Windows:** Installer starten, fertig. Das Studio öffnet sich, AirDeck läuft danach im Hintergrund. Das Symbol im Infobereich bietet Studio öffnen, Protokoll und Beenden.
 
-**Android:** Im Studio am PC unter **Android-App** „Im Netzwerk erreichbar“ einschalten. Dann die APK auf dem Handy laden und den Verbindungslink einfügen ([Anleitung](docs/INSTALLATION.md#android)).
+**Android:** Im Studio am PC unter **Android-App** „Im Netzwerk erreichbar“ einschalten. Dann die APK auf dem Handy laden und mit Adresse und Kopplungscode verbinden ([Anleitung](docs/INSTALLATION.md#android)).
 
 **Server:**
 ```bash

@@ -10,7 +10,7 @@ import { format } from 'node:util';
 import { randomBytes } from 'node:crypto';
 import { createServer } from 'node:net';
 import { homedir } from 'node:os';
-import { resolveConfig, writeDefaultConf } from './config.ts';
+import { API_VERSION, resolveConfig, writeDefaultConf } from './config.ts';
 import { openDatabase, safeUrl } from './db/index.ts';
 import type { DatabaseProvider } from './db/types.ts';
 import { DbDocStore, importJsonFiles } from './repo/docs.ts';
@@ -203,6 +203,17 @@ async function main(): Promise<void> {
   const server = createHttpServer(app, join(root, 'studio'));
   server.requestTimeout = 0; // Streams (Ingest, SSE, Listen) laufen dauerhaft
   server.headersTimeout = 15_000;
+  // LAN-Erkennung (UDP 8751) – antwortet auch bei nur lokaler Freigabe, damit Clients „LAN aus“ melden können
+  let discovery: { close(): void } | null = null;
+  if (String(process.env.AIRDECK_DISCOVERY ?? '').toLowerCase() !== 'off') {
+    const { startResponder } = await import('./discovery.ts');
+    const { hostname } = await import('node:os');
+    discovery = await startResponder(() => ({
+      id: app.sync.instance, name: app.svc.stations.listStations({ id: 'discovery', tokenId: 'discovery', roles: ['admin'], stationIds: ['*'], scopes: ['*'] })[0]?.name ?? 'AirDeck',
+      host: hostname(), version: app.version, api: API_VERSION, port, lan: host === '0.0.0.0' || host === '::',
+    }), { log: (m) => console.warn(m) });
+  }
+
   server.listen(port, host, () => {
     app.start();
     console.log(`AirDeck läuft auf http://${host}:${port}  (Daten: ${dataDir})`);
@@ -212,6 +223,7 @@ async function main(): Promise<void> {
 
   const stop = () => {
     console.log('AirDeck wird beendet …');
+    discovery?.close();
     app.shutdown();
     server.close();
     setTimeout(() => process.exit(0), 3000).unref();

@@ -56,3 +56,16 @@ Das Desktop-Studio verbindet sich über `127.0.0.1` und nicht über die LAN-Adre
 - **Self-Hosted:** Caddy als Reverse Proxy mit automatischem Zertifikat. Die Vorlage erzeugt der Setup-Assistent aus Domain und E-Mail.
 - **LAN:** HTTP ist zulässig, wenn ausdrücklich „nur lokales Netz“ gewählt ist.
 - AirDeck selbst terminiert kein TLS. Das bleibt die Aufgabe des Proxys, der dafür gebaut ist.
+
+## Stand der Umsetzung
+
+| Baustein | Stand |
+|---|---|
+| Health mit Version und API-Version | umgesetzt (`/api/v1/health`) |
+| LAN-Erkennung UDP 8751 (`AIRDECK?1` → Name, Version, API, Port, LAN an/aus) | umgesetzt (`src/server/discovery.ts`). Abschaltbar mit `AIRDECK_DISCOVERY=off`. Suche vom Desktop-Studio über `GET /api/v1/discover`. In der App kommt die Suche mit dem nativen Modul (Schritt 8), weil eine WebView kein UDP senden kann |
+| Kopplungscode (6 Ziffern, 5 min, einmalig, Rolle und Sender wählbar, Sperre nach 8 Fehlversuchen je Adresse für 10 min) | umgesetzt: `POST /api/v1/pairing`, öffentlich `POST /api/v1/pair` |
+| Geräte-Token, einzeln widerrufbar, „zuletzt gesehen“ | umgesetzt: `GET /api/v1/devices`, `DELETE /api/v1/devices/<id>` |
+| Verbindungstest in Stufen mit Hinweisen, Versionsprüfung, Serverprofile | umgesetzt (`studio/js/connect.js`, Dialog „Mit AirDeck verbinden“, „Server wechseln“) |
+| QR-Code | folgt mit dem nativen Kamera-Scanner der App (Schritt 8) |
+| Token im Android Keystore | folgt mit Schritt 8, bis dahin Speicher der WebView |
+
