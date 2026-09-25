@@ -24,6 +24,15 @@ AirDeck ist eine eigenständige Sendesoftware für Webradio. Sie bietet Automati
 Alle Dateien stehen auf der Seite [**Releases → neuestes Release**](https://github.com/ricorewioriginal-collab/anmacha_control/releases/latest). Sie werden nach jeder Änderung automatisch gebaut und getestet. Solange das Repository privat ist, funktionieren die Links nur für angemeldete Mitglieder.
 Windows kann bei nicht signierten Dateien warnen: „Weitere Informationen“ → „Trotzdem ausführen“ (Details in [docs/INSTALLATION.md](docs/INSTALLATION.md)).
 
+## 📸 Vorschau
+
+Alle Screenshots zeigen den Sender **„AirDeck-FM“** mit Beispiel-Titeln – reine Testdaten, kein echter Sender.
+
+| Studio (Windows/Browser) | Handy-Sender (Android) | Hörerbereich (Browser) |
+|---|---|---|
+| [![Studio](docs/screenshots/studio-desktop.png)](docs/screenshots/studio-desktop.png) | [![Handy-Sender](docs/screenshots/handy-sender.png)](docs/screenshots/handy-sender.png) | [![Hörerbereich](docs/screenshots/hoerer-browser.png)](docs/screenshots/hoerer-browser.png) |
+| Decks, Cardwall, Queue, Stream/Encoder und Schnelltrigger auf einen Blick | Live senden vom Handy – Mikrofon, Musik und Pegel, ganz ohne AirDeck-Server | Musikwunsch, Grüße und Voting direkt aus dem Browser der Hörer |
+
 ## Funktionen
 
 **Studio & Sendebetrieb**
