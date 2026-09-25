@@ -129,12 +129,15 @@ async function boot() {
 /**
  * Mit AirDeck verbinden: Adresse + Kopplungscode (Standard), Benutzer/Passwort oder Verbindungslink.
  * Der Verbindungstest läuft in Stufen; bei einem Fehler zeigt AirDeck, welche Stufe scheiterte und was zu tun ist.
- * @param {string} [msg] @param {Record<string, any>} [prev]
+ * @param {string} [msg] @param {Record<string, any>} [prev] @param {boolean} [forceServer] Adressfeld auch im Browser zeigen (z. B. „Server hinzufügen“)
  */
-async function askToken(msg, prev) {
+async function askToken(msg, prev, forceServer) {
   const native = isNativeApp();
-  const needServer = native || !!serverBase();
   const profiles = loadProfiles();
+  // Im Browser reicht die eigene Serveradresse implizit (gleicher Ursprung) – sobald aber schon andere
+  // Instanzen gespeichert sind oder ausdrücklich ein Server hinzugefügt werden soll, zeigen wir das Feld
+  // auch dort, damit sich mehrere selbst gehostete AirDeck-Server aus einem Browser heraus erreichen lassen.
+  const needServer = native || !!serverBase() || profiles.length > 0 || !!forceServer;
   const v = await formDialog('Mit AirDeck verbinden', [
     ...(msg ? [{ name: 'msg', label: 'Hinweis', type: 'info', value: msg }] : []),
     ...(needServer ? [{ name: 'server', label: 'Server-Adresse', value: prev?.server ?? (serverBase() || profiles[0]?.base || ''), suggest: profiles.map((p) => p.base), hint: 'z. B. 192.168.1.20 (Port 8750 wird ergänzt) oder https://radio.example.org' }] : []),
@@ -201,7 +204,7 @@ async function switchServer() {
     { name: 'forget', label: 'Gewählten Server aus der Liste entfernen', type: 'checkbox', value: false },
   ], 'Wechseln');
   if (!v) return;
-  if (v.base === '__new') return askToken();
+  if (v.base === '__new') return askToken(undefined, undefined, true);
   if (v.forget) {
     removeProfile(v.base);
     return status('Server entfernt');
@@ -1533,7 +1536,9 @@ function bindStatic() {
   const isAdmin = S.me?.roles?.includes('admin') && S.me?.stationIds?.includes('*');
   $('nav-users').hidden = !isAdmin;
   $('btn-logout').hidden = !S.me?.user;
-  $('btn-server').hidden = !(isNativeApp() || serverBase());
+  // Auch im reinen Browser sichtbar: mehrere selbst gehostete AirDeck-Instanzen lassen sich so
+  // speichern und wechseln, ohne die App/den Server neu aufzurufen (nicht nur in der Android-App).
+  $('btn-server').hidden = false;
   // Android-App: jederzeit zum Handy-Sender (sendet ohne Server direkt vom Handy)
   $('btn-handy').hidden = !isNativeApp();
   $('btn-handy').addEventListener('click', () => {

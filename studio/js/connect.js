@@ -132,7 +132,10 @@ export async function testConnection(address, auth, opts) {
     const stations = await timed(`${base}/api/v1/stations`, hdr).then((r) => (r.ok ? r.json() : []));
     if (!Array.isArray(stations) || !stations.length) return push({ id: 'rights', label: 'Rechte', ok: false, detail: 'Kein Sender freigegeben', hint: 'Beim Koppeln bzw. in der Benutzerverwaltung einen Sender zuweisen.' }), done(base);
     push({ id: 'rights', label: 'Rechte', ok: true, detail: `${stations.length} Sender` });
-    return done(base, { token, serverName: stations[0]?.name ?? 'AirDeck' });
+    // Bei gleicher Herkunft (Browser direkt auf dem Server) bleibt „base“ bisher leer – für die
+    // Serverliste (mehrere Instanzen wechseln) braucht es aber eine feste Adresse, sonst taucht der
+    // gerade genutzte Server selbst nie unter „Gespeicherte Server“ auf.
+    return done(base || (!opts.native ? location.origin : base), { token, serverName: stations[0]?.name ?? 'AirDeck' });
   } catch {
     push({ id: 'rights', label: 'Rechte', ok: false, detail: 'Abfrage fehlgeschlagen' });
     return done(base);
