@@ -49,14 +49,20 @@ jobs:
       - name: Rollout per SSH (git fetch + docker compose up -d --build)
         run: |
           port="${DEPLOY_PORT:-22}"
-          ssh -i ~/.ssh/deploy_key -p "$port" "$DEPLOY_USER@$DEPLOY_HOST" bash -se -- "$DEPLOY_REF" "$DEPLOY_PATH" <<'REMOTE'
+          # Wichtig: Ref/Pfad NICHT als SSH-Kommandozeilenargumente uebergeben - OpenSSH fuegt alle
+          # Argumente serverseitig zu einer einzigen Zeile zusammen und laesst sie erneut vom Shell
+          # der Gegenseite parsen. Das "&" im Branchnamen wuerde dort als "im Hintergrund ausfuehren"
+          # interpretiert. Stattdessen werden Ref/Pfad hier lokal (per printf %q sicher als ein Wort
+          # maskiert) direkt in das per stdin uebertragene Skript eingesetzt - das wird nur einmal,
+          # als reiner Skripttext, auf der Gegenseite gelesen.
+          quoted_ref=$(printf '%q' "$DEPLOY_REF")
+          quoted_path=$(printf '%q' "$DEPLOY_PATH")
+          ssh -i ~/.ssh/deploy_key -p "$port" "$DEPLOY_USER@$DEPLOY_HOST" bash -s <<REMOTE
             set -e
-            ref="$1"
-            path="$2"
-            cd "$path"
-            git fetch origin "$ref"
-            git checkout "$ref"
-            git reset --hard "origin/$ref"
+            cd $quoted_path
+            git fetch origin $quoted_ref
+            git checkout $quoted_ref
+            git reset --hard origin/$quoted_ref
             docker compose up -d --build
             docker compose ps
           REMOTE
