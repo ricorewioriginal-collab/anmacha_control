@@ -256,6 +256,61 @@ jobs:
           curl -fs -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8750/api/v1/database | tee db.json | grep -q '"engine":"PostgreSQL"'
           docker compose down
 
+  # Linux-Paket: .deb mit systemd-Dienst „airdeck-server“ (Schritt 7 der Architektur, eigener Benutzer,
+  # Daten unter /var/lib/airdeck). Läuft auf einem echten ubuntu-latest-Runner (VM mit systemd als PID 1).
+  linux:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '22', cache: npm }
+      - run: npm ci
+      - name: Debian-Paket bauen
+        run: npm run build:linux-deb
+      - name: Installieren, Dienst starten, über systemd neu starten, purgen
+        run: |
+          set -e
+          VER=$(node -p "require('./package.json').version")
+          sudo apt-get update -q
+          sudo apt-get install -y -q ffmpeg
+          sudo dpkg -i "dist/airdeck_${VER}_amd64.deb"
+          sudo systemctl is-active airdeck-server.service
+          for i in $(seq 1 30); do curl -fs http://127.0.0.1:8750/api/v1/health > /dev/null && break; sleep 1; done
+          curl -fs http://127.0.0.1:8750/api/v1/health | tee health.json
+          grep -q '"ok":true' health.json || (echo "Health-Check fehlgeschlagen" && exit 1)
+          TOKEN=$(sudo journalctl -u airdeck-server --no-pager | grep -A1 "Admin-Token" | tail -1 | tr -d '[:space:]')
+          test -n "$TOKEN" || (echo "Admin-Token nicht im Protokoll gefunden" && sudo journalctl -u airdeck-server --no-pager && exit 1)
+          # Neustart über die API (wie Setup-Assistent/Update): AirDeck erkennt systemd (INVOCATION_ID) und
+          # beendet sich mit Exit-Code 75 – RestartForceExitStatus muss den Dienst neu starten (nicht nur beenden).
+          PID1=$(sudo systemctl show -p MainPID --value airdeck-server.service)
+          curl -fs -X POST -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8750/api/v1/system/restart > /dev/null
+          PID2=""
+          for i in $(seq 1 30); do
+            sleep 1
+            PID2=$(sudo systemctl show -p MainPID --value airdeck-server.service)
+            [ -n "$PID2" ] && [ "$PID2" != "0" ] && [ "$PID2" != "$PID1" ] && curl -fs http://127.0.0.1:8750/api/v1/health > /dev/null 2>&1 && break
+          done
+          if [ "$PID2" = "$PID1" ] || [ -z "$PID2" ] || [ "$PID2" = "0" ]; then
+            echo "systemd hat den Dienst nach dem Neustart-Aufruf nicht neu gestartet"
+            sudo systemctl status airdeck-server.service --no-pager || true
+            exit 1
+          fi
+          curl -fs http://127.0.0.1:8750/api/v1/health | grep -q '"ok":true'
+          echo "Neustart über systemd (Exit-Code 75) OK: PID $PID1 -> $PID2"
+          # Entfernen (purge): Programmdateien und Konfiguration weg, Daten (Datenbank, Medien) bleiben
+          sudo systemctl stop airdeck-server.service
+          sudo dpkg -P airdeck
+          test ! -e /opt/airdeck
+          test ! -e /etc/airdeck/airdeck.conf
+          test -f /var/lib/airdeck/airdeck.db || (echo "Daten wurden beim Entfernen gelöscht" && exit 1)
+          echo "Linux-Paket: Installation, Dienst, Neustart, Health-Check und Purge OK"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AirDeck-Linux-Deb
+          path: dist/airdeck_*.deb
+          retention-days: 30
+
   android:
     needs: test
     runs-on: ubuntu-latest
@@ -301,7 +356,7 @@ jobs:
   # unter „Releases → AirDeck (aktueller Stand)“, ohne GitHub-Login-Umweg über Artefakte.
   release:
     if: github.event_name == 'push' && github.ref_name == github.event.repository.default_branch
-    needs: [windows, android]
+    needs: [windows, android, linux]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -314,6 +369,8 @@ jobs:
           cp artifacts/AirDeck-Windows-Installer/*.exe out/AirDeck-Setup.exe
           mv artifacts/AirDeck-Windows artifacts/AirDeck && (cd artifacts && zip -qr ../out/AirDeck-Windows-Portable.zip AirDeck)
           cp artifacts/AirDeck-Android/AirDeck-Android.apk out/AirDeck-Android.apk
+          # stabiler Dateiname für den "latest"-Downloadlink; der Paketname (im Innern, für apt) bleibt "airdeck"
+          cp artifacts/AirDeck-Linux-Deb/airdeck_*.deb out/AirDeck-Linux.deb
           ls -la out
       - uses: softprops/action-gh-release@v2
         with:
@@ -329,6 +386,7 @@ jobs:
             • AirDeck-Setup.exe – Windows-Installer (ohne Adminrechte, Deutsch/English, mit Audio-Engine und Android-APK)
             • AirDeck-Windows-Portable.zip – ohne Installation: entpacken, AirDeck.exe starten
             • AirDeck-Android.apk – Android-App: Handy-Sender (Mikrofon + Musik direkt zu laut.fm/Icecast, ohne Server) oder Studio-Fernbedienung für AirDeck auf PC/Server
+            • AirDeck-Linux.deb – Linux-Server als systemd-Dienst: `sudo apt install ./AirDeck-Linux.deb` (Debian/Ubuntu, x86_64)
             • Server: docker compose up -d (siehe docs/DOCKER.md)
 
             Powered by AnMaCha Radioproduktion & RicoReWi – für Broadcast, Automation, Live und laut.fm. Hobbyprojekt, ohne Gewähr.

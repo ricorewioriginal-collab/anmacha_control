@@ -14,7 +14,8 @@
     "typecheck": "tsc -p tsconfig.json && tsc -p studio/tsconfig.json",
     "check": "npm run typecheck && npm test",
     "build": "node scripts/build.mjs",
-    "build:win": "node scripts/build.mjs --sea"
+    "build:win": "node scripts/build.mjs --sea",
+    "build:linux-deb": "node scripts/build.mjs --sea && node scripts/build-deb.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.18.0",

@@ -1,0 +1,11 @@
+Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: AirDeck
+Upstream-Contact: AnMaCha Radioproduktion & RicoReWi <231153075+ricorewioriginal-collab@users.noreply.github.com>
+Source: https://github.com/ricorewioriginal-collab/anmacha_control
+
+Files: *
+Copyright: RicoReWi, AnMaCha Radioproduktion
+License: proprietary
+ AirDeck ist ein privates Hobbyprojekt ohne Open-Source-Lizenz; alle Rechte
+ vorbehalten. Nutzung auf eigene Gefahr, siehe /opt/airdeck/HAFTUNGSAUSSCHLUSS.md
+ bzw. https://github.com/ricorewioriginal-collab/anmacha_control/blob/main/HAFTUNGSAUSSCHLUSS.md

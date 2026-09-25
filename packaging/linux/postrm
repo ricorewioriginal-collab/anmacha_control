@@ -1,0 +1,18 @@
+#!/bin/sh
+# AirDeck – nach der Entfernung. Deine Daten (Musik, Datenbank, verschlüsselte Passwörter) unter
+# /var/lib/airdeck bleiben absichtlich erhalten, auch bei "apt purge" – wie bei der Windows-Version.
+# Selbst entfernen: rm -rf /var/lib/airdeck /var/log/airdeck /etc/airdeck
+set -e
+
+if [ -d /run/systemd/system ]; then
+  systemctl daemon-reload || true
+fi
+
+if [ "$1" = "purge" ]; then
+  # Nur die Konfigurationsdatei geht weg (wird beim nächsten Mal neu angelegt); Nutzerkonto
+  # und /var/lib/airdeck bleiben stehen, damit "apt purge && apt install" keine Sendedaten verliert.
+  rm -f /etc/airdeck/airdeck.conf
+  rmdir /etc/airdeck 2>/dev/null || true
+fi
+
+exit 0

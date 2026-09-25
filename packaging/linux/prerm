@@ -1,0 +1,9 @@
+#!/bin/sh
+# AirDeck – vor der Entfernung/dem Upgrade: Dienst anhalten (Upgrade startet ihn über postinst neu).
+set -e
+
+if [ -d /run/systemd/system ]; then
+  systemctl stop airdeck-server.service || true
+fi
+
+exit 0

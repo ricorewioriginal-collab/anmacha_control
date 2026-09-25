@@ -12,9 +12,10 @@ Intern startet AirDeck einen kleinen Dienst, den nur dieser PC erreicht (`127.0.
 | `AirDeck-Setup.exe` | Windows-Installer |
 | `AirDeck-Windows-Portable.zip` | Windows **ohne Installation** |
 | `AirDeck-Android.apk` | Android-App |
+| `AirDeck-Linux.deb` | Linux-Server (Debian/Ubuntu, systemd) |
 
 **Vorher (Test aus dem Pull Request):** GitHub → *Actions* → Workflow **Build** → neuester grüner Lauf → unten unter *Artifacts*:
-`AirDeck-Windows-Installer`, `AirDeck-Windows` (portable) und `AirDeck-Android`. Die Artefakte sind ZIP-Dateien und müssen erst entpackt werden.
+`AirDeck-Windows-Installer`, `AirDeck-Windows` (portable), `AirDeck-Android` und `AirDeck-Linux-Deb`. Die Artefakte sind ZIP-Dateien und müssen erst entpackt werden.
 
 ## Windows
 
@@ -63,6 +64,34 @@ Soll alles im Programmordner bleiben (z. B. USB-Stick), vorher `set AIRDECK_DATA
 ## Server (Docker)
 
 Siehe [DOCKER.md](DOCKER.md): `docker compose up -d`. Das Admin-Token steht im Log.
+
+## Server (Linux, systemd)
+
+Für einen eigenen Linux-Server ohne Docker: `AirDeck-Linux.deb` herunterladen und installieren.
+
+```sh
+sudo apt install ./AirDeck-Linux.deb   # oder: sudo dpkg -i AirDeck-Linux.deb
+```
+
+Das Paket richtet einen eigenen Systembenutzer `airdeck` ein und startet den Dienst `airdeck-server` sofort
+(automatisch bei jedem Systemstart). Das Einmal-Passwort bzw. Admin-Token steht im Protokoll:
+
+```sh
+sudo journalctl -u airdeck-server -n 50
+```
+
+Konfiguration unter `/etc/airdeck/airdeck.conf`, Daten (Musik, Datenbank, verschlüsselte Passwörter) unter
+`/var/lib/airdeck`, Protokoll unter `/var/log/airdeck`. Ohne installiertes `ffmpeg` läuft der Dienst weiter,
+nur ohne 24/7-Automation/Encoder – `sudo apt install ffmpeg` und `sudo systemctl restart airdeck-server` reicht nach.
+Standardmäßig ist AirDeck nur von diesem Server aus erreichbar (`127.0.0.1`); Netzwerkfreigabe wie bei den anderen
+Plattformen über den Setup-Assistenten im Studio oder `bind = lan` in `airdeck.conf`.
+
+```sh
+sudo systemctl status airdeck-server     # Zustand
+sudo systemctl restart airdeck-server    # Neu starten
+sudo apt remove airdeck                  # Entfernen (Daten bleiben erhalten)
+sudo apt purge airdeck                   # Entfernen inkl. Konfiguration (Daten bleiben trotzdem erhalten)
+```
 
 ## Android
 

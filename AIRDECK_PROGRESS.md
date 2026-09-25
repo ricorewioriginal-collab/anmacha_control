@@ -31,6 +31,9 @@
 - [x] Datenspeicher/Sync: MySQL/MariaDB und Firebase (Firestore, Service-Account/RS256) – Auswahl im Installer und unter „Datenspeicher & Sync“, Local-First mit Konflikterkennung; getestet mit echter MariaDB und Firestore-Mock
 - [x] Benachrichtigungen-Dialog (Webhook, Telegram, Now-Playing-Datei)
 - [x] **Update-Funktion Windows + Android:** Prüfung gegen das neueste Release (jeder Build ein eigenes, unveränderliches Release) (oder eigene Update-Adresse), Build-Kennung im Programm, SHA-256-Prüfung des Downloads, Windows installiert still und startet neu, Android lädt die APK über den verbundenen AirDeck (Token bleibt auf dem Server). Tests mit GitHub-Mock
+- [x] **Windows-Programm AirDeck.exe:** eigenes Fenster (WebView2, kein Edge-App-Modus mehr), natives Tray-Symbol, startet/überwacht die Engine (`airdeck-engine.exe`), Fenster zu = Sendung läuft weiter
+- [x] **Android Handy-Sender:** eigene Engine in reinem Java (Mischpult mit Ducking, LAME-MP3 als Java, Icecast-Quelle PUT/SOURCE), sendet direkt zu laut.fm/Icecast ohne AirDeck-Server, auch bei ausgeschaltetem Bildschirm (Vordergrund-Dienst); Engine-Tests gegen echten Icecast in CI
+- [x] **Schritt 7 – Linux-Paket:** `AirDeck-Linux.deb` (Debian/Ubuntu, systemd-Dienst `airdeck-server`, eigener Benutzer, Daten unter `/var/lib/airdeck`, Neustart aus dem Programm über `RestartForceExitStatus=75`); CI installiert, startet, löst einen echten Neustart über die API aus und entfernt es wieder (Daten bleiben erhalten)
 
 ## Nächste Schritte (Vorschlag, in dieser Reihenfolge)
 
@@ -45,7 +48,7 @@
 
 ## Bekannte Grenzen
 
-- Die Android-App ist Studio und Live-Quelle, aber kein 24/7-Sender, weil Android Hintergrund-WebViews pausiert. 24/7 läuft auf Windows oder dem Server.
+- Im Studio-Modus (Fernbedienung eines AirDeck-Servers) ist Android Live-Quelle, aber kein 24/7-Sender, weil Android Hintergrund-WebViews pausiert – 24/7 läuft auf Windows/Server. Der Handy-Sender-Modus (eigene native Engine, ohne Server) sendet dagegen auch mit ausgeschaltetem Bildschirm weiter, ist aber für Musik+Mikrofon gedacht, nicht für Sendeplan/Queue/KI.
 - Die Windows-`.exe` ist nicht signiert. Beim ersten Start warnt SmartScreen („Weitere Informationen“ → „Trotzdem ausführen“).
 - SHOUTcast-Ausgang ist noch nicht implementiert.
 - Die Meter zeigen RMS/Peak, noch kein LUFS.

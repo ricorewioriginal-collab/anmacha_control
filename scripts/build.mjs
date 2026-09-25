@@ -51,8 +51,9 @@ console.log('✓ dist/airdeck.cjs');
 if (sea) {
   const win = process.platform === 'win32';
   const out = join(dist, 'AirDeck');
-  // Windows: die Engine heißt airdeck-engine.exe, AirDeck.exe ist das eigentliche Programm (Fenster, Tray)
-  const exe = join(out, win ? 'airdeck-engine.exe' : 'AirDeck');
+  // Windows: die Engine heißt airdeck-engine.exe, AirDeck.exe ist das eigentliche Programm (Fenster, Tray).
+  // Linux: airdeck-server (systemd-Dienst, siehe scripts/build-deb.mjs). macOS: noch ohne eigenes Paket.
+  const exe = join(out, win ? 'airdeck-engine.exe' : process.platform === 'darwin' ? 'AirDeck' : 'airdeck-server');
   mkdirSync(out, { recursive: true });
   writeFileSync(join(dist, 'sea-config.json'), JSON.stringify({
     main: join(dist, 'airdeck.cjs'),
@@ -98,13 +99,15 @@ if (sea) {
   }
 
   cpSync(join(root, 'studio'), join(out, 'studio'), { recursive: true, filter: (src) => !src.endsWith('tsconfig.json') });
-  writeFileSync(join(out, 'studio', 'build.json'), JSON.stringify({ build: buildId, version, platform: 'windows' }));
-  // Hilfsskripte ins Programmverzeichnis – ohne Installer-Quelle und -Grafiken
-  cpSync(join(root, 'packaging', 'windows'), out, { recursive: true, filter: (src) => !src.endsWith('.iss') && !src.includes(join('windows', 'installer')) });
+  writeFileSync(join(out, 'studio', 'build.json'), JSON.stringify({ build: buildId, version, platform: win ? 'windows' : process.platform }));
   copyFileSync(join(root, 'HAFTUNGSAUSSCHLUSS.md'), join(out, 'HAFTUNGSAUSSCHLUSS.md'));
-  mkdirSync(join(out, 'icons'), { recursive: true });
-  for (const f of ['airdeck-windows.ico', 'airdeck-server.ico']) copyFileSync(join(root, 'assets', 'icons', f), join(out, 'icons', f));
   copyFileSync(join(root, 'README.md'), join(out, 'README.md'));
+  if (win) {
+    // Hilfsskripte ins Programmverzeichnis – ohne Installer-Quelle und -Grafiken
+    cpSync(join(root, 'packaging', 'windows'), out, { recursive: true, filter: (src) => !src.endsWith('.iss') && !src.includes(join('windows', 'installer')) });
+    mkdirSync(join(out, 'icons'), { recursive: true });
+    for (const f of ['airdeck-windows.ico', 'airdeck-server.ico']) copyFileSync(join(root, 'assets', 'icons', f), join(out, 'icons', f));
+  }
   mkdirSync(join(out, 'ffmpeg'), { recursive: true });
   console.log(`✓ ${exe}`);
 }

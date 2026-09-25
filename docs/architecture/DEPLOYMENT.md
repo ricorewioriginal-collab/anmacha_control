@@ -7,7 +7,7 @@
 | Paket | Laufzeit | ffmpeg |
 |---|---|---|
 | Windows (Installer/portable) | Node als Einzelprogramm eingebettet (`AirDeck.exe`, heute schon so) | mitgeliefert (inkl. LAME/Opus), wahlweise System oder eigener Pfad |
-| Linux (`.deb`, `.tar.gz`) | mitgelieferte Node-Laufzeit unter `/opt/airdeck/runtime` | mitgeliefertes statisches ffmpeg, wahlweise System-ffmpeg |
+| Linux (`.deb`) | Node als Einzelprogramm eingebettet (SEA, wie Windows), `/opt/airdeck/airdeck-server` | System-ffmpeg (`Recommends: ffmpeg`), Automation läuft ohne ffmpeg nicht |
 | Docker | im Image | im Image |
 | Entwicklung | Node ≥ 22.18 aus dem System | System-ffmpeg |
 
@@ -19,7 +19,7 @@ Der **Dependency-Manager** meldet für Laufzeit, ffmpeg, Datenbank, Audio-Backen
 |---|---|---|---|
 | Windows | `AirDeck Server` (Windows-Dienst) | automatisch, auch ohne Anmeldung | bei Fehler (Dienst-Wiederherstellung) |
 | Windows (Einfach-Modus) | Hintergrundprozess mit Tray, wie heute | bei Anmeldung | über den Tray |
-| Linux | `airdeck-server.service` (systemd, eigener Benutzer `airdeck`) | `systemctl enable --now airdeck-server` | `Restart=on-failure` |
+| Linux | `airdeck-server.service` (systemd, eigener Benutzer `airdeck`) | automatisch (`apt install`/`dpkg -i` aktiviert und startet ihn) | `Restart=on-failure` + `RestartForceExitStatus=75` (Neustart aus dem Programm) |
 | Docker | Container `airdeck` | `restart: unless-stopped` | Docker |
 
 Nach einem Rechnerneustart wird der vorherige Zustand wiederhergestellt: Modus, Queue-Position, laufende Automation, Ausgänge verbinden neu, Encoder startet neu. Das ist heute schon für die Automation umgesetzt und wird auf den Mode-Manager übertragen.

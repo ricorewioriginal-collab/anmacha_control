@@ -1,0 +1,31 @@
+[Unit]
+Description=AirDeck Radio-Automation & Live-Broadcast (Server)
+Documentation=https://github.com/ricorewioriginal-collab/anmacha_control
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=airdeck
+Group=airdeck
+ExecStart=/opt/airdeck/airdeck-server --headless
+WorkingDirectory=/var/lib/airdeck
+Restart=on-failure
+RestartSec=3
+# Neustart aus dem Programm (Setup-Assistent, Datenbank-Wechsel, Update): AirDeck erkennt den
+# systemd-Betrieb (INVOCATION_ID) und beendet sich dafür bewusst mit Exit-Code 75 (siehe
+# app.requestRestart in src/server/main.ts). RestartForceExitStatus sorgt dafür, dass systemd
+# diesen Code trotzdem als Neustart behandelt, nicht als sauberes Ende.
+RestartForceExitStatus=75
+
+# Absicherung (moderat – MemoryDenyWriteExecute bricht Node/V8's JIT und bleibt daher aus)
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/etc/airdeck /var/lib/airdeck /var/log/airdeck
+UMask=0027
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

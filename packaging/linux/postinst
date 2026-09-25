@@ -1,0 +1,33 @@
+#!/bin/sh
+# AirDeck – nach der Installation: Dienstkonto anlegen, Ordner vorbereiten, systemd-Dienst starten.
+set -e
+
+if ! getent group airdeck >/dev/null 2>&1; then
+  addgroup --system airdeck
+fi
+if ! getent passwd airdeck >/dev/null 2>&1; then
+  adduser --system --ingroup airdeck --home /var/lib/airdeck --no-create-home \
+    --shell /usr/sbin/nologin --gecos "AirDeck Radio-Automation" airdeck
+fi
+
+mkdir -p /etc/airdeck /var/lib/airdeck /var/log/airdeck
+# Eine airdeck.conf muss vorhanden sein, bevor AirDeck zum ersten Mal startet – sonst würde es
+# (ohne systemweite Konfiguration) im Home-Verzeichnis des Dienstkontos statt unter /var/lib/airdeck
+# ablegen (siehe resolveConfig() in src/server/config.ts). Den Rest trägt AirDeck selbst ein.
+if [ ! -e /etc/airdeck/airdeck.conf ]; then
+  printf '# AirDeck – wird beim ersten Start automatisch vervollständigt.\n# Siehe: man airdeck-server, oder das Handbuch im Studio.\n' > /etc/airdeck/airdeck.conf
+fi
+chown -R airdeck:airdeck /etc/airdeck /var/lib/airdeck /var/log/airdeck
+chmod 750 /etc/airdeck /var/lib/airdeck /var/log/airdeck
+
+if [ -d /run/systemd/system ]; then
+  systemctl daemon-reload || true
+  systemctl enable airdeck-server.service || true
+  # Neuinstallation: gleich starten. Upgrade: neu starten, damit die neue Version läuft
+  # ("configure" mit $2 gesetzt = vorherige Version war schon installiert).
+  if [ "$1" = "configure" ]; then
+    systemctl restart airdeck-server.service || true
+  fi
+fi
+
+exit 0
