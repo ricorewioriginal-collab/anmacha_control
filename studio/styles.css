@@ -73,6 +73,7 @@ button, select, input, textarea { font: inherit; color: inherit; }
 .brand-sub { color: var(--muted); font-size: 11px; max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .onair { display: flex; align-items: center; gap: 8px; padding: 6px 12px; border-radius: 999px; font-weight: 800; font-size: 12px; letter-spacing: .05em; background: rgba(255, 255, 255, .05); color: var(--muted); border: 1px solid var(--line); }
 .onair .dot { width: 9px; height: 9px; border-radius: 50%; background: #475569; }
+.rec-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--red); box-shadow: 0 0 8px var(--red); animation: pulse 1s infinite; }
 .onair[data-state="on"] { color: #86efac; border-color: rgba(34, 197, 94, .5); background: rgba(34, 197, 94, .12); }
 .onair[data-state="on"] .dot { background: var(--green); box-shadow: 0 0 10px var(--green); animation: pulse 1.6s infinite; }
 .onair[data-state="live"] { color: #fecaca; border-color: rgba(239, 68, 68, .6); background: rgba(239, 68, 68, .16); }

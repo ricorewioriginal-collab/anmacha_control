@@ -77,3 +77,34 @@ Drittsoftware mit eigenen Lizenzen und sind **nicht** Teil von AirDeck. AirDeck 
 | Event-Kalender (Wochentage, URL-Events, Wiederholung) | ✅ | Zeitplan, Stunden-Uhr, Sendeplan |
 | Nachricht senden (Titelanzeige) | ✅ | Titelanzeige senden |
 | Winamp-DSP-Plugins | ✗ | bewusst nicht: proprietär und nur für Windows |
+
+## AzuraCast, mAirList, RadioDJ, SAM Broadcaster (echte Fremdsysteme)
+
+Öffentlich dokumentierte Funktionen der vier verbreitetsten Systeme, abgeglichen mit dem tatsächlichen AirDeck-Code
+(nicht mit Werbetexten). Quellen: azuracast.com/docs, github.com/AzuraCast/AzuraCast (AGPL-3.0, nur zum Vergleich
+gelesen, kein Code übernommen), mairlist.com/en/products/radio-automation, radiodj.ro, spacial.com (SAM Broadcaster).
+
+| Funktion | AzuraCast | mAirList | RadioDJ | SAM Broadcaster | AirDeck |
+|---|---|---|---|---|---|
+| AutoDJ mit Playlist-Typen (Standard, Zeitfenster, X-mal/Stunde) | ✅ | ✅ | ✅ (Rotation) | ✅ | ✅ Sendeuhr, Zeitplan, Rotation |
+| Live-Assist/Automation-Umschaltung, Mikrofon mit Ducking | ✅ Web-DJ | ✅ | ✅ | ✅ | ✅ Manuell/24-7-AutoDJ, 🎙 Mikro |
+| Cartwall | 🟡 (über Playlisten) | ✅ | ✅ | ✅ | ✅ 12 Carts, Gruppen |
+| **Voice Tracking** (Moderationslink zwischen zwei Titeln aufnehmen) | ✗ | ✅ | 🟡 (Plugin) | ✅ | ✅ 🎙 an der Queue |
+| Hörer-Wünsche/-Charts über eine öffentliche Seite | ✅ | ✗ | 🟡 (eigener Webserver nötig) | ✅ (10 Min. Verzögerung) | ✅ Hörerbereich, ohne feste Verzögerung |
+| Mehrere Sender/Stationen in einer Installation | ✅ | 🟡 (Multi-Instance) | ✗ | ✗ | ✅ |
+| Rollenbasierte Benutzerverwaltung | ✅ | 🟡 (Windows-Konten) | 🟡 (ein Admin-Login) | 🟡 | ✅ |
+| Web-Oberfläche (kein Windows nötig) | ✅ | ✗ (Windows) | ✗ (Windows) | ✗ (Windows) | ✅ (plus eigenständiges Windows-/Android-Programm) |
+| Remote-Relays / mehrere Ausgänge gleichzeitig | ✅ | 🟡 | 🟡 (externer Encoder) | ✅ | ✅ Ausgänge mit Priorität |
+| Webhooks/Integrationen | ✅ Slack/Discord/TuneIn | 🟡 (REST/Skripte) | ✗ | ✗ | ✅ signierte Webhooks, Telegram |
+| Sound-Prozessor (EQ/Kompressor/Lautheit) | 🟡 (Liquidsoap-Filter) | ✅ (VST/Winamp-Plugins) | ✅ (Plugin) | ✅ 5-Band | ✅ 10-Band-EQ, Multiband, EBU-R128-Lautheitsangleich pro Titel |
+| Podcast-/RSS-Hosting (Episoden, Feed) | ✅ | ✗ | 🟡 | ✗ | ⏳ geplant |
+| Erweiterte Playlisten mit eigenem Skript (Liquidsoap von Hand) | ✅ „Advanced Playlist“ | ✗ | ✗ | ✗ | ⏳ nicht geplant (AirDeck bleibt ohne Skriptsprache bedienbar) |
+| Fernsteuerung professioneller Misch­pulte (DHD, Lawo, Studer, Axia, Ember+) | ✗ | ✅ | ✗ | ✗ | ✗ bewusst nicht: Hardware-spezifisch, sehr kleine Zielgruppe |
+| MusicMaster-Anbindung (externe Musikplanung) | ✗ | ✅ | ✗ | ✗ | ✗ nicht geplant: eigene Rotation/Sendeuhr deckt den Bedarf |
+| Monetarisierung (Musikverkauf, Werbe-/Merch-Links) | ✗ | ✗ | ✗ | ✅ | ✗ nicht AirDecks Zweck (Hobbyprojekt, ohne Gewähr) |
+
+**Einordnung:** Bei Kern-Playout, Lautheit/DSP, Mehr-Sender-Betrieb und Hörer-Interaktion liegt AirDeck vor allen vier
+Vergleichssystemen. Die einzige verbliebene, wirklich genutzte Lücke war Voice Tracking – jetzt umgesetzt (siehe
+oben). Podcast-/RSS-Hosting ist die einzige noch offene, tatsächlich nachgefragte Funktion (AzuraCast bietet sie);
+alles andere in der Tabelle ist entweder Nischenhardware, eine externe Abhängigkeit, die AirDecks Ziel
+„läuft komplett lokal, ohne Zusatzsoftware“ widerspräche, oder außerhalb des Projektzwecks.

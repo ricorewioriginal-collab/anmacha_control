@@ -34,13 +34,15 @@
 - [x] **Windows-Programm AirDeck.exe:** eigenes Fenster (WebView2, kein Edge-App-Modus mehr), natives Tray-Symbol, startet/überwacht die Engine (`airdeck-engine.exe`), Fenster zu = Sendung läuft weiter
 - [x] **Android Handy-Sender:** eigene Engine in reinem Java (Mischpult mit Ducking, LAME-MP3 als Java, Icecast-Quelle PUT/SOURCE), sendet direkt zu laut.fm/Icecast ohne AirDeck-Server, auch bei ausgeschaltetem Bildschirm (Vordergrund-Dienst); Engine-Tests gegen echten Icecast in CI
 - [x] **Schritt 7 – Linux-Paket:** `AirDeck-Linux.deb` (Debian/Ubuntu, systemd-Dienst `airdeck-server`, eigener Benutzer, Daten unter `/var/lib/airdeck`, Neustart aus dem Programm über `RestartForceExitStatus=75`); CI installiert, startet, löst einen echten Neustart über die API aus und entfernt es wieder (Daten bleiben erhalten)
+- [x] **Voice Tracking:** Moderationslink direkt in der Queue aufnehmen (🎙 an einem Eintrag → aufnehmen → anhören → einfügen), landet als eigener Titel exakt zwischen den beiden Nachbartiteln, spielt wie jeder andere Titel ab (Idee aus mAirList/SAM Broadcaster, siehe docs/FEATURE_PARITY.md)
+- [x] **Funktionsabgleich AzuraCast/mAirList/RadioDJ/SAM Broadcaster:** docs/FEATURE_PARITY.md um die drei proprietären Systeme und AzuraCast ergänzt; AirDecks DSP-Kette (10-Band-EQ/Multiband/EBU-R128) und Track-Kategorien liegen bereits über allen vieren, echte Lücken (Podcast/RSS-Hosting, Skript-Playlists, Hardware-Mischpult-Fernsteuerung) sind bewusst zurückgestellt bzw. nicht geplant
 
 ## Nächste Schritte (Vorschlag, in dieser Reihenfolge)
 
 1. Windows-Installer (Startmenü-Verknüpfung) und signierte Release-APK (Keystore als GitHub-Secret)
 2. **Encoder-Health serverseitig:** Stilleerkennung auf dem Relay-Stream und Metadata-Freshness.
 3. **Monitoring-Panel:** Bitrate, Codec, letzter Takeover, Fallback-Status, Audit-Ansicht im Studio.
-4. **Sendeplan und Events** (zeitgesteuerte Shows, Uhr pro Stunde/Wochentag), Voice Tracking.
+4. **Sendeplan und Events** (zeitgesteuerte Shows, Uhr pro Stunde/Wochentag).
 5. **DSP-Kette erweitern:** EQ, Kompressor/Multiband, AGC, echte LUFS-Messung.
 6. **Webhooks (signiert), Plugin-Manifest, Sandbox**, dazu das WordPress-Plugin.
 7. **AI-Schicht** (Provider-Abstraktion, TTS-Cache, AI Director). AI darf nie Single Point of Failure sein.

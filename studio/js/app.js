@@ -1083,7 +1083,9 @@ function renderQueue() {
       h('td', { class: 'num muted' }, q.known === false ? '~' + clockTime(q.startsAt) : clockTime(q.startsAt)),
       h('td', {}, mediaTitle(q.media), ' ', q.origin === 'clock' ? h('span', { class: 'tag' }, 'Uhr') : null),
       h('td', { class: 'num' }, fmt(q.media?.durationMs)),
-      h('td', { class: 'act' }, h('button', { title: 'Entfernen', onclick: () => run(() => api.del(url(`/queue/${encodeURIComponent(q.uid)}`))) }, '✕')),
+      h('td', { class: 'act' },
+        h('button', { title: 'Voicetrack davor aufnehmen (Moderationslink)', onclick: () => voicetrack(i, q) }, '🎙'),
+        h('button', { title: 'Entfernen', onclick: () => run(() => api.del(url(`/queue/${encodeURIComponent(q.uid)}`))) }, '✕')),
     );
     dropTarget(row, (dt) => queueDrop(dt, i), true);
     return row;
@@ -1096,6 +1098,115 @@ async function queueDrop(dt, index) {
   if (uid) return run(() => api.post(url(`/queue/${encodeURIComponent(uid)}/move`), { index }));
   const list = await dropMedia(dt);
   for (const [i, m] of list.entries()) await run(() => api.post(url('/queue'), { mediaId: m.id, index: index + i }));
+}
+
+/**
+ * Voicetrack: einen Moderationslink zwischen zwei Titeln aufnehmen und an dieser Stelle in die
+ * Queue einfügen (wie mAirLists Voice Track Recorder bzw. SAM Broadcasters Voice Tracking).
+ * @param {number} index Position in der Queue, vor der aufgenommen wird @param {any} q Titel an dieser Position
+ */
+async function voicetrack(index, q) {
+  const items = S.queue.items ?? [];
+  const prevMedia = index > 0 ? items[index - 1].media : (S.libById.get(S.playout?.status?.current?.mediaId) ?? S.nowPlaying?.media);
+  const dlg = /** @type {HTMLDialogElement} */ ($('dialog'));
+  const form = /** @type {HTMLFormElement} */ ($('dialog-form'));
+
+  /** @type {MediaStream|null} */ let stream = null;
+  /** @type {MediaRecorder|null} */ let rec = null;
+  /** @type {Blob[]} */ let chunks = [];
+  /** @type {Blob|null} */ let blob = null;
+  /** @type {number} */ let raf = 0;
+
+  const timeEl = h('span', { class: 'muted' }, '0:00');
+  const meterBar = h('i');
+  const dot = h('span', { class: 'rec-dot', hidden: true });
+  const audioPreview = /** @type {HTMLAudioElement} */ (h('audio', { controls: true, hidden: true, style: 'width:100%;margin-top:8px' }));
+  const recBtn = /** @type {HTMLButtonElement} */ (h('button', { type: 'button', class: 'btn primary' }, '⏺ Aufnehmen'));
+  const saveBtn = /** @type {HTMLButtonElement} */ (h('button', { class: 'btn primary', value: 'ok', disabled: true }, 'In die Queue einfügen'));
+
+  const cleanup = () => {
+    if (raf) cancelAnimationFrame(raf);
+    raf = 0;
+    if (rec && rec.state !== 'inactive') {
+      rec.ondataavailable = null;
+      rec.onstop = null;
+      try { rec.stop(); } catch {}
+    }
+    for (const t of stream?.getTracks() ?? []) t.stop();
+    stream = null;
+  };
+
+  recBtn.onclick = async () => {
+    if (rec?.state === 'recording') return void rec.stop();
+    try {
+      stream = await openMic();
+    } catch (e) {
+      return void status(`Mikrofon nicht verfügbar: ${e instanceof Error ? e.message : e}`, true);
+    }
+    chunks = [];
+    const type = ['audio/webm;codecs=opus', 'audio/ogg;codecs=opus', 'audio/mp4'].find((t) => MediaRecorder.isTypeSupported(t)) ?? '';
+    rec = new MediaRecorder(stream, type ? { mimeType: type } : undefined);
+    rec.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
+    const ctx = new AudioContext();
+    const analyser = ctx.createAnalyser();
+    analyser.fftSize = 1024;
+    ctx.createMediaStreamSource(stream).connect(analyser);
+    const buf = new Float32Array(analyser.fftSize);
+    const startedAt = Date.now();
+    const tick = () => {
+      analyser.getFloatTimeDomainData(buf);
+      let sum = 0;
+      for (const v of buf) sum += v * v;
+      const db = 20 * Math.log10(Math.sqrt(sum / buf.length) || 1e-9);
+      meterBar.style.width = `${Math.max(0, Math.min(100, ((db + 60) / 60) * 100))}%`;
+      timeEl.textContent = fmt(Date.now() - startedAt);
+      raf = requestAnimationFrame(tick);
+    };
+    rec.onstop = () => {
+      if (raf) cancelAnimationFrame(raf);
+      raf = 0;
+      ctx.close().catch(() => {});
+      for (const t of stream?.getTracks() ?? []) t.stop();
+      stream = null;
+      blob = new Blob(chunks, { type: rec?.mimeType || 'audio/webm' });
+      audioPreview.src = URL.createObjectURL(blob);
+      audioPreview.hidden = false;
+      recBtn.textContent = '⏺ Neu aufnehmen';
+      dot.hidden = true;
+      saveBtn.disabled = false;
+    };
+    rec.start();
+    tick();
+    recBtn.textContent = '⏹ Stopp';
+    dot.hidden = false;
+    audioPreview.hidden = true;
+    saveBtn.disabled = true;
+  };
+
+  form.replaceChildren(
+    h('h3', {}, 'Voicetrack aufnehmen'),
+    h('p', { class: 'muted', style: 'margin:0 0 10px' }, prevMedia ? `Nach „${mediaTitle(prevMedia)}“` : 'Als erster Titel', ' · vor „', mediaTitle(q.media), '“'),
+    h('div', { style: 'display:flex;align-items:center;gap:10px' }, recBtn, dot, timeEl),
+    h('div', { class: 'field', style: 'margin-top:8px' }, h('div', { class: 'meter' }, meterBar)),
+    audioPreview,
+    h('div', { class: 'dialog-actions' },
+      h('button', { class: 'btn', value: 'cancel', formnovalidate: true }, 'Abbrechen'),
+      saveBtn),
+  );
+
+  const ok = await new Promise((resolve) => {
+    dlg.onclose = () => resolve(dlg.returnValue === 'ok');
+    dlg.returnValue = '';
+    dlg.showModal();
+  });
+  cleanup();
+  if (!ok || !blob) return;
+  const name = `Voicetrack ${new Date().toISOString().replace(/[:.]/g, '-')}.webm`;
+  const media = await run(() => api.req('PUT', url(`/media?name=${encodeURIComponent(name)}&category=voice_track`), blob, { 'Content-Type': blob.type || 'audio/webm' }));
+  if (!media) return;
+  S.libById.set(media.id, media);
+  await run(() => api.post(url('/queue'), { mediaId: media.id, index }));
+  status('Voicetrack in die Queue eingefügt');
 }
 
 // ---------- Render: Quellen / Ausgänge / Now Playing ----------
