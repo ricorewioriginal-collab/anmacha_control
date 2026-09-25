@@ -66,6 +66,24 @@ function applyCors(req: IncomingMessage, res: ServerResponse): boolean {
   return true;
 }
 
+/**
+ * Bedienung im laufenden Sendebetrieb – bleibt auch bei ausgefallener Datenbank möglich
+ * (die Änderungen liegen im Speicher und werden nachgeschrieben, sobald die Datenbank wieder antwortet).
+ */
+export const ON_AIR_OPS = new RegExp('^/api/v1/(?:' + [
+  'stations/[^/]+/sources/[^/]+/(?:chunks|health|release|takeover)',
+  'stations/[^/]+/playout/(?:mic|skip|start|stop)',
+  'stations/[^/]+/(?:decks/[^/]+|now-playing|metadata)',
+  'stations/[^/]+/queue(?:/.*)?',
+  'stations/[^/]+/(?:cardwall/[^/]+/trigger|quick/[^/]+)',
+  'stations/[^/]+/(?:playlists/[^/]+/play|clock-events/[^/]+/fire)',
+  'stations/[^/]+/recorder/(?:start|stop)',
+  'stations/[^/]+/ai/pending/[^/]+/(?:approve|reject)',
+  'bridge/stations/[^/]+/now-playing',
+  'auth/logout',
+  'system/shutdown',
+].join('|') + ')$');
+
 export function createHttpServer(app: AirDeckApp, studioDir: string): Server {
   const routes: Route[] = [];
   const add = (method: string, path: string, scope: string | null, handler: Handler) => {
@@ -673,6 +691,11 @@ export function createHttpServer(app: AirDeckApp, studioDir: string): Server {
     }
     if (route.scope && !AirDeckApp.hasScope(p, route.scope)) return json(res, 403, { error: 'insufficient_scope', scope: route.scope });
     if (!route.re.source.includes('chunks') && !allow(p.tokenId)) return json(res, 429, { error: 'rate_limited' });
+    // Datenbank ausgefallen: Sendebetrieb läuft aus dem Speicher weiter, Konfigurationsänderungen werden abgelehnt
+    if (req.method !== 'GET' && req.method !== 'HEAD' && app.docs.status().state === 'error' && !ON_AIR_OPS.test(path)) {
+      res.setHeader('Retry-After', '15');
+      return json(res, 503, { error: 'database_unavailable', message: `Datenbank nicht erreichbar – Änderungen an der Konfiguration sind gerade nicht möglich. Der Sendebetrieb läuft weiter. (${app.docs.status().lastError ?? ''})` });
+    }
 
     const m = route.re.exec(path)!;
     const params: Params = {};

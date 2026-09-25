@@ -156,3 +156,53 @@ test('postgres: Passwort getrennt von der Adresse (AIRDECK_DB_PASSWORD)', { skip
     await db.close();
   }
 });
+
+test('Datenbank ausgefallen: Konfiguration → 503, Sendebetrieb bleibt bedienbar', async () => {
+  const { AirDeckApp } = await import('../src/server/app.ts');
+  const { createHttpServer, ON_AIR_OPS } = await import('../src/server/http.ts');
+  const dir = mkdtempSync(join(tmpdir(), 'airdeck-db-'));
+  const app = new AirDeckApp(dir, { stableMs: 0, ffmpeg: null });
+  const server = createHttpServer(app, join(import.meta.dirname, '../studio'));
+  await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
+  const base = `http://127.0.0.1:${(server.address() as { port: number }).port}/api/v1`;
+  const { token } = app.svc.auth.createToken({ name: 't', scopes: ['*'], roles: ['admin'], stationIds: ['*'] });
+  const call = (method: string, path: string, body?: unknown) => fetch(base + path, { method, headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
+  const store = app.docs as DbDocStore;
+  const orig = store.db.transaction.bind(store.db);
+  let down = true;
+  store.db.transaction = (async (fn: never) => {
+    if (down) throw new Error('Verbindung verloren');
+    return orig(fn);
+  }) as typeof store.db.transaction;
+  const syncTx = store.db.sync!.transaction;
+  store.db.sync!.transaction = ((fn: () => unknown) => {
+    if (down) throw new Error('Verbindung verloren');
+    return syncTx(fn);
+  }) as typeof syncTx;
+  try {
+    app.svc.stations.updateStation('main', { name: 'Vor dem Ausfall' });
+    await store.flush().catch(() => {});
+    assert.equal(store.status().state, 'error');
+
+    const cfg = await call('POST', '/stations', { id: 'neu', name: 'Neu' });
+    assert.equal(cfg.status, 503);
+    assert.equal(((await cfg.json()) as { error: string }).error, 'database_unavailable');
+    assert.equal(cfg.headers.get('retry-after'), '15');
+    // Lesen und Sendebetrieb gehen weiter
+    assert.equal((await call('GET', '/stations')).status, 200);
+    assert.ok((await call('POST', '/stations/main/queue/shuffle')).ok);
+    assert.ok(ON_AIR_OPS.test('/api/v1/stations/main/sources/src_1/takeover'));
+    assert.ok(!ON_AIR_OPS.test('/api/v1/stations/main/sources/src_1/password'));
+
+    // Datenbank wieder da → nachgeschrieben, Konfiguration wieder möglich
+    down = false;
+    await store.flush();
+    assert.equal(store.status().state, 'ok');
+    assert.equal((await call('POST', '/stations', { id: 'neu', name: 'Neu' })).status, 200);
+  } finally {
+    app.shutdown();
+    server.closeAllConnections();
+    server.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

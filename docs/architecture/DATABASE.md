@@ -103,7 +103,7 @@ Fällt die Datenbank aus:
 - Der Core sendet mit dem Stand im Speicher weiter.
 - Schreibende Aktionen antworten mit `503 database_unavailable` und einer klaren Meldung.
 - Das Schreiben wird mit wachsendem Abstand (2 s bis 60 s) wiederholt, bis die Datenbank wieder antwortet. Beim Wechsel zwischen Ausfall und Normalbetrieb kommt ein `DATABASE_STATUS_CHANGED`-Ereignis.
-- *Noch offen:* schreibende API-Aufrufe antworten heute trotz Ausfall normal (die Änderung liegt im Speicher und wird nachgeholt). Die Antwort `503 database_unavailable` kommt mit Schritt 3.
+- Konfigurationsänderungen antworten mit `503 database_unavailable` (mit `Retry-After`). Bedienung im Sendebetrieb bleibt möglich: Übernahme/Freigabe von Quellen, Playout, Queue, Cartwall, Schnelltrigger, Titelanzeige, Mitschnitt, Freigabe von KI-Beiträgen, Abmelden (Liste `ON_AIR_OPS` in `http.ts`). Diese Änderungen liegen im Speicher und werden nachgeschrieben.
 
 ## Tests
 

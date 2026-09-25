@@ -20,7 +20,9 @@ Voraussetzungen: Node.js ≥ 22.18, ffmpeg im PATH (für die Server-Automation).
 | Teil | Ort | Hinweise |
 |---|---|---|
 | Kern (Logik ohne I/O) | `src/core/` | Quellen-Priorität, Queue/Sendeuhr/Rotation, Sendeplan, PCM-Mixer, rein und gut testbar |
-| Server | `src/server/` | `app.ts` (Zustand, maßgeblich), `http.ts` (REST + SSE), `playout.ts` (ffmpeg), Adapter wie `lautfm.ts`, `nextcloud.ts`, `ai/` |
+| Server-Kern | `src/server/` | `app.ts` (Sendekern: Sender-Laufzeit, Quellen, Relay, Ausgänge, Queue, Playout), `model.ts` (Typen), `http.ts` (REST + SSE), `playout.ts` (ffmpeg), Adapter wie `lautfm.ts`, `nextcloud.ts`, `ai/` |
+| Dienste | `src/server/services/` | ein Modul je Fachgebiet (`stations`, `media`, `planning`, `recorder`, `auth`, `bridges`, `status`, `notifications`, `lautfm`, `nextcloud`, `ai`, `system`), erreichbar als `app.svc.<dienst>` – neue Funktionen gehören hierher, nicht in `app.ts` |
+| Datenhaltung | `src/server/db/`, `src/server/repo/` | Datenbanken (SQLite, PostgreSQL, MySQL/MariaDB), Migrationen, Abbildung auf Tabellen – kein SQL außerhalb davon |
 | Studio | `studio/` | Vanilla-JS-Module mit `// @ts-check`, ohne Build-Schritt; jede Ansicht ist ein Modul `mountXyz(root, ctx)` |
 | Windows/Android | `scripts/build.mjs`, `packaging/windows/`, `apps/android/` | Node-SEA-Exe + Inno Setup, Capacitor |
 | Tests | `test/*.test.ts` | `node:test`; externe Dienste werden mit lokalen Mock-Servern getestet |

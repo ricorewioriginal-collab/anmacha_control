@@ -141,7 +141,7 @@ Die bisherigen Namen (`playout.state` usw.) bleiben eine Version lang als Alias 
 
 1. Konfigurations- und Pfadmodell, Betriebsart, Health-/Dependency-Manager – **umgesetzt** (`src/server/config.ts`, `src/server/health.ts`)
 2. Datenbankschicht mit SQLite und Migration der JSON-Daten, dann PostgreSQL, MariaDB/MySQL, CI-Matrix – **umgesetzt** (`src/server/db/`, `src/server/repo/`)
-3. Aufteilung von `app.ts` in Dienstmodule auf Repositories
+3. Aufteilung von `app.ts` in Dienstmodule auf Repositories – **umgesetzt** (`src/server/services/`, `app.ts` von 2 776 auf rund 1 000 Zeilen; der Sendekern folgt mit Schritt 4)
 4. Audio-Engine für alle Quellen und Mode-Manager (AUTO/MANUAL/LIVE/EMERGENCY)
 5. Serververbindung: Erkennung, Verbindungstest, Profile, Versionsprüfung, Kopplung, Admin-Konto auch lokal
 6. Setup-Assistent (erster Start)
