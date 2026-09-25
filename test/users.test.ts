@@ -6,6 +6,9 @@ import { join } from 'node:path';
 import { AirDeckApp } from '../src/server/app.ts';
 import { createHttpServer } from '../src/server/http.ts';
 import { UserStore, hashPassword, verifyPassword } from '../src/server/users.ts';
+import { storedText } from './helpers.ts';
+import { openSqliteSync } from '../src/server/db/index.ts';
+import { DbDocStore } from '../src/server/repo/docs.ts';
 
 test('Passwörter werden mit scrypt gesalzen gespeichert und geprüft', async () => {
   const h1 = await hashPassword('Geheim-Passwort1');
@@ -31,7 +34,7 @@ test('Benutzerverwaltung: Login/Logout, Rollen, Passwortwechsel, Sperre, letzter
   try {
     assert.deepEqual((await call('GET', '/auth/status')).body, { users: false });
     await app.users.create({ username: 'Chef', password: 'Start-Passwort1', roles: ['admin'], mustChangePassword: true });
-    assert.ok(!readFileSync(join(dir, 'users.json'), 'utf8').includes('Start-Passwort1'), 'kein Klartext');
+    assert.ok(!storedText(app).includes('Start-Passwort1'), 'kein Klartext');
 
     assert.equal((await call('POST', '/auth/login', { username: 'chef', password: 'falsch' })).status, 401);
     const login = await call('POST', '/auth/login', { username: 'CHEF', password: 'Start-Passwort1' });
@@ -77,8 +80,11 @@ test('Benutzerverwaltung: Login/Logout, Rollen, Passwortwechsel, Sperre, letzter
     assert.equal(locked.status, 429);
 
     // Sitzungen überleben einen Neustart (nur als Hash gespeichert)
-    const store = new UserStore(dir);
+    app.docs.flushSync();
+    const db = openSqliteSync(join(dir, 'airdeck.db'));
+    const store = new UserStore(dir, DbDocStore.openSync(db));
     assert.equal(store.count, 2);
+    await db.close();
   } finally {
     app.shutdown();
     server.close();

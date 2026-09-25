@@ -1,8 +1,7 @@
 // KI-Dienst: Provider-Verwaltung (Keys verschlüsselt), Primär/Fallback, Kosten- und Budgetkontrolle.
 // Preise werden NICHT vorgegeben – sie trägt der Betreiber pro Modell ein. Ohne Preis wird nur gezählt.
 
-import { join } from 'node:path';
-import { DebouncedJson, readJson, writeFileAtomic } from '../store.ts';
+import { FileDocStore, type DocStore } from '../repo/docs.ts';
 import { AiError, TEXT_KINDS, VOICE_KINDS, chat, listModels, listVoices, speak, type ChatResult, type ProviderConfig, type SpeechResult } from './providers.ts';
 
 export interface Pricing {
@@ -84,22 +83,20 @@ const ID = /^[a-z0-9][a-z0-9_-]{0,39}$/;
 type Fetch = typeof fetch;
 
 export class AiService {
-  private readonly file: string;
+  private readonly docs: DocStore;
   private settings: AiSettings;
   private readonly usage: UsageState;
-  private readonly usageStore: DebouncedJson<UsageState>;
   private readonly getKey: (ref: string) => string | undefined;
   private readonly setKey: (ref: string, value: string | null) => void;
   private readonly log: (event: string, data: Record<string, unknown>) => void;
   private readonly softWarned = new Set<string>();
   fetchFn: Fetch;
 
-  constructor(dataDir: string, keys: { get: (ref: string) => string | undefined; set: (ref: string, value: string | null) => void }, log: (event: string, data: Record<string, unknown>) => void, fetchFn: Fetch = fetch) {
-    this.file = join(dataDir, 'ai.json');
-    this.settings = { providers: [], pricing: [], budgets: { providers: {}, stations: {} }, currency: 'EUR', ...readJson<Partial<AiSettings>>(this.file, {}) };
-    const uFile = join(dataDir, 'ai-usage.json');
-    this.usage = { month: month(), byProvider: {}, byStation: {}, recent: [], ...readJson<Partial<UsageState>>(uFile, {}) };
-    this.usageStore = new DebouncedJson(uFile, () => this.usage, 2000);
+  constructor(dataDir: string, keys: { get: (ref: string) => string | undefined; set: (ref: string, value: string | null) => void }, log: (event: string, data: Record<string, unknown>) => void, fetchFn: Fetch = fetch, docs: DocStore = new FileDocStore(dataDir)) {
+    this.docs = docs;
+    this.settings = { providers: [], pricing: [], budgets: { providers: {}, stations: {} }, currency: 'EUR', ...docs.get<Partial<AiSettings>>('ai', {}) };
+    this.usage = { month: month(), byProvider: {}, byStation: {}, recent: [], ...docs.get<Partial<UsageState>>('ai-usage', {}) };
+    docs.bind('ai-usage', () => this.usage);
     this.getKey = keys.get;
     this.setKey = keys.set;
     this.log = log;
@@ -107,7 +104,7 @@ export class AiService {
   }
 
   flush(): void {
-    this.usageStore.flush();
+    this.docs.flushSync();
   }
 
   // ---------- Einstellungen ----------
@@ -168,7 +165,7 @@ export class AiService {
     if (typeof input.currency === 'string' && /^[A-Z]{3}$/.test(input.currency)) next.currency = input.currency;
     for (const [ref, v] of keyOps) this.setKey(ref, v);
     this.settings = next;
-    writeFileAtomic(this.file, JSON.stringify(next, null, 1));
+    this.docs.set('ai', next);
     return this.view();
   }
 
@@ -225,7 +222,7 @@ export class AiService {
     }
     this.usage.recent.unshift(e);
     if (this.usage.recent.length > 200) this.usage.recent.length = 200;
-    this.usageStore.schedule();
+    this.docs.touch('ai-usage');
   }
 
   usageView(): unknown {

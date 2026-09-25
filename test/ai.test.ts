@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { AirDeckApp } from '../src/server/app.ts';
 import { cleanSpeech, parseFeed, parsePicks } from '../src/server/ai/director.ts';
 import { chat } from '../src/server/ai/providers.ts';
+import { storedText } from './helpers.ts';
 
 let mock: Server;
 let base: string;
@@ -101,7 +102,7 @@ test('KI-Automation: Moderation, Fallback, Kosten, Budget, Freigabe, Musikplanun
       pricing: [{ providerId: 'primary', model: 'mock-large', inPerM: 2, outPerM: 10 }],
     }) as { providers: { hasKey: boolean }[] };
     assert.equal(view.providers[0]!.hasKey, true);
-    assert.ok(!readFileSync(join(dir, 'ai.json'), 'utf8').includes('sk-geheim-1'), 'Key nie im Klartext in ai.json');
+    assert.ok(!storedText(app).includes('sk-geheim-1'), 'Key nie im Klartext gespeichert');
     assert.deepEqual(await app.ai.models('primary'), ['mock-large', 'mock-small']);
     assert.throws(() => app.ai.update({ providers: [{ id: 'y', role: 'voice', kind: 'google' }] }), /passt nicht/);
 

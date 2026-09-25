@@ -65,21 +65,47 @@ Die Dialektunterschiede sind klein und liegen in einer Hilfsschicht:
 
 ## Migrationen
 
-- Dateien `migrations/NNN_name.<dialekt>.sql`, zum Beispiel `001_initial`, `002_media_loudness` usw.
-- `meta.schema_version` hält den Stand. Ausgeführt wird beim Serverstart oder mit `airdeck migrate`.
-- **Vor jeder Migration** entsteht automatisch eine Sicherung (siehe [STORAGE](STORAGE.md)). Schlägt die Migration fehl, wird die Transaktion zurückgerollt. Wo das nicht geht (DDL bei MySQL), wird die Sicherung wiederhergestellt.
-- **Übernahme der bisherigen JSON-Daten:** Migration `000_import_json` liest `airdeck.json`, `tokens.json`, `users.json` usw. einmalig ein und benennt die Dateien in `*.imported` um. Nichts wird gelöscht.
+- Die Migrationen stehen im Programm (`src/server/db/schema.ts`), nicht in losen SQL-Dateien. Tabellen werden einmal beschrieben, daraus entsteht die DDL je Dialekt. Das Windows-Einzelprogramm braucht so keine zusätzlichen Dateien, und es gibt keine drei Fassungen derselben Migration.
+- `meta.schema_version` hält den Stand. Ausgeführt wird beim Serverstart. Kennt das Programm ein neueres Schema nicht, startet es nicht und meldet „Bitte AirDeck aktualisieren“.
+- Jede Migration läuft in einer Transaktion (SQLite, PostgreSQL). Bei MySQL/MariaDB ist DDL nicht transaktional. Die automatische Sicherung vor jeder Migration kommt mit Backup/Restore (ARCHITECTURE §9, Schritt 9).
+- **Übernahme der bisherigen JSON-Daten:** Beim Start werden `airdeck.json`, `tokens.json`, `users.json`, `sessions.json`, `ai.json`, `ai-usage.json`, `update.json`, `nextcloud.json` und `bridge-keys.json` eingelesen und in `*.imported` umbenannt. Nichts wird gelöscht. Defekte Dateien werden gesichert (`*.corrupt-<zeit>`) und übersprungen.
+- `network.json` und `airdeck.conf` bleiben Dateien: Sie werden gebraucht, bevor die Datenbank offen ist.
+
+## Umsetzung (Stand)
+
+| Baustein | Datei |
+|---|---|
+| Schnittstelle, SQLite, PostgreSQL, MySQL/MariaDB | `src/server/db/types.ts`, `sqlite.ts`, `postgres.ts`, `mysql.ts` |
+| Schema, Migrationen, SQL-Hilfen (Upsert, Löschen je Dialekt) | `src/server/db/schema.ts` |
+| Öffnen nach `airdeck.conf` / Umgebung | `src/server/db/index.ts` |
+| Dokumente ↔ Tabellen, Schreiben nur geänderter Zeilen, Wiederholung bei Ausfall, JSON-Übernahme | `src/server/repo/docs.ts`, `mappings.ts` |
+
+Der laufende Zustand liegt weiter im Speicher (der Core sendet auch ohne Datenbank weiter). Gespeichert wird entprellt: Je Tabelle werden nur neue, geänderte und gelöschte Zeilen geschrieben (Vergleich über Prüfsummen). Die Aufteilung von `app.ts` in Dienste mit eigenen Repositories ist Schritt 3.
+
+Tabellen der ersten Fassung: `meta`, `stations`, `sources`, `outputs`, `media`, `playlists`, `playlist_items`, `queue_items`, `clock_templates`, `clock_events`, `program_plans`, `jobs`, `recording_plans`, `recordings`, `play_log`, `settings`, `users`, `sessions`, `api_tokens`, `bridge_keys`, `ai_usage`. Die Tabellen `devices`, `audit_log` und `sync_changes` kommen mit den Funktionen, die sie brauchen (Kopplung, Revisionsprotokoll in der Datenbank, Hybrid-Sync), und nicht vorher leer.
+
+## Einrichtung
+
+```ini
+# airdeck.conf
+[database]
+provider = postgres          # sqlite (Standard) · postgres · mysql (auch MariaDB)
+url = postgres://airdeck@localhost:5432/airdeck
+```
+
+Das Passwort gehört in die Umgebungsvariable `AIRDECK_DB_PASSWORD`, nicht in die Datei. Alternativ gehen `AIRDECK_DB` und `AIRDECK_DB_URL`. Server-Datenbanken, die beim Start noch nicht bereit sind (Container), werden bis zu einer Minute lang erneut versucht.
 
 ## Health
 
-`GET /api/v1/database` liefert zum Beispiel: `{ engine: "PostgreSQL", version: "17.2", database: "airdeck", latencyMs: 3, schema: 7, ok: true }`. Das Studio zeigt die Werte unter Administration → Datenbank.
+`GET /api/v1/database` liefert zum Beispiel: `{ provider: "postgres", engine: "PostgreSQL", version: "17.2", latencyMs: 3, schema: 1, ok: true, pending: 0 }`. Das Studio zeigt den Zustand unter System → Zustand.
 
 Fällt die Datenbank aus:
 - Der Core sendet mit dem Stand im Speicher weiter.
 - Schreibende Aktionen antworten mit `503 database_unavailable` und einer klaren Meldung.
-- Die Verbindung wird mit Backoff neu aufgebaut, dazu kommt ein `DATABASE_STATUS_CHANGED`-Ereignis.
+- Das Schreiben wird mit wachsendem Abstand (2 s bis 60 s) wiederholt, bis die Datenbank wieder antwortet. Beim Wechsel zwischen Ausfall und Normalbetrieb kommt ein `DATABASE_STATUS_CHANGED`-Ereignis.
+- *Noch offen:* schreibende API-Aufrufe antworten heute trotz Ausfall normal (die Änderung liegt im Speicher und wird nachgeholt). Die Antwort `503 database_unavailable` kommt mit Schritt 3.
 
 ## Tests
 
-- In der CI laufen dieselben Repository-Tests gegen **SQLite, PostgreSQL, MariaDB und MySQL** (Service-Container).
+- In der CI laufen dieselben Tests gegen **SQLite, PostgreSQL 17, MariaDB 11 und MySQL 8.4** (Service-Container, `test/db.test.ts`). Lokal geprüft zusätzlich mit PostgreSQL 16 und MariaDB 10.11.
 - Kein Provider gilt als unterstützt, bevor er diese Tests besteht.

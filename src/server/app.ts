@@ -35,7 +35,10 @@ import {
 } from '../core/automation.ts';
 
 const AUDIO_FILE_RE = /\.(mp3|ogg|opus|wav|flac|m4a|aac|webm)$/i;
-import { AuditLog, DebouncedJson, readJson, writeFileAtomic } from './store.ts';
+import { AuditLog, readJson, writeFileAtomic } from './store.ts';
+import { DbDocStore, importJsonFilesSync, type DocStore } from './repo/docs.ts';
+import { openSqliteSync } from './db/index.ts';
+import { SCHEMA_VERSION } from './db/schema.ts';
 import { SecretStore } from './secrets.ts';
 import { IcecastOutput, type BroadcastOutput, type OutputConfig, type OutputState } from './icecast.ts';
 import { ShoutcastOutput } from './shoutcast.ts';
@@ -257,9 +260,11 @@ export class AirDeckApp {
   private readonly notifier: Notifier;
   private readonly lastOutStatus = new Map<string, string>();
   private readonly subscribers = new Set<(e: HubEvent) => void>();
-  private readonly persist: DebouncedJson<PersistedState>;
+  /** Datenhaltung: Datenbank (Standard SQLite im Datenordner) */
+  readonly docs: DocStore;
+  /** von der App selbst geöffnete Datenbank (wird beim Beenden geschlossen) */
+  private readonly ownDb: { close(): Promise<void> } | null;
   private tokens: ApiToken[];
-  private readonly tokensFile: string;
   private tickTimer: NodeJS.Timeout | null = null;
   private levelTimer: NodeJS.Timeout | null = null;
 
@@ -277,8 +282,19 @@ export class AirDeckApp {
   requestShutdown: (() => void) | null = null;
   listenPort = 8750;
 
-  constructor(dataDir: string, opts: { stableMs?: number; cooldownMs?: number; appRoot?: string; ffmpeg?: FfmpegInfo | null; secrets?: SecretStore; sync?: SyncManager; build?: string; packaged?: boolean; headless?: boolean; config?: AirDeckConfig; ffmpegRetryS?: number[] } = {}) {
+  constructor(dataDir: string, opts: { stableMs?: number; cooldownMs?: number; appRoot?: string; ffmpeg?: FfmpegInfo | null; secrets?: SecretStore; sync?: SyncManager; build?: string; packaged?: boolean; headless?: boolean; config?: AirDeckConfig; ffmpegRetryS?: number[]; docs?: DocStore } = {}) {
     this.dataDir = dataDir;
+    if (opts.docs) {
+      this.docs = opts.docs;
+      this.ownDb = null;
+    } else {
+      // ohne Vorgabe (Tests, Hilfsinstanzen): SQLite im Datenordner, bisherige JSON-Dateien werden übernommen
+      const db = openSqliteSync(join(dataDir, 'airdeck.db'));
+      const store = DbDocStore.openSync(db);
+      importJsonFilesSync(dataDir, store);
+      this.docs = store;
+      this.ownDb = db;
+    }
     this.ffmpeg = opts.ffmpeg !== undefined ? opts.ffmpeg : detectFfmpeg(opts.appRoot ?? process.cwd());
     this.ffmpegDisabled = opts.ffmpeg === null;
     if (opts.ffmpegRetryS) this.ffmpegRetryS = opts.ffmpegRetryS;
@@ -293,11 +309,11 @@ export class AirDeckApp {
     this.appRoot = opts.appRoot ?? process.cwd();
     this.headless = opts.headless ?? false;
     this.audit = new AuditLog(join(dataDir, 'audit.log'));
-    this.users = new UserStore(dataDir);
+    this.users = new UserStore(dataDir, this.docs);
     this.ai = new AiService(dataDir, {
       get: (ref) => this.secrets.get(ref),
       set: (ref, v) => (v === null ? this.secrets.delete(ref) : this.secrets.set(ref, v)),
-    }, (event, data) => this.audit.write({ kind: 'ai', event, ...data }));
+    }, (event, data) => this.audit.write({ kind: 'ai', event, ...data }), fetch, this.docs);
     this.director = new AiDirector({
       station: (id) => this.rt(id).station,
       library: (id) => this.rt(id).data.library,
@@ -321,19 +337,17 @@ export class AirDeckApp {
         if (id !== '*') this.publish(type, id, payload);
       },
     }, this.ai, (id) => this.aiConfig(id));
-    this.tokensFile = join(dataDir, 'tokens.json');
-    this.tokens = readJson<ApiToken[]>(this.tokensFile, []);
+    this.tokens = this.docs.get<ApiToken[]>('tokens', []);
     this.notifier = new Notifier((ref) => this.secrets.get(ref), (event, data) => this.audit.write({ kind: 'notify', event, ...data }));
 
-    const file = join(dataDir, 'airdeck.json');
-    const state = readJson<PersistedState | null>(file, null);
+    const state = this.docs.get<PersistedState | null>('airdeck', null);
     // Neustart: Quellen starten getrennt und müssen sich neu verbinden (keine konkurrierenden Aktiven).
     this.engine = SourcePriorityEngine.restore(state?.sources ?? [], {
       stableMs: opts.stableMs ?? 2000,
       cooldownMs: opts.cooldownMs ?? 0,
     });
     this.engine.on((e) => this.onEngineEvent(e));
-    this.persist = new DebouncedJson(file, () => this.snapshot());
+    this.docs.bind('airdeck', () => this.snapshot());
     this.sync = opts.sync ?? new SyncManager(dataDir, this.secrets, (event, data) => this.audit.write({ kind: 'sync', event, ...data }));
     this.health = new HealthManager({
       name: 'AirDeck',
@@ -343,13 +357,18 @@ export class AirDeckApp {
       packaged: this.packaged,
       paths: this.paths,
       ffmpeg: () => this.ffmpeg,
-      // bis zur Datenbankschicht (ARCHITECTURE §9, Schritt 2): JSON-Dateien im Datenordner, optional mit Sync
-      database: () => ({
-        provider: 'json',
-        state: this.sync.status.lastError && this.sync.config.backend !== 'local' ? 'BROKEN' : 'READY',
-        detail: this.sync.config.backend === 'local' ? undefined : `Abgleich ${this.sync.config.backend}${this.sync.status.lastError ? `: ${this.sync.status.lastError}` : ''}`,
-        sync: { backend: this.sync.config.backend, lastDecision: this.sync.status.lastDecision, lastPushAt: this.sync.status.lastPushAt, error: this.sync.status.lastError },
-      }),
+      database: () => {
+        const st = this.docs.status();
+        const backend = this.sync.config.backend;
+        return {
+          provider: this.docs instanceof DbDocStore ? this.docs.db.dialect : 'json',
+          state: st.state === 'error' ? 'BROKEN' : 'READY',
+          detail: st.lastError ?? (backend === 'local' ? undefined : `zusätzlicher Abgleich ${backend}${this.sync.status.lastError ? `: ${this.sync.status.lastError}` : ''}`),
+          pending: st.pending,
+          lastWriteAt: st.lastWriteAt,
+          sync: { backend, lastDecision: this.sync.status.lastDecision, lastPushAt: this.sync.status.lastPushAt, error: this.sync.status.lastError },
+        };
+      },
       aiProviders: () => ((this.ai.view() as { providers: { id: string; name: string; kind: string; enabled: boolean; hasKey: boolean; binPath?: string }[] }).providers),
       outputs: () => [...this.outputs.values()].map((o) => ({ id: o.cfg.id, stationId: o.cfg.stationId, name: o.cfg.name, status: o.state.status, error: o.state.error })),
       encoders: () => [...this.playouts].map(([stationId, { playout }]) => {
@@ -357,7 +376,10 @@ export class AirDeckApp {
         return { stationId, running: st.running, encoder: st.encoder, format: st.format, bitrateKbps: st.bitrateKbps };
       }),
     });
-    this.persist.onWrite = () => this.sync.schedulePush(() => readFileSync(file, 'utf8'));
+    this.docs.onWrite = (name) => {
+      if (name === 'airdeck') this.sync.schedulePush(() => this.stateJson());
+    };
+    if (this.docs instanceof DbDocStore) this.docs.onStatus = (st) => this.publish('DATABASE_STATUS_CHANGED', undefined, { state: st.state, error: st.lastError });
 
     for (const st of state?.stations ?? []) this.mountStation(st, state?.data[st.id]);
     for (const o of state?.outputs ?? []) this.mountOutput(o);
@@ -429,7 +451,8 @@ export class AirDeckApp {
     this.playouts.clear();
     for (const id of [...this.recorders.keys()]) this.stopRecording(id);
     for (const o of this.outputs.values()) o.stop();
-    this.persist.flush();
+    this.persistNow();
+    void this.ownDb?.close();
   }
 
   // ---------- Tokens / Auth ----------
@@ -451,7 +474,7 @@ export class AirDeckApp {
       createdAt: new Date().toISOString(),
     };
     this.tokens.push(rec);
-    writeFileAtomic(this.tokensFile, JSON.stringify(this.tokens, null, 1), 0o600);
+    this.docs.set('tokens', this.tokens);
     const { hash: _hash, ...info } = rec;
     return { token, info };
   }
@@ -476,7 +499,7 @@ export class AirDeckApp {
     const before = this.tokens.length;
     this.tokens = this.tokens.filter((t) => t.id !== id);
     if (this.tokens.length === before) throw new AppError(404, 'not_found', 'Token nicht gefunden');
-    writeFileAtomic(this.tokensFile, JSON.stringify(this.tokens, null, 1), 0o600);
+    this.docs.set('tokens', this.tokens);
   }
 
   authenticate(token: string | undefined): Principal | null {
@@ -1933,7 +1956,7 @@ export class AirDeckApp {
   // ---------- Updates ----------
 
   updateConfig(): UpdateSource & { autoCheck: boolean } {
-    const s = readJson<Partial<UpdateSource> & { autoCheck?: boolean }>(join(this.dataDir, 'update.json'), {});
+    const s = this.docs.get<Partial<UpdateSource> & { autoCheck?: boolean }>('update', {});
     return { ...DEFAULT_SOURCE, ...s, tokenRef: 'update:token', autoCheck: s.autoCheck ?? true };
   }
 
@@ -1955,10 +1978,10 @@ export class AirDeckApp {
       if (input.token) this.secrets.set('update:token', input.token.trim());
       else this.secrets.delete('update:token');
     }
-    writeFileAtomic(join(this.dataDir, 'update.json'), JSON.stringify({
+    this.docs.set('update', {
       repo, tag: typeof input.tag === 'string' && input.tag ? input.tag : cur.tag, manifestUrl: manifestUrl || undefined,
       autoCheck: typeof input.autoCheck === 'boolean' ? input.autoCheck : cur.autoCheck,
-    }));
+    });
     return this.updateSettingsView();
   }
 
@@ -2116,7 +2139,7 @@ export class AirDeckApp {
   // ---------- Bridge-API für Entwickler: externe Schlüssel → AirDeck-Sender (idempotent) ----------
 
   private bridgeMap(): Record<string, string> {
-    return readJson<Record<string, string>>(join(this.dataDir, 'bridge-keys.json'), {});
+    return { ...this.docs.get<Record<string, string>>('bridge-keys', {}) };
   }
 
   /** Sender über einen externen Schlüssel anlegen oder aktualisieren – derselbe Schlüssel ergibt immer denselben Sender. */
@@ -2131,7 +2154,7 @@ export class AirDeckApp {
     const station = this.createStation({ id: sid, name: String(input.name ?? key).slice(0, 80), slogan: typeof input.slogan === 'string' ? input.slogan : undefined, primaryColor: input.primaryColor as string, accentColor: input.accentColor as string }, input.withDefaultSources !== false);
     if (typeof input.genre === 'string') this.updateStation(sid, { genre: input.genre });
     map[key] = sid;
-    writeFileAtomic(join(this.dataDir, 'bridge-keys.json'), JSON.stringify(map, null, 1));
+    this.docs.set('bridge-keys', map);
     this.audit.write({ kind: 'bridge', event: 'station_created', key, stationId: sid });
     return { station, created: true };
   }
@@ -2265,7 +2288,7 @@ export class AirDeckApp {
   // ---------- Nextcloud-Brücke ----------
 
   nextcloudConfig(): (NextcloudConfig & { hasPassword: boolean }) | { configured: false } {
-    const c = readJson<NextcloudConfig | null>(join(this.dataDir, 'nextcloud.json'), null);
+    const c = this.docs.get<NextcloudConfig | null>('nextcloud', null);
     return c ? { ...c, hasPassword: this.secrets.has('nextcloud:password') } : { configured: false };
   }
 
@@ -2287,13 +2310,13 @@ export class AirDeckApp {
     }
     if (typeof input.password === 'string' && input.password) this.secrets.set('nextcloud:password', input.password.trim());
     if (!this.secrets.has('nextcloud:password')) throw new AppError(400, 'no_password', 'App-Passwort fehlt (Nextcloud → Einstellungen → Sicherheit → App-Passwort)');
-    writeFileAtomic(join(this.dataDir, 'nextcloud.json'), JSON.stringify({ url, user, root }));
+    this.docs.set('nextcloud', { url, user, root });
     this.audit.write({ kind: 'nextcloud', event: 'config', url, user });
     return this.nextcloudConfig();
   }
 
   private nc(): { client: Nextcloud; root: string } {
-    const c = readJson<NextcloudConfig | null>(join(this.dataDir, 'nextcloud.json'), null);
+    const c = this.docs.get<NextcloudConfig | null>('nextcloud', null);
     const pw = this.secrets.get('nextcloud:password');
     if (!c || !pw) throw new AppError(409, 'not_configured', 'Nextcloud ist noch nicht eingerichtet');
     return { client: new Nextcloud(c, pw), root: c.root };
@@ -2639,17 +2662,26 @@ export class AirDeckApp {
     this.changed();
   }
 
+  /** Datenbankbericht mit Live-Prüfung (Version, Antwortzeit, Schema) */
+  async databaseReport(): Promise<unknown> {
+    const base = this.health.database() as Record<string, unknown>;
+    if (!(this.docs instanceof DbDocStore)) return base;
+    const h = await this.docs.db.health();
+    return { ...base, engine: h.engine, version: h.version, latencyMs: h.latencyMs, schema: SCHEMA_VERSION, ok: h.ok && base.state === 'READY', error: h.error ?? base.detail };
+  }
+
   /** Zustand sofort speichern (z. B. vor manuellem Sync). */
   persistNow(): void {
-    this.persist.flush();
+    this.docs.touch('airdeck');
+    this.docs.flushSync();
   }
 
   stateJson(): string {
-    return readFileSync(join(this.dataDir, 'airdeck.json'), 'utf8');
+    return JSON.stringify(this.snapshot(), null, 1);
   }
 
   private changed(): void {
-    this.persist.schedule();
+    this.docs.touch('airdeck');
   }
 
   private snapshot(): PersistedState {

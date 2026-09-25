@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { AirDeckApp } from '../src/server/app.ts';
 import { cleanPath, parseMultistatus } from '../src/server/nextcloud.ts';
+import { storedText } from './helpers.ts';
 
 const FILES: Record<string, Buffer> = {
   '/Radio/Hits/Kygo - Firestone.mp3': Buffer.from('ID3-firestone'),
@@ -62,7 +63,7 @@ test('Nextcloud-Brücke: durchsuchen, übernehmen (ohne Doppelte), Mitschnitt ho
   try {
     assert.throws(() => app.setNextcloud({ url: 'ftp://x', user: 'a', password: 'b' }), /https/);
     app.setNextcloud({ url: `http://127.0.0.1:${(srv.address() as { port: number }).port}/`, user: 'rico r', password: 'app-pw', root: '/Radio' });
-    assert.ok(!readFileSync(join(dir, 'nextcloud.json'), 'utf8').includes('app-pw'), 'Passwort nie im Klartext');
+    assert.ok(!storedText(app).includes('app-pw'), 'Passwort nie im Klartext');
 
     const top = (await app.nextcloudList('/Hits')) as { entries: { name: string; path: string; dir: boolean; audio: boolean }[] };
     assert.deepEqual(top.entries.map((e) => [e.name, e.dir, e.audio]), [['Deep', true, false], ['Cover.jpg', false, false], ['Kygo - Firestone.mp3', false, true]]);

@@ -24,8 +24,32 @@ jobs:
         options: >-
           --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -proot-pw"
           --health-interval=5s --health-timeout=5s --health-retries=20
+      # Datenbankschicht: dieselben Tests gegen SQLite, PostgreSQL, MariaDB und MySQL (DATABASE.md „Tests“)
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: airdeck
+          POSTGRES_PASSWORD: airdeck-pw
+          POSTGRES_DB: airdeck_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd="pg_isready -U airdeck" --health-interval=5s --health-timeout=5s --health-retries=20
+      mariadb:
+        image: mariadb:11
+        env:
+          MARIADB_ROOT_PASSWORD: root-pw
+          MARIADB_DATABASE: airdeck_test
+          MARIADB_USER: airdeck
+          MARIADB_PASSWORD: airdeck-pw
+        ports: ['3307:3306']
+        options: >-
+          --health-cmd="healthcheck.sh --connect --innodb_initialized"
+          --health-interval=5s --health-timeout=5s --health-retries=20
     env:
       AIRDECK_TEST_MYSQL: 127.0.0.1:3306:airdeck:airdeck-pw:airdeck_test
+      AIRDECK_TEST_PG: postgres://airdeck:airdeck-pw@127.0.0.1:5432/airdeck_test
+      AIRDECK_TEST_MYSQL_URL: mysql://airdeck:airdeck-pw@127.0.0.1:3306/airdeck_test
+      AIRDECK_TEST_MARIADB_URL: mysql://airdeck:airdeck-pw@127.0.0.1:3307/airdeck_test
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -194,6 +218,21 @@ jobs:
           docker run --rm -v "$PWD:/s" --entrypoint liquidsoap savonet/liquidsoap:v2.2.5 --check /s/airdeck.liq
           docker stop -t 10 airdeck
           test "$(docker inspect -f '{{.State.ExitCode}}' airdeck)" = "0" || (echo "Container wurde nicht sauber beendet" && exit 1)
+      - name: docker compose mit PostgreSQL
+        run: |
+          docker rm -f airdeck > /dev/null
+          docker compose up -d
+          for i in $(seq 1 60); do curl -fs http://127.0.0.1:8750/api/v1/health && break; sleep 1; done
+          docker compose logs airdeck | tee log.txt
+          grep -q "Datenbank: postgres" log.txt || (echo "PostgreSQL wird nicht genutzt" && exit 1)
+          TOKEN=$(grep -A1 "Admin-Token" log.txt | tail -1 | tr -d ' \r')
+          curl -fs -X POST -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{"id":"ci","name":"CI Radio"}' http://127.0.0.1:8750/api/v1/stations > /dev/null
+          # Neustart: Daten müssen aus PostgreSQL kommen
+          docker compose restart airdeck
+          for i in $(seq 1 60); do curl -fs http://127.0.0.1:8750/api/v1/health > /dev/null && break; sleep 1; done
+          curl -fs -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8750/api/v1/stations | grep -q '"id":"ci"' || (echo "Sender nach Neustart verloren" && exit 1)
+          curl -fs -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8750/api/v1/database | tee db.json | grep -q '"engine":"PostgreSQL"'
+          docker compose down
 
   android:
     needs: test

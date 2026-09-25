@@ -6,6 +6,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
+import { databaseConfig, type DatabaseConfig } from './db/index.ts';
 
 export type Mode = 'local' | 'server' | 'hybrid';
 export const MODES: readonly Mode[] = ['local', 'server', 'hybrid'];
@@ -21,6 +22,7 @@ export interface AirDeckConfig {
   /** true = systemweite Installation (Dienst/Paket), false = Benutzer-/Portable-Installation */
   system: boolean;
   paths: { config: string; data: string; media: string; logs: string; backups: string };
+  database: DatabaseConfig;
 }
 
 export interface ResolveInput {
@@ -125,7 +127,9 @@ export function resolveConfig(input: ResolveInput): AirDeckConfig {
     else if (bind === 'local' || bind === '') host = bind === '' && readLan(join(data, 'network.json'), exists, read) ? '0.0.0.0' : '127.0.0.1';
     else host = bind;
   }
-  return { mode, port, host, configFile, system, paths };
+  // Relative SQLite-Pfade gelten ab dem Konfigurationsordner
+  const database = databaseConfig({ ...conf, ...(conf['database.url'] && !conf['database.url'].includes('://') ? { 'database.url': pathOf(conf['database.url'])! } : {}) }, env, data);
+  return { mode, port, host, configFile, system, paths, database };
 }
 
 function readLan(file: string, exists: (p: string) => boolean, read: (p: string) => string): boolean {
@@ -161,6 +165,12 @@ export function writeDefaultConf(cfg: AirDeckConfig): boolean {
       `# media = ${cfg.paths.media}`,
       `# logs = ${cfg.paths.logs}`,
       `# backups = ${cfg.paths.backups}`,
+      '',
+      '[database]',
+      '# sqlite (Standard, Datei im Datenordner) · postgres · mysql (auch MariaDB)',
+      '# Passwort besser nicht hier, sondern in der Umgebungsvariablen AIRDECK_DB_PASSWORD.',
+      `# provider = ${cfg.database.provider}`,
+      '# url = postgres://airdeck@localhost:5432/airdeck',
       '',
     ].join('\n'), 'utf8');
     return true;

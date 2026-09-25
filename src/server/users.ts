@@ -2,9 +2,8 @@
 // Passwörter: scrypt mit Salz (nie im Klartext), Sitzungen nur als Hash gespeichert, Sperre nach Fehlversuchen.
 
 import { createHash, randomBytes, scrypt as scryptCb, timingSafeEqual } from 'node:crypto';
-import { join } from 'node:path';
 import { promisify } from 'node:util';
-import { readJson, writeFileAtomic } from './store.ts';
+import { FileDocStore, type DocStore } from './repo/docs.ts';
 
 const scrypt = promisify(scryptCb) as (pw: string, salt: Buffer, len: number, opts: { N: number; r: number; p: number; maxmem: number }) => Promise<Buffer>;
 
@@ -90,40 +89,31 @@ export function checkPassword(pw: string): void {
 }
 
 export class UserStore {
-  private readonly file: string;
-  private readonly sessionsFile: string;
+  private readonly docs: DocStore;
   private users: User[];
   private sessions: Session[];
   private readonly failures = new Map<string, { count: number; until: number }>();
-  private saveTimer: NodeJS.Timeout | null = null;
 
-  constructor(dataDir: string) {
-    this.file = join(dataDir, 'users.json');
-    this.sessionsFile = join(dataDir, 'sessions.json');
-    this.users = readJson<User[]>(this.file, []);
-    this.sessions = readJson<Session[]>(this.sessionsFile, []).filter((s) => s.expiresAt > Date.now());
+  /** docs: Datenbank (Programm) oder JSON-Dateien im Ordner (eigenständig, Tests) */
+  constructor(dataDir: string, docs: DocStore = new FileDocStore(dataDir)) {
+    this.docs = docs;
+    this.users = docs.get<User[]>('users', []);
+    this.sessions = docs.get<Session[]>('sessions', []).filter((s) => s.expiresAt > Date.now());
+    docs.bind('sessions', () => (this.sessions = this.sessions.filter((s) => s.expiresAt > Date.now())));
   }
 
   private saveUsers(): void {
-    writeFileAtomic(this.file, JSON.stringify(this.users, null, 1), 0o600);
+    this.docs.set('users', this.users);
   }
 
+  /** Sitzungen entprellt (gleitende Ablaufzeit ändert sich bei jeder Anfrage) */
   private saveSessions(): void {
-    if (this.saveTimer) return;
-    this.saveTimer = setTimeout(() => {
-      this.saveTimer = null;
-      this.sessions = this.sessions.filter((s) => s.expiresAt > Date.now());
-      writeFileAtomic(this.sessionsFile, JSON.stringify(this.sessions), 0o600);
-    }, 1000);
-    this.saveTimer.unref();
+    this.docs.touch('sessions');
   }
 
   flush(): void {
-    if (this.saveTimer) {
-      clearTimeout(this.saveTimer);
-      this.saveTimer = null;
-    }
-    writeFileAtomic(this.sessionsFile, JSON.stringify(this.sessions.filter((s) => s.expiresAt > Date.now())), 0o600);
+    this.docs.touch('sessions');
+    this.docs.flushSync();
   }
 
   get count(): number {

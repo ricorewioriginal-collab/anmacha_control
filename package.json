@@ -18,12 +18,14 @@
   },
   "devDependencies": {
     "@types/node": "^22.18.0",
+    "@types/pg": "^8.23.1",
     "esbuild": "^0.25.12",
     "postject": "^1.0.0-alpha.6",
     "rcedit": "^4.0.1",
     "typescript": "^5.9.0"
   },
   "dependencies": {
-    "mysql2": "^3.24.4"
+    "mysql2": "^3.24.4",
+    "pg": "^8.23.0"
   }
 }

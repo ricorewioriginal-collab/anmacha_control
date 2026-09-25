@@ -262,7 +262,7 @@ export function createHttpServer(app: AirDeckApp, studioDir: string): Server {
   add('POST', '/api/v1/stations/:sid/playout/mic', 'automation:write', async (c) => app.setMic(sid(c), (await c.body()).on === true));
   // Zustandsberichte (angemeldet): Laufzeit, Abhängigkeiten, Datenbank, Audio, Encoder, Stream, KI
   add('GET', '/api/v1/system', null, () => ({ ...(app.system() as object), ...app.health.system() }));
-  add('GET', '/api/v1/database', null, () => app.health.database());
+  add('GET', '/api/v1/database', null, () => app.databaseReport());
   add('GET', '/api/v1/audio', null, () => app.health.audio());
   add('GET', '/api/v1/encoder', null, (c) => app.health.encoder((s) => canSee(c.p, s)));
   add('GET', '/api/v1/stream', null, (c) => app.health.stream((s) => canSee(c.p, s)));

@@ -31,7 +31,22 @@ export interface RemoteStore {
   close(): Promise<void>;
 }
 
-export const hashState = (json: string): string => createHash('sha256').update(json).digest('hex');
+/** Inhaltlich gleiche Stände ergeben denselben Wert, egal in welcher Reihenfolge die Felder stehen
+ *  (der Stand kommt jetzt aus der Datenbank und nicht mehr Byte für Byte aus airdeck.json). */
+function canonical(v: unknown): unknown {
+  if (Array.isArray(v)) return v.map(canonical);
+  if (v && typeof v === 'object') return Object.fromEntries(Object.keys(v).sort().map((k) => [k, canonical((v as Record<string, unknown>)[k])]));
+  return v;
+}
+export const hashState = (json: string): string => {
+  let text = json;
+  try {
+    text = JSON.stringify(canonical(JSON.parse(json)));
+  } catch {
+    // kein JSON → Rohtext
+  }
+  return createHash('sha256').update(text).digest('hex');
+};
 
 // ---------------- MySQL / MariaDB ----------------
 
@@ -363,7 +378,8 @@ export class SyncManager {
    * Abgleich beim Start (vor dem Laden des Zustands). Schreibt ggf. data/airdeck.json neu.
    * Fehler (z. B. Datenbank nicht erreichbar) blockieren den Start nie – AirDeck läuft dann lokal.
    */
-  async startup(): Promise<SyncDecision | null> {
+  /** local: aktueller Stand aus der Datenbank; ohne Angabe wird data/airdeck.json gelesen (ältere Installationen) */
+  async startup(localState?: string | null): Promise<SyncDecision | null> {
     await this.importSetupFile();
     const store = (() => {
       try {
@@ -378,7 +394,7 @@ export class SyncManager {
     const metaFile = join(this.dataDir, 'sync-meta.json');
     const meta = readJson<SyncMeta>(metaFile, {});
     try {
-      const local = existsSync(stateFile) ? readFileSync(stateFile, 'utf8') : null;
+      const local = localState !== undefined ? localState : existsSync(stateFile) ? readFileSync(stateFile, 'utf8') : null;
       const localHash = local ? hashState(local) : null;
       const remote = await store.pull();
       const decision = decide(localHash, remote, meta, this.firstSync);

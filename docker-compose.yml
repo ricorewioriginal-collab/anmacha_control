@@ -1,19 +1,47 @@
 # AirDeck-Server: docker compose up -d   →   Studio: http://<server>:8750
-# Das Admin-Token steht beim ersten Start im Log:  docker compose logs airdeck | grep -A1 Admin-Token
+# Anmeldung beim ersten Start steht im Log:  docker compose logs airdeck | grep -A1 -e Admin-Token -e Einmal-Passwort
+#
+# Datenbank: PostgreSQL (Standard für Server). Das Passwort bitte in einer Datei .env neben dieser Datei setzen:
+#   AIRDECK_DB_PASSWORD=<langes zufälliges Passwort>
+# Die Datenbank ist nur im internen Netz der Container erreichbar, kein Port nach außen.
+# Ohne PostgreSQL (kleine Installation, SQLite im Datenordner): den Dienst „postgres“ und die drei AIRDECK_DB-Zeilen entfernen.
 services:
   airdeck:
     build: .
     image: airdeck:latest
     container_name: airdeck
     restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
     ports:
       - "8750:8750"
     volumes:
       - airdeck-data:/data
     environment:
       TZ: Europe/Berlin
+      AIRDECK_DB: postgres
+      AIRDECK_DB_URL: postgres://airdeck@postgres:5432/airdeck
+      AIRDECK_DB_PASSWORD: ${AIRDECK_DB_PASSWORD:-airdeck-bitte-aendern}
       # Optional: eigener Port
       # AIRDECK_PORT: 8750
 
+  postgres:
+    image: postgres:17
+    container_name: airdeck-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: airdeck
+      POSTGRES_DB: airdeck
+      POSTGRES_PASSWORD: ${AIRDECK_DB_PASSWORD:-airdeck-bitte-aendern}
+    volumes:
+      - airdeck-pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U airdeck -d airdeck"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
 volumes:
   airdeck-data:
+  airdeck-pg:

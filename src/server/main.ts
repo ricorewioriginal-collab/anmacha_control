@@ -11,6 +11,9 @@ import { randomBytes } from 'node:crypto';
 import { createServer } from 'node:net';
 import { homedir } from 'node:os';
 import { resolveConfig, writeDefaultConf } from './config.ts';
+import { openDatabase, safeUrl } from './db/index.ts';
+import type { DatabaseProvider } from './db/types.ts';
+import { DbDocStore, importJsonFiles } from './repo/docs.ts';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { AirDeckApp } from './app.ts';
@@ -113,37 +116,66 @@ $timer.Start()
   p.unref();
 }
 
+/** Server-Datenbanken starten im Container oft später als AirDeck: bis zu 1 Minute erneut versuchen. */
+async function connectDatabase(): Promise<DatabaseProvider> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await openDatabase(config.database);
+    } catch (err) {
+      const msg = (err as Error).message;
+      // Schema neuer als das Programm oder falsche Einstellung: Warten hilft nicht
+      if (config.database.provider === 'sqlite' || /Schema|fehlt die Verbindungsadresse/.test(msg) || attempt >= 20) {
+        console.error(`Datenbank nicht verfügbar (${config.database.provider}): ${msg}`);
+        process.exit(1);
+      }
+      console.warn(`Datenbank noch nicht erreichbar (Versuch ${attempt}): ${msg}`);
+      await new Promise((r) => setTimeout(r, 3000));
+    }
+  }
+}
+
 async function main(): Promise<void> {
   const logFile = packaged ? logToFile() : '';
 
+  // Das Desktop-Token legt die laufende Instanz beim Start an; Hilfsaufrufe lesen es nur (ohne Datenbank)
+  const secrets = new SecretStore(dataDir);
+  const runningToken = () => secrets.get('desktop:token') ?? '';
+
   // AirDeck.exe --stop: laufende Instanz sauber beenden (Tray, Startmenü „AirDeck beenden“)
   if (argv.includes('--stop')) {
-    const probe = new AirDeckApp(dataDir, { appRoot: root, ffmpeg: null, config });
-    const r = await fetch(`http://${localHost}:${port}/api/v1/system/shutdown`, { method: 'POST', headers: { Authorization: `Bearer ${probe.desktopToken()}` }, signal: AbortSignal.timeout(5000) }).catch(() => null);
+    const r = await fetch(`http://${localHost}:${port}/api/v1/system/shutdown`, { method: 'POST', headers: { Authorization: `Bearer ${runningToken()}` }, signal: AbortSignal.timeout(5000) }).catch(() => null);
     console.log(r?.ok ? 'AirDeck wird beendet.' : 'Keine laufende AirDeck-Instanz gefunden.');
     process.exit(r?.ok ? 0 : 1);
   }
 
   // Zweiter Start im Desktop-Modus: nur Fenster öffnen, kein zweiter Server
   if (desktop && (await portInUse(port, host))) {
-    const probe = new AirDeckApp(dataDir, { appRoot: root, ffmpeg: null, config });
-    openStudio(`http://${localHost}:${port}/#token=${probe.desktopToken()}`);
+    openStudio(`http://${localHost}:${port}/#token=${runningToken()}`);
     return;
   }
 
-  // Optionaler Datenbank-Sync (MySQL/Firebase) vor dem Laden des Zustands; Fehler → lokaler Betrieb
-  const secrets = new SecretStore(dataDir);
+  // Datenbank öffnen (Migrationen laufen dabei), bisherige JSON-Dateien einmalig übernehmen
+  mkdirSync(dataDir, { recursive: true });
+  const db = await connectDatabase();
+  const docs = await DbDocStore.open(db);
+  const imported = await importJsonFiles(dataDir, docs);
+  if (imported.length) console.log(`Übernommen in die Datenbank: ${imported.join(', ')} (Dateien als *.imported aufbewahrt)`);
+
+  // Optionaler Abgleich (MySQL/Firebase) vor dem Laden des Zustands; Fehler → lokaler Betrieb
   const sync = new SyncManager(dataDir, secrets, (event, data) => console.log(`[sync] ${event}`, data ?? ''));
-  const decision = await sync.startup();
+  const local = docs.get<unknown>('airdeck', null);
+  const decision = await sync.startup(local ? JSON.stringify(local, null, 1) : null);
+  // geholter Stand liegt als airdeck.json vor → übernehmen
+  if (decision === 'take_remote') await importJsonFiles(dataDir, docs);
   if (sync.config.backend !== 'local') {
     console.log(`Datenspeicher: ${sync.config.backend} – Abgleich: ${decision ?? 'nicht möglich'}${sync.status.lastError ? ` (${sync.status.lastError})` : ''}`);
   }
-  mkdirSync(dataDir, { recursive: true });
   if (writeDefaultConf(config)) console.log(`Grundeinstellungen angelegt: ${config.configFile}`);
-  const app = new AirDeckApp(dataDir, { appRoot: root, secrets, sync, build: globalThis.__AIRDECK_BUILD ?? 'dev', packaged, headless: !desktop, config });
+  const app = new AirDeckApp(dataDir, { appRoot: root, secrets, sync, build: globalThis.__AIRDECK_BUILD ?? 'dev', packaged, headless: !desktop, config, docs });
   app.listenHost = host;
   app.listenPort = port;
   console.log(`AirDeck ${app.version} · Betriebsart: ${config.mode} · Konfiguration: ${config.configFile}`);
+  console.log(`Datenbank: ${config.database.provider} (${safeUrl(config.database)})`);
   console.log(app.ffmpeg ? `ffmpeg: ${app.ffmpeg.version} (${app.ffmpeg.source})` : 'ffmpeg nicht gefunden – neuer Versuch im Hintergrund, bis dahin kein Server-Playout');
 
   if (argv.includes('--new-admin-token')) {
@@ -183,9 +215,10 @@ async function main(): Promise<void> {
     app.shutdown();
     server.close();
     setTimeout(() => process.exit(0), 3000).unref();
-    // letzten Stand noch in die Datenbank schreiben (falls konfiguriert)
-    const final = sync.config.backend !== 'local' ? sync.pushNow(app.stateJson()).catch(() => {}) : Promise.resolve();
-    void final.then(() => sync.close()).finally(() => process.exit(0));
+    // letzten Stand in die Datenbank schreiben, dann (falls eingerichtet) abgleichen
+    const final = docs.flush().catch((err) => console.error('Letztes Speichern fehlgeschlagen:', (err as Error).message))
+      .then(() => (sync.config.backend !== 'local' ? sync.pushNow(app.stateJson()).catch(() => {}) : undefined));
+    void final.then(() => sync.close()).then(() => db.close()).finally(() => process.exit(0));
   };
   app.requestShutdown = stop;
   process.on('SIGINT', stop);
