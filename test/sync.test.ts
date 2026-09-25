@@ -54,8 +54,8 @@ test('MySQL: zwei Standorte teilen den Senderzustand, Konflikte werden gesichert
     const syncA = new SyncManager(dirA, secA);
     await syncA.configure({ backend: 'mysql', mysql: mysqlCfg, firstSync: 'push' }, true);
     const appA = new AirDeckApp(dirA, { ffmpeg: null, secrets: secA, sync: syncA });
-    appA.updateStation('main', { name: 'Studio Hannover' });
-    appA.addMedia('main', { id: 'm1', title: 'Song', artist: 'X', category: 'music', file: 'm1.mp3', durationMs: 1000, addedAt: 0 });
+    appA.svc.stations.updateStation('main', { name: 'Studio Hannover' });
+    appA.svc.media.addMedia('main', { id: 'm1', title: 'Song', artist: 'X', category: 'music', file: 'm1.mp3', durationMs: 1000, addedAt: 0 });
     appA.persistNow();
     await syncA.pushNow(appA.stateJson());
     appA.shutdown();
@@ -66,13 +66,13 @@ test('MySQL: zwei Standorte teilen den Senderzustand, Konflikte werden gesichert
     await syncB.configure({ backend: 'mysql', mysql: mysqlCfg }, true);
     assert.equal(await syncB.startup(), 'take_remote');
     const appB = new AirDeckApp(dirB, { ffmpeg: null, secrets: secB, sync: syncB });
-    assert.equal(appB.station('main').name, 'Studio Hannover');
-    assert.equal(appB.library('main')[0]?.title, 'Song');
+    assert.equal(appB.svc.stations.station('main').name, 'Studio Hannover');
+    assert.equal(appB.svc.media.library('main')[0]?.title, 'Song');
     appB.shutdown();
 
     // Beide ändern offline → Konflikt: lokal gewinnt, Remote-Stand wird gesichert
     const b2 = new AirDeckApp(dirB, { ffmpeg: null, secrets: secB, sync: syncB });
-    b2.updateStation('main', { name: 'Studio Berlin' });
+    b2.svc.stations.updateStation('main', { name: 'Studio Berlin' });
     b2.persistNow();
     b2.shutdown();
     await syncA.pushNow(JSON.stringify({ ...JSON.parse(appA.stateJson()), marker: 1 }));

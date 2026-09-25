@@ -48,10 +48,10 @@ test('Server-Playout sendet 24/7 ohne Browser, mit Skip, Neustart und Stille-Fal
       ['a.wav', 3, 440, 'music'], ['b.wav', 3, 550, 'music'], ['id.wav', 1, 880, 'station_id'],
     ] as const) {
       wav(join(app.mediaDir, 'main', name), secs, freq);
-      app.addMedia('main', { id: name, title: name, artist: name, category: cat, file: name, durationMs: null, addedAt: 0 });
+      app.svc.media.addMedia('main', { id: name, title: name, artist: name, category: cat, file: name, durationMs: null, addedAt: 0 });
     }
     // ffprobe ermittelt Laufzeiten serverseitig
-    if (ff!.ffprobe) await until(() => app.library('main').every((m) => m.durationMs != null));
+    if (ff!.ffprobe) await until(() => app.svc.media.library('main').every((m) => m.durationMs != null));
 
     app.saveOutput(admin, 'main', null, { name: 'ice', host: '127.0.0.1', port, mount: '/radio', password: 'pw-123456' });
     app.start();
@@ -80,9 +80,9 @@ test('Server-Playout sendet 24/7 ohne Browser, mit Skip, Neustart und Stille-Fal
     assert.equal((app.playoutView('main') as { status: { running: boolean } }).status.running, true);
 
     // Stille: nur stille Titel → Quelle fällt aus, Fallback auf Backup
-    for (const m of [...app.library('main')]) app.removeMedia('main', m.id);
+    for (const m of [...app.svc.media.library('main')]) app.svc.media.removeMedia('main', m.id);
     wav(join(app.mediaDir, 'main', 'quiet.wav'), 20, 0);
-    app.addMedia('main', { id: 'quiet.wav', title: 'quiet', artist: '', category: 'music', file: 'quiet.wav', durationMs: 20000, addedAt: 0 });
+    app.svc.media.addMedia('main', { id: 'quiet.wav', title: 'quiet', artist: '', category: 'music', file: 'quiet.wav', durationMs: 20000, addedAt: 0 });
     app.stopPlayout(admin, 'main');
     const backup = app.engine.addSource({ id: 'backup', stationId: 'main', name: 'Backup', type: 'backup_automation', target: '/live', priority: 20, takeoverPolicy: 'auto', allowedRoles: [] });
     app.engine.connect(backup.id);

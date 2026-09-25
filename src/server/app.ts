@@ -1,48 +1,20 @@
-// AirDeck Server-Zustand: Sender, Quellen, Relay, Ausgänge, Medien, Queue, Cardwall.
-// Keine Abhängigkeit zu AnMaCha oder anderen externen Diensten.
+// AirDeck-Kern: Sender-Laufzeit, Quellen (Source Priority), Relay/Ingest, Ausgänge, Queue, Decks, Server-Playout,
+// Cardwall sowie Takt, Ereignisse und Datenhaltung. Alle übrigen Fachgebiete liegen als Dienste unter services/
+// und werden über `app.svc.<dienst>` angesprochen. Keine Abhängigkeit zu AnMaCha oder anderen externen Diensten.
 
-import { createHash, randomBytes } from 'node:crypto';
-import { cpus, freemem, networkInterfaces, totalmem, uptime as osUptime } from 'node:os';
-import { spawn } from 'node:child_process';
-import { existsSync } from 'node:fs';
-import { createWriteStream, mkdirSync, rmSync, type WriteStream } from 'node:fs';
-import { extname, join } from 'node:path';
+import { mkdirSync } from 'node:fs';
+import { join } from 'node:path';
+import { SourcePriorityEngine, type EngineEvent, type SourceConfig } from '../core/source-priority.ts';
 import {
-  SourcePriorityEngine,
-  PriorityError,
-  type Actor,
-  type EngineEvent,
-  type SourceConfig,
-} from '../core/source-priority.ts';
-import {
-  DEFAULT_CLOCK,
-  DEFAULT_ROTATION,
-  PlayQueue,
-  backtime,
-  defaultCardwall,
-  fillFromClock,
-  playLength,
-  type CartSlot,
-  type ClockTemplate,
-  type DeckId,
-  type DeckState,
-  type MediaItem,
-  type QueueEntry,
-  type RotationRules,
-  DECK_IDS,
-  MEDIA_CATEGORIES,
-  parseFileName,
+  DECK_IDS, DEFAULT_CLOCK, DEFAULT_ROTATION, MEDIA_CATEGORIES, PlayQueue, backtime, defaultCardwall, fillFromClock, pickNext as pickFromPool, playLength,
+  type CartSlot, type ClockTemplate, type DeckId, type DeckState, type MediaItem,
 } from '../core/automation.ts';
-
+import { activeWindow } from '../core/scheduler.ts';
 import {
-  ALL_SCOPES, AUDIO_FILE_RE, AppError, SLUG, SYSTEM_PRINCIPAL, canSee, hashToken, newId, normalizeMount, posInt, publicOutput, publicSource,
-  relayKey, safeColor, timingSafeEqualStr, wrap,
-  type ActiveRecording, type ApiToken, type BridgeConfig, type HubEvent, type NowPlaying, type PersistedState, type PlayLogEntry,
-  type Playlist, type PlayoutConfig, type Principal, type Recording, type Station, type StationData, type StationRuntime,
+  AppError, SYSTEM_PRINCIPAL, newId, normalizeMount, posInt, publicOutput, publicSource, relayKey, safeColor, timingSafeEqualStr, wrap,
+  type HubEvent, type NowPlaying, type PersistedState, type PlayLogEntry, type PlayoutConfig, type Principal, type Station, type StationData, type StationRuntime,
 } from './model.ts';
-// Bisherige Importe aus app.ts bleiben gültig
-export * from './model.ts';
-import { AuditLog, readJson, writeFileAtomic } from './store.ts';
+import { AuditLog } from './store.ts';
 import { DbDocStore, importJsonFilesSync, type DocStore } from './repo/docs.ts';
 import { openSqliteSync } from './db/index.ts';
 import { SCHEMA_VERSION } from './db/schema.ts';
@@ -51,31 +23,21 @@ import { IcecastOutput, type BroadcastOutput, type OutputConfig, type OutputStat
 import { ShoutcastOutput } from './shoutcast.ts';
 import { fetchListeners } from './stats.ts';
 import { RelayTarget } from './relay.ts';
-import { analyzeLoudness, detectFfmpeg, detectFfmpegAsync, inputDeviceArgs, listInputDevices, probeMedia, type FfmpegInfo } from './ffmpeg.ts';
-import { DEFAULT_PLAYOUT, DSP_PRESETS, EQ_BANDS, Playout, type PlayoutOptions } from './playout.ts';
-import {
-  activeWindow, clockDue, dueJobs, nextOccurrence, parseM3U, toM3U, validateClock, validateWindow,
-  type ClockEvent, type JobTarget, type ProgramPlan, type RecordingPlan, type Repeat, type ScheduledJob,
-} from '../core/scheduler.ts';
-import { pickNext as pickFromPool } from '../core/automation.ts';
-import type { RelayTap } from './relay.ts';
-import { DEFAULT_ORIGIN, ORIGIN_RE, PUBLIC_API, RADIOADMIN, loginUrl, type LautfmConfig } from './lautfm.ts';
+import { detectFfmpeg, detectFfmpegAsync, inputDeviceArgs, listInputDevices, type FfmpegInfo } from './ffmpeg.ts';
+import { DEFAULT_PLAYOUT, DSP_PRESETS, EQ_BANDS, Playout } from './playout.ts';
 import { SyncManager } from './sync.ts';
 import { appVersion, type AirDeckConfig, type Mode } from './config.ts';
 import { HealthManager } from './health.ts';
-import { createServices, type Services } from './services/index.ts';
-import { DEFAULT_SOURCE, Updater, type UpdateSource } from './update.ts';
+import { Updater } from './update.ts';
 import { AiService } from './ai/service.ts';
-import { AiDirector, DEFAULT_AI, type AiStationConfig, type AiSource } from './ai/director.ts';
-import { AiError } from './ai/providers.ts';
-import { Nextcloud, NextcloudError, cleanPath, type NextcloudConfig } from './nextcloud.ts';
-import { liquidsoapScript } from './liquidsoap.ts';
+import { AiDirector } from './ai/director.ts';
 import { UserStore } from './users.ts';
-import { lautfmStatus, listenUrlOf, type StreamStatus } from './status.ts';
-import { PullRelay, fetchAzuracast, fetchIcecastMount, type ExternalNow } from './bridge.ts';
+import { Notifier } from './notify.ts';
+import { createServices, type Services } from './services/index.ts';
 
-import { readFileSync, writeFileSync } from 'node:fs';
-import { NOTIFY_EVENTS, Notifier, validateExportPath, validateWebhookUrl, type IntegrationsConfig, type NotifyEvent } from './notify.ts';
+// Bisherige Importe aus app.ts bleiben gültig
+export * from './model.ts';
+
 export class AirDeckApp {
   /** Dienstmodule (services/) */
   readonly svc: Services;
@@ -163,7 +125,7 @@ export class AirDeckApp {
       },
       addGenerated: (id, audio, ext, title, category) => this.svc.ai.addGeneratedMedia(id, audio, ext, title, category),
       remove: (id, mediaId) => {
-        if (this.rt(id).data.library.some((m) => m.id === mediaId)) this.removeMedia(id, mediaId);
+        if (this.rt(id).data.library.some((m) => m.id === mediaId)) this.svc.media.removeMedia(id, mediaId);
       },
       nowPlayingId: (id) => this.rt(id).nowPlaying.mediaId,
       pickJingle: (id) => {
@@ -220,7 +182,7 @@ export class AirDeckApp {
 
     for (const st of state?.stations ?? []) this.mountStation(st, state?.data[st.id]);
     for (const o of state?.outputs ?? []) this.mountOutput(o);
-    if (this.stations.size === 0) this.createStation({ id: 'main', name: 'AirDeck Radio' }, true);
+    if (this.stations.size === 0) this.svc.stations.createStation({ id: 'main', name: 'AirDeck Radio' }, true);
   }
 
   start(): void {
@@ -292,7 +254,7 @@ export class AirDeckApp {
     void this.ownDb?.close();
   }
 
-  // ---------- Tokens / Auth ----------
+  // ---------- Rechte ----------
 
   static hasScope(p: Principal, scope: string): boolean {
     return p.scopes.includes('*') || p.scopes.includes(scope);
@@ -393,124 +355,6 @@ export class AirDeckApp {
     this.stations.set(station.id, rt);
     mkdirSync(join(this.mediaDir, station.id), { recursive: true });
     return rt;
-  }
-
-  createStation(input: Partial<Station> & { id: string; name: string }, withDefaults = false): Station {
-    if (!SLUG.test(input.id)) throw new AppError(400, 'invalid_id', 'Sender-ID: a-z, 0-9, Bindestrich, max. 40 Zeichen');
-    if (this.stations.has(input.id)) throw new AppError(409, 'exists', 'Sender existiert bereits');
-    const station: Station = {
-      id: input.id,
-      name: input.name.slice(0, 80),
-      slogan: (input.slogan ?? '').slice(0, 120),
-      primaryColor: safeColor(input.primaryColor, '#19c3e6'),
-      accentColor: safeColor(input.accentColor, '#8b5cf6'),
-    };
-    this.mountStation(station);
-    if (withDefaults) {
-      // Sinnvolle Grundausstattung laut Spezifikation.
-      const defaults: Array<[string, SourceConfig['type'], number, SourceConfig['takeoverPolicy']]> = [
-        ['Live Studio', 'live_studio', 1, 'auto'],
-        ['Remote Studio', 'remote_studio', 2, 'auto'],
-        ['Android Live', 'mobile', 3, 'auto'],
-        ['AirDeck Automation', 'automation', 10, 'auto'],
-      ];
-      for (const [name, type, priority, takeoverPolicy] of defaults) {
-        this.engine.addSource({
-          id: newId('src'), stationId: station.id, name, type, target: '/live', priority, takeoverPolicy,
-          allowedRoles: ['operator', 'dj'],
-        });
-      }
-    }
-    this.audit.write({ kind: 'station', event: 'created', stationId: station.id });
-    this.changed();
-    return station;
-  }
-
-  updateStation(id: string, patch: Partial<Station>): Station {
-    const rt = this.rt(id);
-    const s = rt.station;
-    if (patch.name !== undefined) s.name = String(patch.name).slice(0, 80);
-    if (patch.slogan !== undefined) s.slogan = String(patch.slogan).slice(0, 120);
-    if (patch.primaryColor !== undefined) s.primaryColor = safeColor(patch.primaryColor, s.primaryColor);
-    if (patch.accentColor !== undefined) s.accentColor = safeColor(patch.accentColor, s.accentColor);
-    if (typeof patch.publicStatus === 'boolean') s.publicStatus = patch.publicStatus;
-    if (typeof patch.genre === 'string') s.genre = patch.genre.slice(0, 80) || undefined;
-    this.publish('station.changed', id, s);
-    this.changed();
-    return s;
-  }
-
-  static readonly LOGO_TYPES: Record<string, string> = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp', 'image/gif': 'gif' };
-
-  /** Eigenes Senderlogo speichern (PNG/JPG/WebP/GIF, max. 2 MB; SVG bewusst nicht wegen Skripten). */
-  setStationLogo(id: string, contentType: string, data: Buffer): Station {
-    const s = this.rt(id).station;
-    const ext = AirDeckApp.LOGO_TYPES[contentType.split(';')[0]!.trim().toLowerCase()];
-    if (!ext) throw new AppError(415, 'unsupported_media', 'Logo als PNG, JPG, WebP oder GIF hochladen');
-    if (data.length > 2 * 1024 * 1024) throw new AppError(413, 'too_large', 'Logo höchstens 2 MB');
-    // Signatur prüfen statt dem angegebenen Typ blind zu vertrauen
-    const sig = data.subarray(0, 12);
-    const ok = { png: sig[0] === 0x89 && sig[1] === 0x50, jpg: sig[0] === 0xff && sig[1] === 0xd8, gif: sig.toString('latin1', 0, 3) === 'GIF', webp: sig.toString('latin1', 8, 12) === 'WEBP' }[ext];
-    if (!ok) throw new AppError(415, 'unsupported_media', 'Datei ist kein gültiges Bild');
-    const dir = join(this.dataDir, 'logos');
-    mkdirSync(dir, { recursive: true });
-    this.removeLogoFile(id);
-    writeFileSync(join(dir, `${id}.${ext}`), data);
-    s.logo = `${ext}:${Date.now().toString(36)}`;
-    this.publish('station.changed', id, s);
-    this.changed();
-    return s;
-  }
-
-  removeStationLogo(id: string): Station {
-    const s = this.rt(id).station;
-    this.removeLogoFile(id);
-    delete s.logo;
-    this.publish('station.changed', id, s);
-    this.changed();
-    return s;
-  }
-
-  removeLogoFile(id: string): void {
-    for (const ext of Object.values(AirDeckApp.LOGO_TYPES)) rmSync(join(this.dataDir, 'logos', `${id}.${ext}`), { force: true });
-  }
-
-  stationLogo(id: string): { path: string; type: string } | null {
-    const s = this.stations.get(id)?.station;
-    if (!s?.logo) return null;
-    const ext = s.logo.split(':')[0]!;
-    const type = Object.entries(AirDeckApp.LOGO_TYPES).find(([, e]) => e === ext)?.[0];
-    const path = join(this.dataDir, 'logos', `${id}.${ext}`);
-    return type && existsSync(path) ? { path, type } : null;
-  }
-
-  /** Sender vollständig entfernen (Playout, Aufnahmen, Quellen, Ausgänge, Medien). Der letzte Sender bleibt. */
-  deleteStation(p: Principal, id: string): void {
-    this.rt(id);
-    if (this.stations.size <= 1) throw new AppError(409, 'last_station', 'Der letzte Sender kann nicht gelöscht werden');
-    const pl = this.playouts.get(id);
-    if (pl) {
-      pl.playout.stop();
-      this.playouts.delete(id);
-    }
-    if (this.svc.recorder.recorders.has(id)) this.svc.recorder.stopRecording(id);
-    for (const s of this.engine.list(id)) this.removeSource(p, id, s.id);
-    for (const o of [...this.outputs.values()]) if (o.cfg.stationId === id) this.removeOutput(p, id, o.cfg.id);
-    for (const key of [...this.relays.keys()]) if (key.startsWith(`${id}/`)) this.relays.delete(key);
-    this.secrets.delete(`lautfm:${id}`);
-    this.removeLogoFile(id);
-    rmSync(join(this.mediaDir, id), { recursive: true, force: true });
-    this.stations.delete(id);
-    this.audit.write({ kind: 'station', event: 'deleted', actor: p.id, stationId: id });
-    this.changed();
-  }
-
-  listStations(p: Principal): Station[] {
-    return [...this.stations.values()].map((r) => r.station).filter((s) => canSee(p, s.id));
-  }
-
-  station(id: string): Station {
-    return this.rt(id).station;
   }
 
   // ---------- Quellen ----------
@@ -724,126 +568,7 @@ export class AirDeckApp {
     this.changed();
   }
 
-  // ---------- Medien ----------
-
-  library(stationId: string): MediaItem[] {
-    return this.rt(stationId).data.library;
-  }
-
-  media(stationId: string, id: string): MediaItem {
-    const m = this.rt(stationId).data.library.find((x) => x.id === id);
-    if (!m) throw new AppError(404, 'not_found', 'Medium nicht gefunden');
-    return m;
-  }
-
-  mediaPath(stationId: string, m: MediaItem): string {
-    if (m.url) return m.url;
-    return join(this.mediaDir, stationId, m.file);
-  }
-
-  addMedia(stationId: string, item: MediaItem): MediaItem {
-    const rt = this.rt(stationId);
-    rt.data.library.push(item);
-    this.publish('library.changed', stationId, { added: item });
-    this.changed();
-    // Laufzeit und ID3-Tags serverseitig lesen (wichtig für Crossfade/Backtiming im Headless-Betrieb)
-    const ffprobe = this.ffmpeg?.ffprobe;
-    if (ffprobe && !item.url) {
-      probeMedia(ffprobe, this.mediaPath(stationId, item)).then(({ durationMs, tags }) => {
-        if (!rt.data.library.includes(item)) return;
-        const patch: Record<string, unknown> = {};
-        if (durationMs && item.durationMs == null) patch.durationMs = durationMs;
-        if (tags.title) patch.title = tags.title;
-        if (tags.artist) patch.artist = tags.artist;
-        if (tags.bpm && item.bpm == null) patch.bpm = tags.bpm;
-        if (tags.album) item.album = tags.album;
-        if (tags.genre) item.genre = tags.genre;
-        if (tags.year) item.year = tags.year;
-        if (Object.keys(patch).length || tags.album || tags.genre || tags.year) this.updateMedia(stationId, item.id, patch);
-      });
-    }
-    if (!item.url && item.lufs == null) this.queueLoudness(stationId, item.id);
-    return item;
-  }
-
-  // ---------- Lautheitsanalyse (EBU R128) – nacheinander, damit der Sendebetrieb nicht leidet ----------
-
-  readonly loudQueue: { stationId: string; id: string }[] = [];
-  loudBusy = false;
-
-  queueLoudness(stationId: string, id: string): void {
-    if (!this.ffmpeg || this.loudQueue.some((x) => x.stationId === stationId && x.id === id)) return;
-    this.loudQueue.push({ stationId, id });
-    void this.runLoudness();
-  }
-
-  /** Alle noch nicht gemessenen Titel eines Senders einreihen. */
-  analyzeLibrary(stationId: string, force = false): { queued: number } {
-    if (!this.ffmpeg) throw new AppError(501, 'unsupported', 'Lautheitsanalyse benötigt ffmpeg');
-    let queued = 0;
-    for (const m of this.rt(stationId).data.library) {
-      if (m.url || (!force && m.lufs != null)) continue;
-      this.queueLoudness(stationId, m.id);
-      queued++;
-    }
-    return { queued };
-  }
-
-  loudnessStatus(stationId: string): unknown {
-    const lib = this.rt(stationId).data.library.filter((m) => !m.url);
-    return { total: lib.length, measured: lib.filter((m) => m.lufs != null).length, pending: this.loudQueue.filter((x) => x.stationId === stationId).length, running: this.loudBusy };
-  }
-
-  async runLoudness(): Promise<void> {
-    if (this.loudBusy || !this.ffmpeg) return;
-    this.loudBusy = true;
-    try {
-      for (let job = this.loudQueue.shift(); job; job = this.loudQueue.shift()) {
-        const rt = this.stations.get(job.stationId);
-        const m = rt?.data.library.find((x) => x.id === job!.id);
-        if (!m || m.url) continue;
-        const r = await analyzeLoudness(this.ffmpeg.ffmpeg, this.mediaPath(job.stationId, m));
-        if (!r || !rt!.data.library.includes(m)) continue;
-        m.lufs = r.lufs;
-        m.truePeakDb = r.truePeakDb;
-        this.publish('library.changed', job.stationId, { updated: m });
-        this.changed();
-      }
-    } finally {
-      this.loudBusy = false;
-    }
-  }
-
-  updateMedia(stationId: string, id: string, patch: Record<string, unknown>): MediaItem {
-    const m = this.media(stationId, id);
-    if (typeof patch.title === 'string') m.title = patch.title.slice(0, 200);
-    if (typeof patch.artist === 'string') m.artist = patch.artist.slice(0, 200);
-    if (typeof patch.category === 'string' && (MEDIA_CATEGORIES as readonly string[]).includes(patch.category)) m.category = patch.category as MediaItem['category'];
-    if (typeof patch.folder === 'string') m.folder = patch.folder.trim().slice(0, 80) || undefined;
-    for (const k of ['durationMs', 'cueInMs', 'cueOutMs', 'segueMs', 'introMs', 'bpm', 'gainDb'] as const) {
-      const v = patch[k];
-      if (v === null && k !== 'durationMs') delete m[k];
-      else if (typeof v === 'number' && Number.isFinite(v) && (k === 'gainDb' || v >= 0)) m[k] = v;
-    }
-    this.publish('library.changed', stationId, { updated: m });
-    this.changed();
-    return m;
-  }
-
-  removeMedia(stationId: string, id: string): void {
-    const rt = this.rt(stationId);
-    const m = this.media(stationId, id);
-    rt.data.library = rt.data.library.filter((x) => x.id !== id);
-    rt.queue.prune((mid) => mid !== id);
-    for (const c of rt.data.cardwall) if (c.mediaId === id) c.mediaId = null;
-    for (const pl of rt.data.playlists ?? []) pl.items = pl.items.filter((x) => x !== id);
-    if (!m.url) rmSync(this.mediaPath(stationId, m), { force: true });
-    this.publish('library.changed', stationId, { removed: id });
-    this.publishQueue(stationId);
-    this.changed();
-  }
-
-  // ---------- Queue / Automation ----------
+  // ---------- Queue / Automation / Decks ----------
 
   queueView(stationId: string, remainingCurrentMs = 0): unknown {
     const rt = this.rt(stationId);
@@ -857,7 +582,7 @@ export class AirDeckApp {
   }
 
   queueAdd(stationId: string, mediaId: string, index?: number): void {
-    this.media(stationId, mediaId);
+    this.svc.media.media(stationId, mediaId);
     this.rt(stationId).queue.add(mediaId, 'manual', index);
     this.publishQueue(stationId);
   }
@@ -915,7 +640,7 @@ export class AirDeckApp {
 
   setNowPlaying(stationId: string, mediaId: string, deck: DeckId): NowPlaying {
     const rt = this.rt(stationId);
-    const m = this.media(stationId, mediaId);
+    const m = this.svc.media.media(stationId, mediaId);
     rt.nowPlaying = { mediaId, deck, startedAt: Date.now() };
     if (m.category === 'music') {
       rt.data.history.unshift(mediaId);
@@ -948,7 +673,7 @@ export class AirDeckApp {
     if (!(DECK_IDS as readonly string[]).includes(deckId)) throw new AppError(404, 'not_found', 'Deck nicht gefunden');
     const d = rt.decks[deckId as DeckId];
     if (patch.mediaId !== undefined) {
-      if (patch.mediaId !== null) this.media(stationId, patch.mediaId);
+      if (patch.mediaId !== null) this.svc.media.media(stationId, patch.mediaId);
       d.mediaId = patch.mediaId;
     }
     if (patch.status && ['empty', 'cued', 'playing', 'paused'].includes(patch.status)) d.status = patch.status;
@@ -990,7 +715,7 @@ export class AirDeckApp {
 
     const playout = new Playout(this.ffmpeg.ffmpeg, {
       nextTrack: () => this.queueNext(stationId) ?? this.emergencyPick(stationId),
-      mediaPath: (m) => this.mediaPath(stationId, m),
+      mediaPath: (m) => this.svc.media.mediaPath(stationId, m),
       onNowPlaying: (m) => this.setNowPlaying(stationId, m.id, 'A'),
       onStreamStart: (type) => {
         try {
@@ -1056,30 +781,6 @@ export class AirDeckApp {
   inputDevices(): unknown {
     if (!this.ffmpeg) return { supported: false, devices: [] };
     return { supported: true, devices: listInputDevices(this.ffmpeg.ffmpeg), monitor: !!this.ffmpeg.ffplay, eqBands: EQ_BANDS };
-  }
-
-  /** Cover-Bild aus der Audiodatei (eingebettetes Bild), zwischengespeichert. */
-  async cover(stationId: string, mediaId: string): Promise<string | null> {
-    const m = this.media(stationId, mediaId);
-    if (m.url || !this.ffmpeg) return null;
-    const dir = join(this.dataDir, 'covers', stationId);
-    const file = join(dir, `${m.id}.jpg`);
-    const none = `${file}.none`;
-    if (existsSync(file)) return file;
-    if (existsSync(none)) return null;
-    mkdirSync(dir, { recursive: true });
-    const ok = await new Promise<boolean>((resolve) => {
-      const p = spawn(this.ffmpeg!.ffmpeg, ['-hide_banner', '-loglevel', 'error', '-y', '-i', this.mediaPath(stationId, m), '-an', '-frames:v', '1', '-vf', 'scale=300:300:force_original_aspect_ratio=increase,crop=300:300', file], { windowsHide: true });
-      p.on('error', () => resolve(false));
-      p.on('close', (code) => resolve(code === 0 && existsSync(file)));
-      setTimeout(() => p.kill(), 15_000).unref();
-    });
-    if (!ok) {
-      rmSync(file, { force: true });
-      writeFileAtomic(none, '');
-      return null;
-    }
-    return file;
   }
 
   /** Schnelltrigger: Titel einer Kategorie (Rotation) über der Musik oder als Nächstes. */
@@ -1159,23 +860,7 @@ export class AirDeckApp {
     return list.length ? list[Math.floor(Math.random() * list.length)]! : null;
   }
 
-  // ---------- Ordner, URL-Streams, M3U, Titelanzeige, Verlauf ----------
-
-  folders(stationId: string): string[] {
-    return [...new Set(this.rt(stationId).data.library.map((m) => m.folder ?? '').filter(Boolean))].sort((a, b) => a.localeCompare(b, 'de'));
-  }
-
-  addUrlMedia(stationId: string, input: { url: string; title?: string; artist?: string; durationMs?: number; folder?: string }): MediaItem {
-    const url = String(input.url ?? '').trim();
-    if (!/^https?:\/\/[^\s]+$/i.test(url)) throw new AppError(400, 'invalid_url', 'Nur http(s)-URLs sind erlaubt');
-    const existing = this.rt(stationId).data.library.find((m) => m.url === url);
-    if (existing) return existing;
-    const dur = typeof input.durationMs === 'number' && input.durationMs > 0 ? Math.round(input.durationMs) : null;
-    return this.addMedia(stationId, {
-      id: newId('m'), title: String(input.title || url).slice(0, 200), artist: String(input.artist ?? '').slice(0, 200),
-      category: 'stream', file: '', url, durationMs: dur, cueOutMs: dur ?? undefined, addedAt: Date.now(), folder: input.folder,
-    });
-  }
+  // ---------- Queue aus Auswahl füllen, Titelanzeige, Sendeverlauf ----------
 
   /** Füllt die Queue mit n Titeln aus Ordner oder Kategorie (mit Rotationsregeln). */
   queueFillFrom(stationId: string, input: { folder?: string; category?: string; count?: number }): number {
@@ -1196,42 +881,6 @@ export class AirDeckApp {
     return added;
   }
 
-  exportQueueM3U(stationId: string): string {
-    const rt = this.rt(stationId);
-    const lib = new Map(rt.data.library.map((m) => [m.id, m]));
-    return toM3U(rt.queue.list().map((q) => lib.get(q.mediaId)).filter((m): m is MediaItem => !!m).map((m) => ({
-      title: m.title, artist: m.artist, durationMs: m.durationMs, path: m.url ?? m.originalName ?? m.file,
-    })));
-  }
-
-  /** M3U importieren: Einträge werden über Dateiname, "Interpret - Titel" oder URL der Bibliothek zugeordnet. */
-  importM3U(stationId: string, text: string, target: { playlistName?: string }): { matched: number; missing: string[]; playlistId?: string } {
-    const rt = this.rt(stationId);
-    const norm = (x: string) => x.toLowerCase().replace(/\.[a-z0-9]{2,5}$/, '').replace(/\s+/g, ' ').trim();
-    const byName = new Map<string, MediaItem>();
-    for (const m of rt.data.library) {
-      if (m.originalName) byName.set(norm(m.originalName), m);
-      byName.set(norm(m.artist ? `${m.artist} - ${m.title}` : m.title), m);
-      if (m.url) byName.set(m.url.toLowerCase(), m);
-    }
-    const ids: string[] = [];
-    const missing: string[] = [];
-    for (const e of parseM3U(text).slice(0, 5000)) {
-      const base = e.path.replace(/^.*[\\/]/, '');
-      let m = byName.get(e.path.toLowerCase()) ?? byName.get(norm(base)) ?? (e.title ? byName.get(norm(e.title)) : undefined);
-      if (!m && /^https?:\/\//i.test(e.path)) m = this.addUrlMedia(stationId, { url: e.path, title: e.title, durationMs: e.durationMs });
-      if (m) ids.push(m.id);
-      else missing.push(e.title ?? base);
-    }
-    if (target.playlistName) {
-      const pl = this.svc.planning.savePlaylist(stationId, null, { name: target.playlistName, items: ids });
-      return { matched: ids.length, missing, playlistId: pl.id };
-    }
-    for (const id of ids) rt.queue.add(id, 'manual');
-    this.publishQueue(stationId);
-    return { matched: ids.length, missing };
-  }
-
   /** Titelanzeige manuell senden (z. B. bei Live-Moderation). */
   sendMetadata(stationId: string, artist: string, title: string): void {
     const song = (artist ? `${artist} - ${title}` : title).slice(0, 250);
@@ -1244,9 +893,7 @@ export class AirDeckApp {
     return (this.rt(stationId).data.playLog ?? []).slice(0, Math.min(1000, Math.max(1, limit)));
   }
 
-  // ---------- Playlists ----------
-
-  // ---------- Zeitplan, Stunden-Uhr, Sendeplan ----------
+  // ---------- Weiterschalten (Planung, Playlists, Schnelltrigger) ----------
 
   /** Nächsten Titel starten – im Server-Playout direkt, sonst übernimmt das Studio (Event). */
   advance(stationId: string): void {
@@ -1254,29 +901,6 @@ export class AirDeckApp {
     if (po) po.playout.skip();
     else this.publish('automation.command', stationId, { action: 'next' });
   }
-
-  // ---------- Recorder / Replays ----------
-
-  // ---------- Benachrichtigungen, Webhooks, Now-Playing-Export ----------
-
-  // ---------- Updates ----------
-
-  // ---------- Brücke zu bestehenden Systemen ----------
-
-  // ---------- Bridge-API für Entwickler: externe Schlüssel → AirDeck-Sender (idempotent) ----------
-
-  // ---------- Stream-Status (öffentlich, wie Icecast) ----------
-
-
-  // ---------- Liquidsoap ----------
-
-  // ---------- Nextcloud-Brücke ----------
-
-  // ---------- Android-App / Netzwerk ----------
-
-  // ---------- KI-Automation ----------
-
-  // ---------- laut.fm ----------
 
   // ---------- Cardwall ----------
 
@@ -1291,7 +915,7 @@ export class AirDeckApp {
     if (typeof patch.group === 'string') slot.group = patch.group.slice(0, 40);
     if (patch.color !== undefined) slot.color = safeColor(patch.color, slot.color);
     if (patch.mediaId !== undefined) {
-      if (patch.mediaId !== null) this.media(stationId, patch.mediaId);
+      if (patch.mediaId !== null) this.svc.media.media(stationId, patch.mediaId);
       slot.mediaId = patch.mediaId;
     }
     this.publish('cardwall.changed', stationId, this.cardwall(stationId));
@@ -1305,7 +929,7 @@ export class AirDeckApp {
     if (!slot.mediaId) throw new AppError(409, 'empty_cart', 'Cart ist leer');
     const po = this.playouts.get(stationId);
     if (po) {
-      const m = this.media(stationId, slot.mediaId);
+      const m = this.svc.media.media(stationId, slot.mediaId);
       po.playout.playCart(m, ['voice_track', 'tts', 'news', 'ad'].includes(m.category));
     }
     this.publish('cardwall.triggered', stationId, { ...slot, server: !!po });

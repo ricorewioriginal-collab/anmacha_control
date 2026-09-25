@@ -72,11 +72,11 @@ test('Nextcloud-Brücke: durchsuchen, übernehmen (ohne Doppelte), Mitschnitt ho
 
     const r = await app.svc.nextcloud.nextcloudImport('main', ['/Hits'], { category: 'music' });
     assert.deepEqual(r, { imported: 2, skipped: 0, errors: [] });
-    const lib = app.library('main');
+    const lib = app.svc.media.library('main');
     const levels = lib.find((m) => m.title === 'Levels')!;
     assert.equal(levels.artist, 'Avicii');
     assert.equal(levels.folder, 'Hits / Deep');
-    assert.equal(readFileSync(app.mediaPath('main', levels), 'utf8'), 'ID3-levels');
+    assert.equal(readFileSync(app.svc.media.mediaPath('main', levels), 'utf8'), 'ID3-levels');
     assert.deepEqual(await app.svc.nextcloud.nextcloudImport('main', ['/Hits/Kygo - Firestone.mp3'], {}), { imported: 0, skipped: 1, errors: [] });
 
     // Mitschnitt hochladen

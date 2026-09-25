@@ -154,12 +154,12 @@ export class BridgeService {
     if (!/^[A-Za-z0-9][A-Za-z0-9:._-]{0,119}$/.test(key)) throw new AppError(400, 'invalid_key', 'Schlüssel: Buchstaben, Ziffern und : . _ - (max. 120)');
     const map = this.bridgeMap();
     const known = map[key];
-    if (known && this.app.stations.has(known)) return { station: this.app.updateStation(known, input as Partial<Station>), created: false };
+    if (known && this.app.stations.has(known)) return { station: this.app.svc.stations.updateStation(known, input as Partial<Station>), created: false };
     const base = (typeof input.id === 'string' && input.id ? input.id : key).toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 32) || 'sender';
     let sid = base;
     for (let i = 2; this.app.stations.has(sid); i++) sid = `${base}-${i}`;
-    const station = this.app.createStation({ id: sid, name: String(input.name ?? key).slice(0, 80), slogan: typeof input.slogan === 'string' ? input.slogan : undefined, primaryColor: input.primaryColor as string, accentColor: input.accentColor as string }, input.withDefaultSources !== false);
-    if (typeof input.genre === 'string') this.app.updateStation(sid, { genre: input.genre });
+    const station = this.app.svc.stations.createStation({ id: sid, name: String(input.name ?? key).slice(0, 80), slogan: typeof input.slogan === 'string' ? input.slogan : undefined, primaryColor: input.primaryColor as string, accentColor: input.accentColor as string }, input.withDefaultSources !== false);
+    if (typeof input.genre === 'string') this.app.svc.stations.updateStation(sid, { genre: input.genre });
     map[key] = sid;
     this.app.docs.set('bridge-keys', map);
     this.app.audit.write({ kind: 'bridge', event: 'station_created', key, stationId: sid });

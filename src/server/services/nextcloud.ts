@@ -103,7 +103,7 @@ export class NextcloudService {
       try {
         await this.ncCall(() => client.download(cleanPath(`${root}/${f.path}`), join(this.app.mediaDir, stationId, file), 500 * 1024 * 1024));
         const meta = parseFileName(f.name);
-        this.app.addMedia(stationId, { id, title: meta.title || f.name, artist: meta.artist, category, file, durationMs: null, addedAt: Date.now(), folder: f.folder.slice(0, 80) || undefined, originalName: f.name, source: `nextcloud:${f.path}` });
+        this.app.svc.media.addMedia(stationId, { id, title: meta.title || f.name, artist: meta.artist, category, file, durationMs: null, addedAt: Date.now(), folder: f.folder.slice(0, 80) || undefined, originalName: f.name, source: `nextcloud:${f.path}` });
         imported++;
       } catch (err) {
         errors.push(`${f.name}: ${(err as Error).message}`);

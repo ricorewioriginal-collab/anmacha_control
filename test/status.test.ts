@@ -51,7 +51,7 @@ test('Öffentlicher Status eines AirDeck-Senders (JSON/XML), abschaltbar', async
   await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
   const base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
   try {
-    const m = app.addMedia('main', { id: 'm1', title: 'Believer', artist: 'Imagine Dragons', category: 'music', file: 'b.mp3', durationMs: 200_000, addedAt: 0 });
+    const m = app.svc.media.addMedia('main', { id: 'm1', title: 'Believer', artist: 'Imagine Dragons', category: 'music', file: 'b.mp3', durationMs: 200_000, addedAt: 0 });
     app.setNowPlaying('main', m.id, 'A');
     const list = (await (await fetch(`${base}/status.json`)).json()) as { stations: { id: string }[] };
     assert.deepEqual(list.stations.map((s) => s.id), ['main']);
@@ -64,7 +64,7 @@ test('Öffentlicher Status eines AirDeck-Senders (JSON/XML), abschaltbar', async
     assert.deepEqual(s.icestats.source, [], 'ohne verbundenen Ausgang kein Mount (wie Icecast)');
     const xml = await (await fetch(`${base}/status/main.xml`)).text();
     assert.match(xml, /^<\?xml[\s\S]*<sources>0<\/sources>/);
-    app.updateStation('main', { publicStatus: false });
+    app.svc.stations.updateStation('main', { publicStatus: false });
     assert.equal((await fetch(`${base}/status/main.json`)).status, 404);
     assert.deepEqual(((await (await fetch(`${base}/status.json`)).json()) as { stations: unknown[] }).stations, []);
   } finally {

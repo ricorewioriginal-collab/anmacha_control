@@ -70,7 +70,7 @@ export class AiToolsService {
     const id = newId('m');
     const file = `${id}.${ext === 'wav' ? 'wav' : 'mp3'}`;
     writeFileSync(join(this.app.mediaDir, stationId, file), audio);
-    return this.app.addMedia(stationId, {
+    return this.app.svc.media.addMedia(stationId, {
       id, title: title.slice(0, 200), artist: this.app.rt(stationId).station.name, category, file, durationMs: null, addedAt: Date.now(),
       folder: generated ? 'KI' : 'KI-Studio', ...(generated ? { generatedBy: 'ai' as const } : {}),
     });

@@ -40,7 +40,7 @@ test('Webhook (signiert), Now-Playing-Datei und Stream-Ereignisse', async () => 
   const url = `http://127.0.0.1:${(hook.address() as { port: number }).port}/hook`;
   const app = new AirDeckApp(dir, { stableMs: 0, ffmpeg: null });
   try {
-    app.addMedia('main', { id: 'a', title: 'Believer', artist: 'Imagine Dragons', category: 'music', file: 'a.mp3', durationMs: 1000, addedAt: 0 });
+    app.svc.media.addMedia('main', { id: 'a', title: 'Believer', artist: 'Imagine Dragons', category: 'music', file: 'a.mp3', durationMs: 1000, addedAt: 0 });
     const npFile = join(dir, 'export', 'nowplaying.txt');
     assert.throws(() => app.svc.notifications.setIntegrations(admin, 'main', { webhooks: [{ url: 'nope', events: [] }] }), /URL/);
     const cfg = app.svc.notifications.setIntegrations(admin, 'main', {
@@ -78,7 +78,7 @@ test('Notfall-Ordner wird genutzt, wenn nichts anderes spielt', () => {
   const dir = mkdtempSync(join(tmpdir(), 'airdeck-em-'));
   const app = new AirDeckApp(dir, { stableMs: 0, ffmpeg: null });
   try {
-    app.addMedia('main', { id: 'n1', title: 'Notfall', artist: '', category: 'jingle', file: 'n.mp3', durationMs: 1000, addedAt: 0, folder: 'Notfall' });
+    app.svc.media.addMedia('main', { id: 'n1', title: 'Notfall', artist: '', category: 'jingle', file: 'n.mp3', durationMs: 1000, addedAt: 0, folder: 'Notfall' });
     app.savePlayoutConfig('main', { emergencyFolder: 'Notfall' });
     const pick = (app as unknown as { emergencyPick(s: string): { id: string } | null }).emergencyPick('main');
     assert.equal(pick?.id, 'n1');

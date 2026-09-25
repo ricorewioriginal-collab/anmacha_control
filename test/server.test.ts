@@ -251,7 +251,7 @@ test('Persistenz: Neustart stellt Konfiguration ohne aktive Quellen wieder her',
   assert.equal(list.length, 4);
   assert.ok(list.every((s) => s.state === 'disconnected'));
   assert.equal(again.listOutputs('main').length, 1);
-  assert.equal(again.library('main').length, 3);
+  assert.equal(again.svc.media.library('main').length, 3);
   assert.ok(again.svc.auth.authenticate(token));
   again.shutdown();
 });

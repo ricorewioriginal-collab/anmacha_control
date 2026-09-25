@@ -108,7 +108,7 @@ test('KI-Automation: Moderation, Fallback, Kosten, Budget, Freigabe, Musikplanun
 
     assert.throws(() => app.svc.ai.setAiConfig(admin, 'main', { enabled: true }), /Text-Provider/);
     const add = (title: string, artist: string, category: 'music' | 'station_id') =>
-      app.addMedia('main', { id: `m-${title}`, title, artist, category, file: `${title}.mp3`, durationMs: 180_000, addedAt: Date.now() });
+      app.svc.media.addMedia('main', { id: `m-${title}`, title, artist, category, file: `${title}.mp3`, durationMs: 180_000, addedAt: Date.now() });
     const kygo = add('Firestone', 'Kygo', 'music');
     add('Wake Me Up', 'Avicii', 'music');
     add('Believer', 'Imagine Dragons', 'music');

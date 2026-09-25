@@ -14,7 +14,7 @@ function setup() {
   const dir = mkdtempSync(join(tmpdir(), 'airdeck-f-'));
   const app = new AirDeckApp(dir, { stableMs: 0, ffmpeg: null });
   for (const [id, cat, folder] of [['a', 'music', 'Rock'], ['b', 'music', 'Rock'], ['c', 'music', 'Pop'], ['j', 'jingle', 'Jingles']] as const) {
-    app.addMedia('main', { id, title: `Titel ${id}`, artist: `Artist ${id}`, category: cat, file: `${id}.mp3`, durationMs: 60_000, addedAt: 0, folder, originalName: `Artist ${id} - Titel ${id}.mp3` });
+    app.svc.media.addMedia('main', { id, title: `Titel ${id}`, artist: `Artist ${id}`, category: cat, file: `${id}.mp3`, durationMs: 60_000, addedAt: 0, folder, originalName: `Artist ${id} - Titel ${id}.mp3` });
   }
   return { dir, app, done: () => { app.shutdown(); rmSync(dir, { recursive: true, force: true }); } };
 }
@@ -22,7 +22,7 @@ function setup() {
 test('Ordner, Queue aus Ordner füllen, Playlists, Playlist abspielen', () => {
   const { app, done } = setup();
   try {
-    assert.deepEqual(app.folders('main'), ['Jingles', 'Pop', 'Rock']);
+    assert.deepEqual(app.svc.media.folders('main'), ['Jingles', 'Pop', 'Rock']);
     assert.equal(app.queueFillFrom('main', { folder: 'Rock', count: 2 }), 2);
     const q = (app.queueView('main') as { items: { mediaId: string }[] }).items.map((x) => x.mediaId);
     assert.deepEqual(new Set(q), new Set(['a', 'b']));
@@ -31,7 +31,7 @@ test('Ordner, Queue aus Ordner füllen, Playlists, Playlist abspielen', () => {
     app.queueClear('main');
     app.svc.planning.playPlaylist('main', pl.id);
     assert.equal((app.queueView('main') as { items: unknown[] }).items.length, 2);
-    app.removeMedia('main', 'a');
+    app.svc.media.removeMedia('main', 'a');
     assert.deepEqual(app.svc.planning.playlists('main')[0]!.items, ['b']);
   } finally {
     done();
@@ -87,14 +87,14 @@ test('M3U Export und Import (Abgleich über Dateiname/Titel, URLs)', () => {
   const { app, done } = setup();
   try {
     app.queueAdd('main', 'a');
-    const m3u = app.exportQueueM3U('main');
+    const m3u = app.svc.media.exportQueueM3U('main');
     assert.ok(m3u.includes('#EXTINF:60,Artist a - Titel a'));
-    const r = app.importM3U('main', '#EXTM3U\nC:\\\\Musik\\\\Artist b - Titel b.mp3\n#EXTINF:10,Artist c - Titel c\nirgendwo.mp3\nhttps://stream.example/live\nfehlt.mp3\n', { playlistName: 'Import' });
+    const r = app.svc.media.importM3U('main', '#EXTM3U\nC:\\\\Musik\\\\Artist b - Titel b.mp3\n#EXTINF:10,Artist c - Titel c\nirgendwo.mp3\nhttps://stream.example/live\nfehlt.mp3\n', { playlistName: 'Import' });
     assert.equal(r.matched, 3);
     assert.deepEqual(r.missing, ['fehlt.mp3']);
     assert.equal(app.svc.planning.playlists('main').find((p) => p.id === r.playlistId)!.items.length, 3);
-    assert.ok(app.library('main').some((m) => m.url === 'https://stream.example/live' && m.category === 'stream'));
-    assert.throws(() => app.addUrlMedia('main', { url: 'file:///etc/passwd' }), /http/);
+    assert.ok(app.svc.media.library('main').some((m) => m.url === 'https://stream.example/live' && m.category === 'stream'));
+    assert.throws(() => app.svc.media.addUrlMedia('main', { url: 'file:///etc/passwd' }), /http/);
   } finally {
     done();
   }

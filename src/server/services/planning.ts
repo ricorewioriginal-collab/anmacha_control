@@ -160,13 +160,13 @@ export class PlanningService {
     const rt = this.app.rt(stationId);
     switch (kind) {
       case 'media':
-        this.app.media(stationId, String(input.mediaId ?? ''));
+        this.app.svc.media.media(stationId, String(input.mediaId ?? ''));
         return { kind, mediaId: String(input.mediaId), mode, label };
       case 'folder':
         if (!rt.data.library.some((m) => (m.folder ?? '') === String(input.folder ?? ''))) throw new AppError(400, 'empty_folder', 'Ordner ist leer');
         return { kind, folder: String(input.folder ?? ''), mode, label };
       case 'url': {
-        const m = this.app.addUrlMedia(stationId, { url: String(input.url ?? ''), title: label, durationMs: Number(input.durationMs) || undefined });
+        const m = this.app.svc.media.addUrlMedia(stationId, { url: String(input.url ?? ''), title: label, durationMs: Number(input.durationMs) || undefined });
         return { kind: 'media', mediaId: m.id, mode, label: label ?? m.title };
       }
       case 'playlist':

@@ -43,11 +43,11 @@ test('Titel werden automatisch gemessen (EBU R128)', { skip: !ff && 'ffmpeg nich
     execFileSync(ff!.ffmpeg, ['-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'sine=f=440:d=4', '-af', 'volume=-20dB', '-c:a', 'libmp3lame', '-b:a', '128k', file]);
     const direct = await analyzeLoudness(ff!.ffmpeg, file);
     assert.ok(direct && direct.lufs < -30 && direct.lufs > -55, `LUFS plausibel: ${direct?.lufs}`);
-    const m = app.addMedia('main', item({ id: 'm1', file: 'leise.mp3', durationMs: null }));
+    const m = app.svc.media.addMedia('main', item({ id: 'm1', file: 'leise.mp3', durationMs: null }));
     for (let i = 0; i < 100 && m.lufs == null; i++) await new Promise((r) => setTimeout(r, 50));
     assert.equal(m.lufs, direct!.lufs);
     assert.ok(m.truePeakDb! < 0);
-    assert.deepEqual(app.loudnessStatus('main'), { total: 1, measured: 1, pending: 0, running: false });
+    assert.deepEqual(app.svc.media.loudnessStatus('main'), { total: 1, measured: 1, pending: 0, running: false });
     app.shutdown();
   } finally {
     rmSync(dir, { recursive: true, force: true });

@@ -138,17 +138,17 @@ export function createHttpServer(app: AirDeckApp, studioDir: string): Server {
   add('DELETE', '/api/v1/tokens/:id', 'tokens:write', (c) => app.svc.auth.revokeToken(c.params.id!));
 
   // --- Sender / Branding ---
-  add('GET', '/api/v1/stations', 'branding:read', (c) => app.listStations(c.p));
+  add('GET', '/api/v1/stations', 'branding:read', (c) => app.svc.stations.listStations(c.p));
   add('POST', '/api/v1/stations', 'stations:write', async (c) => {
     const b = await c.body();
     if (!c.p.stationIds.includes('*')) throw new AppError(403, 'forbidden', 'Nur globale Admins legen Sender an');
-    return app.createStation({ id: String(b.id ?? ''), name: String(b.name ?? ''), slogan: str(b.slogan), primaryColor: str(b.primaryColor), accentColor: str(b.accentColor) }, b.withDefaultSources !== false);
+    return app.svc.stations.createStation({ id: String(b.id ?? ''), name: String(b.name ?? ''), slogan: str(b.slogan), primaryColor: str(b.primaryColor), accentColor: str(b.accentColor) }, b.withDefaultSources !== false);
   });
-  add('GET', '/api/v1/stations/:sid', 'branding:read', (c) => app.station(sid(c)));
-  add('PATCH', '/api/v1/stations/:sid', 'stations:write', async (c) => app.updateStation(sid(c), await c.body()));
+  add('GET', '/api/v1/stations/:sid', 'branding:read', (c) => app.svc.stations.station(sid(c)));
+  add('PATCH', '/api/v1/stations/:sid', 'stations:write', async (c) => app.svc.stations.updateStation(sid(c), await c.body()));
   add('DELETE', '/api/v1/stations/:sid', 'stations:write', (c) => {
     if (!c.p.stationIds.includes('*')) throw new AppError(403, 'forbidden', 'Nur globale Admins löschen Sender');
-    app.deleteStation(c.p, sid(c));
+    app.svc.stations.deleteStation(c.p, sid(c));
   });
   add('PUT', '/api/v1/stations/:sid/logo', 'stations:write', async (c) => {
     const chunks: Buffer[] = [];
@@ -158,9 +158,9 @@ export function createHttpServer(app: AirDeckApp, studioDir: string): Server {
       if (size > 2 * 1024 * 1024) throw new AppError(413, 'too_large', 'Logo höchstens 2 MB');
       chunks.push(d as Buffer);
     }
-    return app.setStationLogo(sid(c), String(c.req.headers['content-type'] ?? ''), Buffer.concat(chunks));
+    return app.svc.stations.setStationLogo(sid(c), String(c.req.headers['content-type'] ?? ''), Buffer.concat(chunks));
   });
-  add('DELETE', '/api/v1/stations/:sid/logo', 'stations:write', (c) => app.removeStationLogo(sid(c)));
+  add('DELETE', '/api/v1/stations/:sid/logo', 'stations:write', (c) => app.svc.stations.removeStationLogo(sid(c)));
 
   // --- Quellen / Source Priority ---
   add('GET', '/api/v1/stations/:sid/sources', 'sources:read', (c) => app.listSources(sid(c)));
@@ -188,7 +188,7 @@ export function createHttpServer(app: AirDeckApp, studioDir: string): Server {
   add('DELETE', '/api/v1/stations/:sid/outputs/:id', 'outputs:write', (c) => app.removeOutput(c.p, sid(c), c.params.id!));
 
   // --- Medien ---
-  add('GET', '/api/v1/stations/:sid/media', 'media:read', (c) => app.library(sid(c)));
+  add('GET', '/api/v1/stations/:sid/media', 'media:read', (c) => app.svc.media.library(sid(c)));
   add('PUT', '/api/v1/stations/:sid/media', 'media:write', async (c) => {
     const s = sid(c);
     const name = String(c.url.searchParams.get('name') ?? '').slice(0, 200);
@@ -214,19 +214,19 @@ export function createHttpServer(app: AirDeckApp, studioDir: string): Server {
     }
     const meta = parseFileName(name);
     const folder = (c.url.searchParams.get('folder') ?? '').trim().slice(0, 80) || undefined;
-    return app.addMedia(s, { id, title: meta.title || name, artist: meta.artist, category, file, durationMs: null, addedAt: Date.now(), folder, originalName: name.replace(/^.*[\\/]/, '') });
+    return app.svc.media.addMedia(s, { id, title: meta.title || name, artist: meta.artist, category, file, durationMs: null, addedAt: Date.now(), folder, originalName: name.replace(/^.*[\\/]/, '') });
   });
-  add('PATCH', '/api/v1/stations/:sid/media/:id', 'media:write', async (c) => app.updateMedia(sid(c), c.params.id!, await c.body()));
-  add('DELETE', '/api/v1/stations/:sid/media/:id', 'media:write', (c) => app.removeMedia(sid(c), c.params.id!));
+  add('PATCH', '/api/v1/stations/:sid/media/:id', 'media:write', async (c) => app.svc.media.updateMedia(sid(c), c.params.id!, await c.body()));
+  add('DELETE', '/api/v1/stations/:sid/media/:id', 'media:write', (c) => app.svc.media.removeMedia(sid(c), c.params.id!));
   add('GET', '/api/v1/stations/:sid/media/:id/file', 'media:read', (c) => {
     const s = sid(c);
-    const m = app.media(s, c.params.id!);
+    const m = app.svc.media.media(s, c.params.id!);
     if (m.url) {
       c.res.writeHead(302, { Location: m.url });
       c.res.end();
       return STREAMED;
     }
-    sendFile(c.req, c.res, app.mediaPath(s, m), AUDIO_EXT[extname(m.file)] ?? 'application/octet-stream');
+    sendFile(c.req, c.res, app.svc.media.mediaPath(s, m), AUDIO_EXT[extname(m.file)] ?? 'application/octet-stream');
     return STREAMED;
   });
 
@@ -269,7 +269,7 @@ export function createHttpServer(app: AirDeckApp, studioDir: string): Server {
   add('GET', '/api/v1/ai', 'ai:read', () => app.health.ai());
   add('POST', '/api/v1/stations/:sid/quick/:category', 'cardwall:trigger', async (c) => app.quickTrigger(sid(c), c.params.category!, str((await c.body()).mode)));
   add('GET', '/api/v1/stations/:sid/media/:id/cover', 'media:read', async (c) => {
-    const file = await app.cover(sid(c), c.params.id!);
+    const file = await app.svc.media.cover(sid(c), c.params.id!);
     if (!file) throw new AppError(404, 'no_cover', 'Kein Cover');
     c.res.setHeader('Cache-Control', 'private, max-age=86400');
     sendFile(c.req, c.res, file, 'image/jpeg');
@@ -280,18 +280,18 @@ export function createHttpServer(app: AirDeckApp, studioDir: string): Server {
   add('POST', '/api/v1/stations/:sid/playout/skip', 'automation:write', (c) => app.skipPlayout(sid(c)));
 
   // --- Ordner, URL-Streams, M3U, Titelanzeige, Verlauf ---
-  add('GET', '/api/v1/stations/:sid/folders', 'media:read', (c) => app.folders(sid(c)));
-  add('POST', '/api/v1/stations/:sid/media/url', 'media:write', async (c) => app.addUrlMedia(sid(c), (await c.body()) as never));
+  add('GET', '/api/v1/stations/:sid/folders', 'media:read', (c) => app.svc.media.folders(sid(c)));
+  add('POST', '/api/v1/stations/:sid/media/url', 'media:write', async (c) => app.svc.media.addUrlMedia(sid(c), (await c.body()) as never));
   add('POST', '/api/v1/stations/:sid/queue/fill-from', 'queue:write', async (c) => ({ added: app.queueFillFrom(sid(c), (await c.body()) as never) }));
   add('GET', '/api/v1/stations/:sid/queue.m3u', 'queue:read', (c) => {
-    const text = app.exportQueueM3U(sid(c));
+    const text = app.svc.media.exportQueueM3U(sid(c));
     c.res.writeHead(200, { 'Content-Type': 'audio/x-mpegurl; charset=utf-8', 'Content-Disposition': 'attachment; filename="airdeck-queue.m3u"' });
     c.res.end(text);
     return STREAMED;
   });
   add('POST', '/api/v1/stations/:sid/m3u/import', 'queue:write', async (c) => {
     const b = await c.body();
-    return app.importM3U(sid(c), String(b.text ?? ''), { playlistName: typeof b.playlistName === 'string' && b.playlistName ? b.playlistName : undefined });
+    return app.svc.media.importM3U(sid(c), String(b.text ?? ''), { playlistName: typeof b.playlistName === 'string' && b.playlistName ? b.playlistName : undefined });
   });
   add('POST', '/api/v1/stations/:sid/metadata', 'automation:write', async (c) => {
     const b = await c.body();
@@ -426,8 +426,8 @@ export function createHttpServer(app: AirDeckApp, studioDir: string): Server {
 
   // --- Lautheitsanalyse & Klangprofile ---
   add('GET', '/api/v1/dsp/presets', 'automation:read', () => DSP_PRESETS);
-  add('GET', '/api/v1/stations/:sid/media/loudness', 'media:read', (c) => app.loudnessStatus(sid(c)));
-  add('POST', '/api/v1/stations/:sid/media/loudness', 'media:write', async (c) => app.analyzeLibrary(sid(c), (await c.body()).force === true));
+  add('GET', '/api/v1/stations/:sid/media/loudness', 'media:read', (c) => app.svc.media.loudnessStatus(sid(c)));
+  add('POST', '/api/v1/stations/:sid/media/loudness', 'media:write', async (c) => app.svc.media.analyzeLibrary(sid(c), (await c.body()).force === true));
 
   // --- Nextcloud-Brücke ---
   add('GET', '/api/v1/nextcloud', null, (c) => (globalAdmin(c), app.svc.nextcloud.nextcloudConfig()));
@@ -613,7 +613,7 @@ export function createHttpServer(app: AirDeckApp, studioDir: string): Server {
     // Senderlogo ist Branding und öffentlich (Studio, Widgets, Android-App)
     const logo = /^\/api\/v1\/stations\/([a-z0-9-]{1,40})\/logo$/.exec(path);
     if (logo && req.method === 'GET') {
-      const l = app.stationLogo(logo[1]!);
+      const l = app.svc.stations.stationLogo(logo[1]!);
       if (!l) return json(res, 404, { error: 'not_found' });
       res.writeHead(200, { 'Content-Type': l.type, 'Cache-Control': 'public, max-age=300', 'X-Content-Type-Options': 'nosniff' });
       return void createReadStream(l.path).pipe(res);
