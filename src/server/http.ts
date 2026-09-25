@@ -260,7 +260,13 @@ export function createHttpServer(app: AirDeckApp, studioDir: string): Server {
   add('POST', '/api/v1/stations/:sid/playout/start', 'automation:write', async (c) => app.startPlayout(c.p, sid(c), (await c.body()) as never));
   add('POST', '/api/v1/stations/:sid/playout/stop', 'automation:write', (c) => app.stopPlayout(c.p, sid(c)));
   add('POST', '/api/v1/stations/:sid/playout/mic', 'automation:write', async (c) => app.setMic(sid(c), (await c.body()).on === true));
-  add('GET', '/api/v1/system', null, () => app.system());
+  // Zustandsberichte (angemeldet): Laufzeit, Abhängigkeiten, Datenbank, Audio, Encoder, Stream, KI
+  add('GET', '/api/v1/system', null, () => ({ ...(app.system() as object), ...app.health.system() }));
+  add('GET', '/api/v1/database', null, () => app.health.database());
+  add('GET', '/api/v1/audio', null, () => app.health.audio());
+  add('GET', '/api/v1/encoder', null, (c) => app.health.encoder((s) => canSee(c.p, s)));
+  add('GET', '/api/v1/stream', null, (c) => app.health.stream((s) => canSee(c.p, s)));
+  add('GET', '/api/v1/ai', 'ai:read', () => app.health.ai());
   add('POST', '/api/v1/stations/:sid/quick/:category', 'cardwall:trigger', async (c) => app.quickTrigger(sid(c), c.params.category!, str((await c.body()).mode)));
   add('GET', '/api/v1/stations/:sid/media/:id/cover', 'media:read', async (c) => {
     const file = await app.cover(sid(c), c.params.id!);
@@ -542,7 +548,12 @@ export function createHttpServer(app: AirDeckApp, studioDir: string): Server {
     }
 
     if (path.startsWith('/ingest/')) return handleIngest(app, req, res, path);
-    if (path === '/api/v1/health') return json(res, 200, { ok: true, name: 'AirDeck', version: '0.4.0' });
+    // öffentlich, ohne Details (NETWORK.md); `ok` bleibt für ältere Clients erhalten
+    if (path === '/api/v1/health') {
+      res.setHeader('Cache-Control', 'no-store');
+      const h = app.health.summary();
+      return json(res, h.status === 'error' ? 503 : 200, { ok: h.status !== 'error', ...h });
+    }
     // Anmeldung (öffentlich): Benutzername + Passwort → Sitzungs-Token; Sperre nach Fehlversuchen im UserStore
     if (path === '/api/v1/auth/status' && req.method === 'GET') return json(res, 200, { users: app.users.count > 0 });
     if (path === '/api/v1/auth/login' && req.method === 'POST') {

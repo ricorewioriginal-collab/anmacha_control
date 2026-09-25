@@ -41,7 +41,7 @@ import { IcecastOutput, type BroadcastOutput, type OutputConfig, type OutputStat
 import { ShoutcastOutput } from './shoutcast.ts';
 import { fetchListeners } from './stats.ts';
 import { RelayTarget } from './relay.ts';
-import { analyzeLoudness, detectFfmpeg, inputDeviceArgs, listInputDevices, probeMedia, type FfmpegInfo } from './ffmpeg.ts';
+import { analyzeLoudness, detectFfmpeg, detectFfmpegAsync, inputDeviceArgs, listInputDevices, probeMedia, type FfmpegInfo } from './ffmpeg.ts';
 import { DEFAULT_PLAYOUT, DSP_PRESETS, EQ_BANDS, Playout, type PlayoutOptions } from './playout.ts';
 import {
   activeWindow, clockDue, dueJobs, nextOccurrence, parseM3U, toM3U, validateClock, validateWindow,
@@ -51,6 +51,8 @@ import { pickNext as pickFromPool } from '../core/automation.ts';
 import type { RelayTap } from './relay.ts';
 import { DEFAULT_ORIGIN, ORIGIN_RE, PUBLIC_API, RADIOADMIN, loginUrl, type LautfmConfig } from './lautfm.ts';
 import { SyncManager } from './sync.ts';
+import { appVersion, type AirDeckConfig, type Mode } from './config.ts';
+import { HealthManager } from './health.ts';
 import { DEFAULT_SOURCE, Updater, type UpdateSource } from './update.ts';
 import { AiService } from './ai/service.ts';
 import { AiDirector, DEFAULT_AI, type AiStationConfig, type AiSource } from './ai/director.ts';
@@ -241,7 +243,13 @@ export class AirDeckApp {
   private readonly outputs = new Map<string, BroadcastOutput>();
   private readonly relays = new Map<string, RelayTarget>();
   private readonly playouts = new Map<string, { playout: Playout; source: SourceConfig }>();
-  readonly ffmpeg: FfmpegInfo | null;
+  /** kann sich im Betrieb ändern: fehlgeschlagene Erkennung wird im Hintergrund wiederholt */
+  ffmpeg: FfmpegInfo | null;
+  readonly health: HealthManager;
+  readonly mode: Mode;
+  readonly version: string;
+  readonly paths: AirDeckConfig['paths'];
+  private ffmpegRetry: NodeJS.Timeout | null = null;
   private tickCount = 0;
   private lastSchedAt = Date.now();
   private readonly activePlanId = new Map<string, string | null>();
@@ -269,11 +277,16 @@ export class AirDeckApp {
   requestShutdown: (() => void) | null = null;
   listenPort = 8750;
 
-  constructor(dataDir: string, opts: { stableMs?: number; cooldownMs?: number; appRoot?: string; ffmpeg?: FfmpegInfo | null; secrets?: SecretStore; sync?: SyncManager; build?: string; packaged?: boolean; headless?: boolean } = {}) {
+  constructor(dataDir: string, opts: { stableMs?: number; cooldownMs?: number; appRoot?: string; ffmpeg?: FfmpegInfo | null; secrets?: SecretStore; sync?: SyncManager; build?: string; packaged?: boolean; headless?: boolean; config?: AirDeckConfig; ffmpegRetryS?: number[] } = {}) {
     this.dataDir = dataDir;
     this.ffmpeg = opts.ffmpeg !== undefined ? opts.ffmpeg : detectFfmpeg(opts.appRoot ?? process.cwd());
-    this.mediaDir = join(dataDir, 'media');
+    this.ffmpegDisabled = opts.ffmpeg === null;
+    if (opts.ffmpegRetryS) this.ffmpegRetryS = opts.ffmpegRetryS;
+    this.mediaDir = opts.config?.paths.media ?? join(dataDir, 'media');
     mkdirSync(this.mediaDir, { recursive: true });
+    this.paths = opts.config?.paths ?? { config: join(dataDir, 'config'), data: dataDir, media: this.mediaDir, logs: join(dataDir, 'logs'), backups: join(dataDir, 'backups') };
+    this.mode = opts.config?.mode ?? (opts.headless ? 'server' : 'local');
+    this.version = appVersion(opts.appRoot ?? process.cwd());
     this.secrets = opts.secrets ?? new SecretStore(dataDir);
     this.updater = new Updater(opts.build ?? 'dev');
     this.packaged = opts.packaged ?? false;
@@ -322,6 +335,28 @@ export class AirDeckApp {
     this.engine.on((e) => this.onEngineEvent(e));
     this.persist = new DebouncedJson(file, () => this.snapshot());
     this.sync = opts.sync ?? new SyncManager(dataDir, this.secrets, (event, data) => this.audit.write({ kind: 'sync', event, ...data }));
+    this.health = new HealthManager({
+      name: 'AirDeck',
+      version: this.version,
+      build: opts.build ?? 'dev',
+      mode: this.mode,
+      packaged: this.packaged,
+      paths: this.paths,
+      ffmpeg: () => this.ffmpeg,
+      // bis zur Datenbankschicht (ARCHITECTURE §9, Schritt 2): JSON-Dateien im Datenordner, optional mit Sync
+      database: () => ({
+        provider: 'json',
+        state: this.sync.status.lastError && this.sync.config.backend !== 'local' ? 'BROKEN' : 'READY',
+        detail: this.sync.config.backend === 'local' ? undefined : `Abgleich ${this.sync.config.backend}${this.sync.status.lastError ? `: ${this.sync.status.lastError}` : ''}`,
+        sync: { backend: this.sync.config.backend, lastDecision: this.sync.status.lastDecision, lastPushAt: this.sync.status.lastPushAt, error: this.sync.status.lastError },
+      }),
+      aiProviders: () => ((this.ai.view() as { providers: { id: string; name: string; kind: string; enabled: boolean; hasKey: boolean; binPath?: string }[] }).providers),
+      outputs: () => [...this.outputs.values()].map((o) => ({ id: o.cfg.id, stationId: o.cfg.stationId, name: o.cfg.name, status: o.state.status, error: o.state.error })),
+      encoders: () => [...this.playouts].map(([stationId, { playout }]) => {
+        const st = playout.status();
+        return { stationId, running: st.running, encoder: st.encoder, format: st.format, bitrateKbps: st.bitrateKbps };
+      }),
+    });
     this.persist.onWrite = () => this.sync.schedulePush(() => readFileSync(file, 'utf8'));
 
     for (const st of state?.stations ?? []) this.mountStation(st, state?.data[st.id]);
@@ -340,9 +375,40 @@ export class AirDeckApp {
     this.levelTimer.unref();
     // Brücken: Relays zu bestehenden Systemen wieder aufnehmen
     this.startBridges();
-    // 24/7: Playouts, die vor dem Neustart liefen, automatisch wieder starten
+    this.autostartPlayouts();
+    if (!this.ffmpeg && !this.ffmpegDisabled) this.scheduleFfmpegRetry(0);
+  }
+
+  /** false, wenn Tests bzw. Hilfsinstanzen ffmpeg ausdrücklich abgeschaltet haben */
+  private ffmpegDisabled = false;
+  private ffmpegRetryS = [10, 30, 60, 120, 300];
+
+  /** ffmpeg-Erkennung ist beim Start fehlgeschlagen (z. B. Zeitüberschreitung unter Last): im Hintergrund erneut suchen. */
+  private scheduleFfmpegRetry(attempt: number): void {
+    const delay = this.ffmpegRetryS[attempt];
+    if (delay === undefined) {
+      this.audit.write({ kind: 'system', event: 'ffmpeg_missing', attempts: attempt });
+      return;
+    }
+    this.ffmpegRetry = setTimeout(() => {
+      void detectFfmpegAsync(this.appRoot).then((info) => {
+        this.ffmpegRetry = null;
+        if (!info) return this.scheduleFfmpegRetry(attempt + 1);
+        this.ffmpeg = info;
+        console.log(`ffmpeg gefunden (Versuch ${attempt + 2}): ${info.version}`);
+        this.audit.write({ kind: 'system', event: 'ffmpeg_ready', source: info.source, attempt: attempt + 2 });
+        this.publish('system.dependency', undefined, { id: 'ffmpeg', state: 'READY' });
+        this.autostartPlayouts();
+      });
+    }, delay * 1000);
+    this.ffmpegRetry.unref();
+  }
+
+  // 24/7: Playouts, die vor dem Neustart liefen, automatisch wieder starten
+  private autostartPlayouts(): void {
+    if (!this.ffmpeg) return;
     for (const [id, rt] of this.stations) {
-      if (!rt.data.playout?.autostart) continue;
+      if (!rt.data.playout?.autostart || this.playouts.get(id)?.playout.status().running) continue;
       try {
         this.startPlayout(SYSTEM_PRINCIPAL, id, {});
       } catch (err) {
@@ -352,6 +418,7 @@ export class AirDeckApp {
   }
 
   shutdown(): void {
+    if (this.ffmpegRetry) clearTimeout(this.ffmpegRetry);
     this.ai.flush();
     this.users.flush();
     for (const r of this.pulls.values()) r.stop();

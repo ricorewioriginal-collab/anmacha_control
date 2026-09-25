@@ -83,6 +83,20 @@ test('ohne Token kein Zugriff, Health öffentlich', async () => {
   assert.equal((await api('GET', '/api/v1/stations', undefined, 'falsch')).status, 401);
   const h = await fetch(base + '/api/v1/health');
   assert.equal(h.status, 200);
+  const body = (await h.json()) as Record<string, string>;
+  assert.equal(body.name, 'AirDeck');
+  assert.equal(body.api, '1.0');
+  assert.match(body.version!, /^\d+\.\d+\.\d+/);
+  for (const k of ['server', 'database', 'storage', 'audio', 'encoder', 'stream', 'ai', 'mode']) assert.ok(k in body, k);
+  // öffentlich keine Pfade oder Fehlermeldungen
+  assert.ok(!JSON.stringify(body).includes(dir));
+  // Einzelberichte nur angemeldet
+  assert.equal((await api('GET', '/api/v1/database', undefined, 'falsch')).status, 401);
+  const sys = await api('GET', '/api/v1/system');
+  assert.equal(sys.status, 200);
+  assert.ok(Array.isArray(sys.body.dependencies));
+  assert.equal(typeof sys.body.cpu, 'number');
+  for (const p of ['/api/v1/database', '/api/v1/audio', '/api/v1/encoder', '/api/v1/stream', '/api/v1/ai']) assert.equal((await api('GET', p)).status, 200, p);
 });
 
 test('Scopes werden durchgesetzt', async () => {

@@ -10,37 +10,29 @@ import { format } from 'node:util';
 import { randomBytes } from 'node:crypto';
 import { createServer } from 'node:net';
 import { homedir } from 'node:os';
+import { resolveConfig, writeDefaultConf } from './config.ts';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { AirDeckApp } from './app.ts';
 import { SecretStore } from './secrets.ts';
 import { SyncManager } from './sync.ts';
 import { createHttpServer } from './http.ts';
-import { readJson } from './store.ts';
 
 declare global {
   // wird im gebündelten Windows-/Desktop-Build per Banner gesetzt (scripts/build.mjs)
   var __AIRDECK_ROOT: string | undefined;
   var __AIRDECK_PACKAGED: boolean | undefined;
   var __AIRDECK_BUILD: string | undefined;
-  var __AIRDECK_VERSION: string | undefined;
 }
 
 const argv = process.argv.slice(2);
 const packaged = globalThis.__AIRDECK_PACKAGED === true;
 const root = process.env.AIRDECK_ROOT ?? globalThis.__AIRDECK_ROOT ?? resolve(fileURLToPath(import.meta.url), '../../..');
 const desktop = !argv.includes('--headless') && (argv.includes('--desktop') || packaged);
-const port = Number(process.env.AIRDECK_PORT ?? 8750);
-
-function defaultDataDir(): string {
-  if (!packaged) return join(root, 'data');
-  // Installiertes Programm: Nutzerdaten gehören nicht in den Programmordner
-  if (process.platform === 'win32') return join(process.env.LOCALAPPDATA ?? join(homedir(), 'AppData', 'Local'), 'AirDeck', 'data');
-  return join(homedir(), '.airdeck', 'data');
-}
-const dataDir = resolve(process.env.AIRDECK_DATA ?? defaultDataDir());
-// Im Netzwerk erreichbar (für Android-App/andere PCs): Einstellung im Studio, sonst nur dieser PC
-const host = process.env.AIRDECK_HOST ?? (readJson<{ lan?: boolean }>(join(dataDir, 'network.json'), {}).lan ? '0.0.0.0' : '127.0.0.1');
+// Betriebsart, Port, Adresse und Pfade aus airdeck.conf (docs/architecture/STORAGE.md)
+const config = resolveConfig({ env: process.env, root, packaged, desktop });
+const { port, host } = config;
+const dataDir = config.paths.data;
 const localHost = host === '0.0.0.0' ? '127.0.0.1' : host;
 
 /** Studio im App-Fenster öffnen (Edge/Chrome im App-Modus, sonst Standardbrowser). */
@@ -71,7 +63,7 @@ function portInUse(p: number, h: string): Promise<boolean> {
 
 /** Windows-Programm ohne Konsole: Ausgaben zusätzlich in data/logs/airdeck.log (mit einfacher Rotation). */
 function logToFile(): string {
-  const dir = join(dataDir, 'logs');
+  const dir = config.paths.logs;
   mkdirSync(dir, { recursive: true });
   const file = join(dir, 'airdeck.log');
   try {
@@ -126,7 +118,7 @@ async function main(): Promise<void> {
 
   // AirDeck.exe --stop: laufende Instanz sauber beenden (Tray, Startmenü „AirDeck beenden“)
   if (argv.includes('--stop')) {
-    const probe = new AirDeckApp(dataDir, { appRoot: root, ffmpeg: null });
+    const probe = new AirDeckApp(dataDir, { appRoot: root, ffmpeg: null, config });
     const r = await fetch(`http://${localHost}:${port}/api/v1/system/shutdown`, { method: 'POST', headers: { Authorization: `Bearer ${probe.desktopToken()}` }, signal: AbortSignal.timeout(5000) }).catch(() => null);
     console.log(r?.ok ? 'AirDeck wird beendet.' : 'Keine laufende AirDeck-Instanz gefunden.');
     process.exit(r?.ok ? 0 : 1);
@@ -134,7 +126,7 @@ async function main(): Promise<void> {
 
   // Zweiter Start im Desktop-Modus: nur Fenster öffnen, kein zweiter Server
   if (desktop && (await portInUse(port, host))) {
-    const probe = new AirDeckApp(dataDir, { appRoot: root, ffmpeg: null });
+    const probe = new AirDeckApp(dataDir, { appRoot: root, ffmpeg: null, config });
     openStudio(`http://${localHost}:${port}/#token=${probe.desktopToken()}`);
     return;
   }
@@ -146,10 +138,13 @@ async function main(): Promise<void> {
   if (sync.config.backend !== 'local') {
     console.log(`Datenspeicher: ${sync.config.backend} – Abgleich: ${decision ?? 'nicht möglich'}${sync.status.lastError ? ` (${sync.status.lastError})` : ''}`);
   }
-  const app = new AirDeckApp(dataDir, { appRoot: root, secrets, sync, build: globalThis.__AIRDECK_BUILD ?? 'dev', packaged, headless: !desktop });
+  mkdirSync(dataDir, { recursive: true });
+  if (writeDefaultConf(config)) console.log(`Grundeinstellungen angelegt: ${config.configFile}`);
+  const app = new AirDeckApp(dataDir, { appRoot: root, secrets, sync, build: globalThis.__AIRDECK_BUILD ?? 'dev', packaged, headless: !desktop, config });
   app.listenHost = host;
   app.listenPort = port;
-  console.log(app.ffmpeg ? `ffmpeg: ${app.ffmpeg.version}` : 'ffmpeg nicht gefunden – Server-Playout (24/7) deaktiviert');
+  console.log(`AirDeck ${app.version} · Betriebsart: ${config.mode} · Konfiguration: ${config.configFile}`);
+  console.log(app.ffmpeg ? `ffmpeg: ${app.ffmpeg.version} (${app.ffmpeg.source})` : 'ffmpeg nicht gefunden – neuer Versuch im Hintergrund, bis dahin kein Server-Playout');
 
   if (argv.includes('--new-admin-token')) {
     const { token } = app.createToken({ name: 'admin (neu)', scopes: ['*'], roles: ['admin'], stationIds: ['*'] });
@@ -157,7 +152,7 @@ async function main(): Promise<void> {
     process.exit(0);
   }
   // Eigenbetrieb (Server/Docker): erstes Administrator-Konto mit Einmal-Passwort anlegen
-  if (!desktop && app.users.count === 0) {
+  if (config.mode !== 'local' && app.users.count === 0) {
     const pw = randomBytes(9).toString('base64url');
     await app.users.create({ username: 'admin', name: 'Administrator', password: `${pw}1`, roles: ['admin'], stationIds: ['*'], mustChangePassword: true });
     console.log('\n  Anmeldung im Studio – Benutzer: admin  Einmal-Passwort (bitte beim ersten Login ändern):');

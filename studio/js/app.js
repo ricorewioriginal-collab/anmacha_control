@@ -1294,6 +1294,7 @@ function bindStatic() {
   $('btn-add-source').addEventListener('click', () => editSource());
   $('btn-add-output').addEventListener('click', () => editOutput());
   $('btn-liq').addEventListener('click', liquidsoapDialog);
+  $('btn-sys-deps').addEventListener('click', () => void showDeps());
   $('btn-station').addEventListener('click', editStation);
   $('station-select').addEventListener('change', async (e) => {
     const id = /** @type {HTMLSelectElement} */ (e.target).value;
@@ -1387,6 +1388,19 @@ function bindProcessing() {
   $('fx-pfl-v').title = 'Klick auf „Vorhören“: Ausgabegerät wählen';
 }
 
+/** @type {{ id: string, name: string, state: string, version?: string, source?: string, detail?: string }[]} */
+let lastDeps = [];
+const DEP_STATE = { READY: '✔ bereit', MISSING: '✖ fehlt', OUTDATED: '⚠ veraltet', BROKEN: '⚠ gestört' };
+const DEP_SOURCE = { bundled: 'mitgeliefert', system: 'System', custom: 'eigener Pfad', builtin: 'eingebaut' };
+
+async function showDeps() {
+  await pollSystem();
+  await formDialog('Systemzustand', lastDeps.map((d) => ({
+    name: d.id, label: d.name, type: 'info',
+    value: [DEP_STATE[/** @type {keyof typeof DEP_STATE} */ (d.state)] ?? d.state, d.version, d.source && DEP_SOURCE[/** @type {keyof typeof DEP_SOURCE} */ (d.source)], d.detail].filter(Boolean).join(' · '),
+  })), 'Schließen');
+}
+
 async function pollSystem() {
   if (!api || document.hidden) return;
   try {
@@ -1398,6 +1412,11 @@ async function pollSystem() {
     const kbit = (s.streamBytesPerSec * 8) / 1000;
     bar('sys-net', Math.min(100, kbit / 5), `${kbit.toFixed(0)} kbit/s`);
     $('sum-rate').textContent = kbit ? `${kbit.toFixed(0)} k` : '–';
+    if (Array.isArray(s.dependencies)) {
+      lastDeps = s.dependencies;
+      const bad = lastDeps.filter((d) => d.state !== 'READY');
+      $('sys-deps').textContent = bad.length ? `⚠ ${bad.map((d) => d.name).join(', ')}` : `Alle Komponenten bereit · ${s.mode ?? ''} · v${s.version ?? ''}`;
+    }
   } catch {
     // Monitoring ist optional
   }

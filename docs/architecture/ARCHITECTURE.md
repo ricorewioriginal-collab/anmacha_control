@@ -139,7 +139,7 @@ Die bisherigen Namen (`playout.state` usw.) bleiben eine Version lang als Alias 
 
 ## 9. Umbau-Reihenfolge (verbindlich)
 
-1. Konfigurations- und Pfadmodell, Betriebsart, Health-/Dependency-Manager
+1. Konfigurations- und Pfadmodell, Betriebsart, Health-/Dependency-Manager – **umgesetzt** (`src/server/config.ts`, `src/server/health.ts`)
 2. Datenbankschicht mit SQLite und Migration der JSON-Daten, dann PostgreSQL, MariaDB/MySQL, CI-Matrix
 3. Aufteilung von `app.ts` in Dienstmodule auf Repositories
 4. Audio-Engine für alle Quellen und Mode-Manager (AUTO/MANUAL/LIVE/EMERGENCY)

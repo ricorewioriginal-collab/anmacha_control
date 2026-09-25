@@ -1,7 +1,7 @@
 // ffmpeg-Capability-Erkennung. Reihenfolge: AIRDECK_FFMPEG → mitgeliefertes ./ffmpeg/ → PATH.
 // Ohne ffmpeg bleibt AirDeck lauffähig; nur das Server-Playout meldet dann "unsupported".
 
-import { spawn, spawnSync } from 'node:child_process';
+import { execFile, spawn, spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
@@ -12,34 +12,67 @@ export interface FfmpegInfo {
   ffplay: string | null;
   version: string;
   encoders: { mp3: boolean; opus: boolean };
+  /** custom = AIRDECK_FFMPEG, bundled = mitgeliefert (./ffmpeg/), system = PATH */
+  source: 'custom' | 'bundled' | 'system';
 }
 
 const exe = process.platform === 'win32' ? '.exe' : '';
+const TIMEOUT_MS = 15_000;
+const OPTS = { encoding: 'utf8' as const, timeout: TIMEOUT_MS, windowsHide: true, maxBuffer: 4 * 1024 * 1024 };
 
-function works(bin: string): string | null {
+function runSync(bin: string, args: string[]): string | null {
   try {
-    const r = spawnSync(bin, ['-hide_banner', '-version'], { encoding: 'utf8', timeout: 5000, windowsHide: true });
-    return r.status === 0 ? (r.stdout.split('\n')[0] ?? '').trim() : null;
+    const r = spawnSync(bin, args, OPTS);
+    return r.status === 0 ? r.stdout : null;
   } catch {
     return null;
   }
 }
 
-export function detectFfmpeg(appRoot: string): FfmpegInfo | null {
-  const candidates = [process.env.AIRDECK_FFMPEG, join(appRoot, 'ffmpeg', `ffmpeg${exe}`), `ffmpeg${exe}`].filter(
-    (c): c is string => !!c && (!c.includes('/') && !c.includes('\\') ? true : existsSync(c)),
-  );
-  for (const bin of candidates) {
-    const version = works(bin);
+function runAsync(bin: string, args: string[]): Promise<string | null> {
+  return new Promise((ok) => execFile(bin, args, OPTS, (err, stdout) => ok(err ? null : stdout)));
+}
+
+const isPath = (bin: string) => bin.includes('/') || bin.includes('\\');
+
+// Reihenfolge: eigener Pfad → mitgeliefert → PATH. Schlägt ein Kandidat fehl, folgt der nächste.
+function candidates(appRoot: string): { bin: string; source: FfmpegInfo['source'] }[] {
+  const list: { bin: string; source: FfmpegInfo['source'] }[] = [];
+  if (process.env.AIRDECK_FFMPEG) list.push({ bin: process.env.AIRDECK_FFMPEG, source: 'custom' });
+  list.push({ bin: join(appRoot, 'ffmpeg', `ffmpeg${exe}`), source: 'bundled' }, { bin: `ffmpeg${exe}`, source: 'system' });
+  return list.filter((c) => !isPath(c.bin) || existsSync(c.bin));
+}
+
+/** Prüfschritte als Generator: dieselbe Logik für den blockierenden Start und die Suche im Betrieb. */
+function* probe(appRoot: string): Generator<[string, string[]], FfmpegInfo | null, string | null> {
+  const firstLine = (out: string | null) => (out ?? '').split('\n')[0]!.trim() || null;
+  for (const { bin, source } of candidates(appRoot)) {
+    const version = firstLine(yield [bin, ['-hide_banner', '-version']]);
     if (!version) continue;
-    const probeCandidate = bin.includes('/') || bin.includes('\\') ? join(dirname(bin), `ffprobe${exe}`) : `ffprobe${exe}`;
-    const ffprobe = works(probeCandidate) ? probeCandidate : null;
-    const playCandidate = probeCandidate.replace(/ffprobe(\.exe)?$/, `ffplay${exe}`);
-    const ffplay = works(playCandidate) ? playCandidate : null;
-    const enc = spawnSync(bin, ['-hide_banner', '-encoders'], { encoding: 'utf8', timeout: 5000, windowsHide: true }).stdout ?? '';
-    return { ffmpeg: bin, ffprobe, ffplay, version, encoders: { mp3: /libmp3lame/.test(enc), opus: /libopus/.test(enc) } };
+    const probeBin = isPath(bin) ? join(dirname(bin), `ffprobe${exe}`) : `ffprobe${exe}`;
+    const ffprobe = firstLine(yield [probeBin, ['-hide_banner', '-version']]) ? probeBin : null;
+    const playBin = probeBin.replace(/ffprobe(\.exe)?$/, `ffplay${exe}`);
+    const ffplay = firstLine(yield [playBin, ['-hide_banner', '-version']]) ? playBin : null;
+    const enc = (yield [bin, ['-hide_banner', '-encoders']]) ?? '';
+    return { ffmpeg: bin, ffprobe, ffplay, version, encoders: { mp3: /libmp3lame/.test(enc), opus: /libopus/.test(enc) }, source };
   }
   return null;
+}
+
+/** Beim Start (blockierend, es läuft noch nichts). */
+export function detectFfmpeg(appRoot: string): FfmpegInfo | null {
+  const g = probe(appRoot);
+  let step = g.next(null);
+  while (!step.done) step = g.next(runSync(...step.value));
+  return step.value;
+}
+
+/** Erneute Suche im laufenden Betrieb, ohne den Prozess zu blockieren. */
+export async function detectFfmpegAsync(appRoot: string): Promise<FfmpegInfo | null> {
+  const g = probe(appRoot);
+  let step = g.next(null);
+  while (!step.done) step = g.next(await runAsync(...step.value));
+  return step.value;
 }
 
 export interface MediaProbe {
