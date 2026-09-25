@@ -24,6 +24,12 @@ AirDeck ist eine eigenständige Sendesoftware für Webradio. Sie bietet Automati
 Alle Dateien stehen auf der Seite [**Releases → neuestes Release**](https://github.com/ricorewioriginal-collab/anmacha_control/releases/latest). Sie werden nach jeder Änderung automatisch gebaut und getestet. Solange das Repository privat ist, funktionieren die Links nur für angemeldete Mitglieder.
 Windows kann bei nicht signierten Dateien warnen: „Weitere Informationen“ → „Trotzdem ausführen“ (Details in [docs/INSTALLATION.md](docs/INSTALLATION.md)).
 
+## 🚀 Live-Demo ausprobieren
+
+**[airdeck-demo.ricorewi-radio.de](https://airdeck-demo.ricorewi-radio.de)** – Studio direkt im Browser, ohne Installation.
+
+⚠️ Reine Testinstanz: setzt sich **automatisch alle 10 Minuten komplett zurück** (alle Daten weg), läuft ohne Audio-Engine – keine echte 24/7-Sendung möglich. Bitte nichts Echtes hier ablegen.
+
 ## 📸 Vorschau
 
 Alle Screenshots zeigen den Sender **„AirDeck-FM“** mit Beispiel-Titeln – reine Testdaten, kein echter Sender.

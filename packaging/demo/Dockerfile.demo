@@ -14,6 +14,12 @@ RUN npm ci --omit=dev --no-audit --no-fund && npm cache clean --force
 COPY src ./src
 COPY studio ./studio
 COPY README.md HAFTUNGSAUSSCHLUSS.md ./
+COPY packaging/demo/demo-banner.js ./studio/demo-banner.js
+# Deutlich sichtbarer Hinweis "Testinstanz" in jeder Ansicht - nur im Demo-Image, die normale
+# Studio-Auslieferung (Windows/Android/Server) bleibt davon unberührt.
+RUN for f in index.html handy.html hoerer.html; do \
+      sed -i 's#</body>#<script src="/demo-banner.js" defer></script></body>#' "./studio/$f"; \
+    done
 
 ENV NODE_ENV=production \
     AIRDECK_DATA=/data \
