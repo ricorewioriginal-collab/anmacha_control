@@ -6,7 +6,7 @@
 
 import { spawn, type ChildProcess } from 'node:child_process';
 import { performance } from 'node:perf_hooks';
-import type { MediaItem } from '../core/automation.ts';
+import type { DeckId, MediaItem } from '../core/automation.ts';
 import { SilenceDetector } from '../core/automation.ts';
 import {
   BYTES_PER_FRAME, CHANNELS, PcmFifo, SAMPLE_RATE, busRmsDb, busToS16, dbToGain, framesToMs, mixInto, msToFrames,
@@ -110,7 +110,7 @@ const RAW_IN = ['-f', 's16le', '-ar', String(SAMPLE_RATE), '-ch_layout', 'stereo
 export interface PlayoutHooks {
   nextTrack(): MediaItem | null;
   mediaPath(m: MediaItem): string;
-  onNowPlaying(m: MediaItem): void;
+  onNowPlaying(m: MediaItem, deck: DeckId): void;
   onStreamStart(contentType: string): void;
   onStreamData(chunk: Buffer): void;
   onStreamStop(): void;
@@ -174,14 +174,29 @@ class Voice {
   fadeTo: number | null = null;
   fadeFramesLeft = 0;
   segueFired = false;
+  /** Deck, auf dem die Stimme läuft (null = Cart oder vom Deck gelöst, z. B. beim Ausblenden nach Stopp) */
+  deck: DeckId | null = null;
+  /** von der Automation gestartet (Deck wird danach geleert) */
+  auto = false;
+  /** Startposition in der Datei (ms) */
+  readonly startMs: number;
+  lvSum = 0;
+  lvN = 0;
+  lvPeak = 0;
 
-  constructor(media: MediaItem, kind: 'track' | 'cart', duck: boolean, gainDb = media.gainDb ?? 0) {
+  constructor(media: MediaItem, kind: 'track' | 'cart', duck: boolean, gainDb = media.gainDb ?? 0, startMs = media.cueInMs ?? 0) {
     this.media = media;
     this.kind = kind;
     this.duck = duck;
     this.gain = dbToGain(gainDb);
+    this.startMs = Math.max(0, startMs);
     const end = media.cueOutMs ?? media.durationMs;
-    this.totalFrames = end != null ? Math.max(0, msToFrames(end - (media.cueInMs ?? 0))) : null;
+    this.totalFrames = end != null ? Math.max(0, msToFrames(end - this.startMs)) : null;
+  }
+
+  /** aktuelle Position in der Datei (ms) */
+  get positionMs(): number {
+    return this.startMs + framesToMs(this.played);
   }
 
   get remainingFrames(): number | null {
@@ -207,15 +222,43 @@ class Voice {
   }
 }
 
+export type EngineDeckState = 'empty' | 'cued' | 'playing' | 'paused';
+
+export interface EngineDeckView {
+  id: DeckId;
+  state: EngineDeckState;
+  mediaId: string | null;
+  title: string | null;
+  artist: string | null;
+  positionMs: number;
+  durationMs: number | null;
+  /** von der Automation belegt */
+  auto: boolean;
+}
+
+interface EngineDeck {
+  id: DeckId;
+  media: MediaItem | null;
+  state: EngineDeckState;
+  /** Position im Stillstand (ms in der Datei) */
+  posMs: number;
+  voice: Voice | null;
+  auto: boolean;
+}
+
+export class DeckError extends Error {}
+
 export interface PlayoutStatus {
   running: boolean;
   format: StreamFormat;
   bitrateKbps: number;
   encoder: 'running' | 'restarting' | 'stopped';
   silent: boolean;
-  current: { mediaId: string; title: string; artist: string; positionMs: number; durationMs: number | null; deck: 'A' | 'B' } | null;
+  current: { mediaId: string; title: string; artist: string; positionMs: number; durationMs: number | null; deck: DeckId } | null;
   /** Titel, der gerade ausgeblendet wird (Crossfade), falls vorhanden */
-  fading: { mediaId: string; title: string; deck: 'A' | 'B' } | null;
+  fading: { mediaId: string; title: string; deck: DeckId } | null;
+  /** Die vier Decks der Engine (A/B: Automation und Hand, C/D: nur Hand) */
+  decks: EngineDeckView[];
   carts: number;
   startedAt: number | null;
   underruns: number;
@@ -254,8 +297,13 @@ export class Playout {
   private inputState: PlayoutStatus['input'] = 'off';
   private micOn = false;
   private micGain = 0;
-  private trackCounter = 0;
-  private readonly deckOf = new WeakMap<object, 'A' | 'B'>();
+  private readonly decks: Record<DeckId, EngineDeck> = {
+    A: { id: 'A', media: null, state: 'empty', posMs: 0, voice: null, auto: false },
+    B: { id: 'B', media: null, state: 'empty', posMs: 0, voice: null, auto: false },
+    C: { id: 'C', media: null, state: 'empty', posMs: 0, voice: null, auto: false },
+    D: { id: 'D', media: null, state: 'empty', posMs: 0, voice: null, auto: false },
+  };
+  private lastAutoDeck: 'A' | 'B' = 'B';
   private levelPeak = 0;
   private levelSum = 0;
   private levelN = 0;
@@ -296,6 +344,12 @@ export class Playout {
     this.timer = null;
     for (const v of this.voices) v.stop();
     this.voices = [];
+    for (const d of Object.values(this.decks)) {
+      if (d.voice) d.posMs = d.voice.positionMs;
+      d.voice = null;
+      if (d.state === 'playing') d.state = d.auto ? 'empty' : 'paused';
+      if (d.state === 'empty') d.media = null;
+    }
     const enc = this.encoder;
     this.encoder = null;
     this.encoderState = 'stopped';
@@ -320,13 +374,122 @@ export class Playout {
   }
 
   /** Pegel seit dem letzten Abruf (RMS/Peak in dBFS) – für die VU-Anzeige im Studio. */
-  readLevel(): { rmsDb: number; peakDb: number } {
+  readLevel(): { rmsDb: number; peakDb: number; decks: Partial<Record<DeckId, number>> } {
     const toDb = (x: number) => (x > 0 ? Math.max(-90, 20 * Math.log10(x)) : -90);
-    const r = { rmsDb: this.levelN ? toDb(Math.sqrt(this.levelSum / this.levelN)) : -90, peakDb: toDb(this.levelPeak) };
+    const decks: Partial<Record<DeckId, number>> = {};
+    for (const d of Object.values(this.decks)) {
+      const v = d.voice;
+      decks[d.id] = v && v.lvN ? toDb(Math.sqrt(v.lvSum / v.lvN)) : -90;
+      if (v) v.lvSum = v.lvN = v.lvPeak = 0;
+    }
+    const r = { rmsDb: this.levelN ? toDb(Math.sqrt(this.levelSum / this.levelN)) : -90, peakDb: toDb(this.levelPeak), decks };
     this.levelPeak = 0;
     this.levelSum = 0;
     this.levelN = 0;
     return r;
+  }
+
+  // ---------- Decks (von Hand) ----------
+
+  private deck(id: string): EngineDeck {
+    const d = this.decks[id as DeckId];
+    if (!d) throw new DeckError('Deck gibt es nicht');
+    return d;
+  }
+
+  /** Titel ins Deck laden (nicht während es spielt). */
+  deckLoad(id: string, media: MediaItem): void {
+    const d = this.deck(id);
+    if (d.state === 'playing') throw new DeckError(`Deck ${id} spielt gerade – erst stoppen`);
+    d.media = media;
+    d.state = 'cued';
+    d.posMs = media.cueInMs ?? 0;
+    d.auto = false;
+  }
+
+  /** Deck starten bzw. nach Pause fortsetzen. */
+  deckPlay(id: string): void {
+    const d = this.deck(id);
+    if (!this.running) throw new DeckError('Die Engine läuft nicht');
+    if (!d.media) throw new DeckError(`Deck ${id} ist leer`);
+    if (d.state === 'playing') return;
+    this.startDeckVoice(d, d.posMs, false);
+  }
+
+  /** Anhalten, Position bleibt. */
+  deckPause(id: string): void {
+    const d = this.deck(id);
+    if (d.state !== 'playing' || !d.voice) return;
+    d.posMs = d.voice.positionMs;
+    this.releaseVoice(d, 30);
+    d.state = 'paused';
+  }
+
+  /** Stoppen (kurz ausblenden) und an den Anfang zurück. */
+  deckStop(id: string): void {
+    const d = this.deck(id);
+    if (d.voice) this.releaseVoice(d, 250);
+    if (!d.media) return;
+    d.state = 'cued';
+    d.posMs = d.media.cueInMs ?? 0;
+    d.auto = false;
+  }
+
+  deckEject(id: string): void {
+    const d = this.deck(id);
+    if (d.voice) this.releaseVoice(d, 250);
+    d.media = null;
+    d.state = 'empty';
+    d.posMs = 0;
+    d.auto = false;
+  }
+
+  /** Springen (ms in der Datei). */
+  deckSeek(id: string, ms: number): void {
+    const d = this.deck(id);
+    if (!d.media) return;
+    const end = d.media.cueOutMs ?? d.media.durationMs ?? Infinity;
+    const pos = Math.max(d.media.cueInMs ?? 0, Math.min(ms, end - 100));
+    if (d.state === 'playing') {
+      this.releaseVoice(d, 20);
+      this.startDeckVoice(d, pos, d.auto);
+    } else {
+      d.posMs = pos;
+      if (d.state === 'cued' && pos > (d.media.cueInMs ?? 0)) d.state = 'paused';
+    }
+  }
+
+  private startDeckVoice(d: EngineDeck, fromMs: number, auto: boolean): Voice {
+    const m = d.media!;
+    const v = new Voice(m, 'track', false, trackGainDb(m, this.opts.loudness, this.opts.dsp.limiter), fromMs);
+    v.deck = d.id;
+    v.auto = auto;
+    d.voice = v;
+    d.state = 'playing';
+    d.auto = auto;
+    this.startVoice(v);
+    // Titelanzeige: Musik bzw. alles auf den Hauptdecks
+    if (d.id === 'A' || d.id === 'B' || m.category === 'music') this.hooks.onNowPlaying(m, d.id);
+    return v;
+  }
+
+  /** Stimme vom Deck lösen und ausblenden (sie läuft im Mixer bis zur Stille weiter). */
+  private releaseVoice(d: EngineDeck, fadeMs: number): void {
+    const v = d.voice;
+    d.voice = null;
+    if (!v) return;
+    v.deck = null;
+    v.fade(0, msToFrames(fadeMs));
+  }
+
+  /**
+   * Hauptdeck (A/B) für den nächsten Titel: bevorzugt ein leeres, dann eins mit fertigem AutoDJ-Titel,
+   * erst zuletzt eins, in das von Hand etwas geladen wurde; spielende Decks nur, wenn beide spielen.
+   */
+  private freeMainDeck(): EngineDeck {
+    const order = [this.decks[this.lastAutoDeck === 'A' ? 'B' : 'A'], this.decks[this.lastAutoDeck]];
+    const rank = (d: EngineDeck) => (d.state === 'empty' ? 0 : d.state !== 'playing' && d.auto ? 1 : d.state !== 'playing' ? 2 : 3);
+    return order.reduce((best, d) => (rank(d) < rank(best) ? d : best));
   }
 
   /** Mikrofon/Line-In auf Sendung (mit Ducking der Musik) oder stumm. */
@@ -408,11 +571,20 @@ export class Playout {
   /** Titel sofort auf Sendung (MANUAL „jetzt senden“): laufender Titel wird kurz ausgeblendet. */
   playNow(media: MediaItem): void {
     if (!this.running) return;
-    for (const v of this.voices) if (v.kind === 'track' && v.fadeTo !== 0) v.fade(0, msToFrames(500));
-    const v = new Voice(media, 'track', false, trackGainDb(media, this.opts.loudness, this.opts.dsp.limiter));
-    this.deckOf.set(v, this.trackCounter++ % 2 === 0 ? 'A' : 'B');
-    this.startVoice(v);
-    this.hooks.onNowPlaying(media);
+    const target = this.freeMainDeck();
+    // laufenden Titel auf dem anderen Hauptdeck kurz ausblenden
+    for (const id of ['A', 'B'] as const) {
+      const d = this.decks[id];
+      if (d === target || !d.voice) continue;
+      this.releaseVoice(d, 500);
+      d.state = d.auto ? 'empty' : 'cued';
+      if (d.auto) d.media = null;
+      d.posMs = d.media?.cueInMs ?? 0;
+    }
+    if (target.voice) this.releaseVoice(target, 500);
+    target.media = media;
+    this.lastAutoDeck = target.id as 'A' | 'B';
+    this.startDeckVoice(target, media.cueInMs ?? 0, false);
   }
 
   private killLive(ch: LiveChannel): void {
@@ -479,15 +651,21 @@ export class Playout {
       current: cur
         ? {
             mediaId: cur.media.id, title: cur.media.title, artist: cur.media.artist,
-            positionMs: framesToMs(cur.played) + (cur.media.cueInMs ?? 0),
-            durationMs: cur.totalFrames == null ? null : framesToMs(cur.totalFrames),
-            deck: this.deckOf.get(cur) ?? 'A',
+            positionMs: cur.positionMs,
+            durationMs: cur.totalFrames == null ? null : framesToMs(cur.totalFrames) + cur.startMs - (cur.media.cueInMs ?? 0),
+            deck: cur.deck ?? 'A',
           }
         : null,
       fading: (() => {
-        const f = this.voices.find((v) => v.kind === 'track' && v.fadeTo === 0 && !v.finished);
-        return f ? { mediaId: f.media.id, title: f.media.title, deck: this.deckOf.get(f) ?? 'A' } : null;
+        const f = this.voices.find((v) => v.kind === 'track' && v.fadeTo === 0 && !v.finished && v.deck);
+        return f ? { mediaId: f.media.id, title: f.media.title, deck: f.deck! } : null;
       })(),
+      decks: Object.values(this.decks).map((d) => ({
+        id: d.id, state: d.state, mediaId: d.media?.id ?? null, title: d.media?.title ?? null, artist: d.media?.artist ?? null,
+        positionMs: d.voice ? d.voice.positionMs : d.posMs,
+        durationMs: d.media ? (d.media.cueOutMs ?? d.media.durationMs ?? null) : null,
+        auto: d.auto,
+      })),
       carts: this.voices.filter((v) => v.kind === 'cart').length,
       startedAt: this.startedAt,
       underruns: this.underruns,
@@ -506,7 +684,7 @@ export class Playout {
     // jüngster nicht ausblendender Track
     for (let i = this.voices.length - 1; i >= 0; i--) {
       const v = this.voices[i]!;
-      if (v.kind === 'track' && v.fadeTo !== 0) return v;
+      if (v.kind === 'track' && v.fadeTo !== 0 && (v.deck === 'A' || v.deck === 'B')) return v;
     }
     return undefined;
   }
@@ -587,7 +765,7 @@ export class Playout {
 
   private startVoice(v: Voice): void {
     const args = ['-hide_banner', '-loglevel', 'error', '-nostdin'];
-    if (v.media.cueInMs) args.push('-ss', (v.media.cueInMs / 1000).toFixed(3));
+    if (v.startMs > 0) args.push('-ss', (v.startMs / 1000).toFixed(3));
     args.push('-i', this.hooks.mediaPath(v.media), '-vn', '-f', 's16le', '-ar', String(SAMPLE_RATE), '-ac', String(CHANNELS), 'pipe:1');
     const p = spawn(this.ffmpeg, args, { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
     v.proc = p;
@@ -608,15 +786,16 @@ export class Playout {
   private startNextTrack(): boolean {
     const m = this.hooks.nextTrack();
     if (!m) return false;
-    const v = new Voice(m, 'track', false, trackGainDb(m, this.opts.loudness, this.opts.dsp.limiter));
-    this.deckOf.set(v, this.trackCounter++ % 2 === 0 ? 'A' : 'B');
+    const d = this.freeMainDeck();
+    if (d.voice) this.releaseVoice(d, 300);
+    d.media = m;
+    this.lastAutoDeck = d.id as 'A' | 'B';
+    const v = this.startDeckVoice(d, m.cueInMs ?? 0, true);
     if (this.opts.fadeInMs > 0) {
       const target = v.gain;
       v.gain = 0;
       v.fade(target, msToFrames(this.opts.fadeInMs));
     }
-    this.startVoice(v);
-    this.hooks.onNowPlaying(m);
     return true;
   }
 
@@ -661,6 +840,12 @@ export class Playout {
       }
       const k = v.kind === 'track' ? 1 : 0;
       mixInto(bus, samples, from * (k ? duckFrom : 1), to * (k ? duckTo : 1));
+      if (v.deck) {
+        // Pegel je Deck (nach Gain), für die Deck-Anzeigen
+        const g = (to * (k ? duckTo : 1)) / 32768;
+        for (let i = 0; i < samples.length; i++) v.lvSum += samples[i]! * samples[i]! * g * g;
+        v.lvN += samples.length;
+      }
       v.played += got;
       if (v.proc && v.fifo.bytes < RESUME_BYTES) v.proc.stdout?.resume();
     }
@@ -681,6 +866,19 @@ export class Playout {
     this.voices = this.voices.filter((v) => {
       if (!v.finished) return true;
       v.stop();
+      const d = v.deck ? this.decks[v.deck] : null;
+      if (d && d.voice === v) {
+        // Titel zu Ende: Automation räumt das Deck, von Hand gestartete Titel stehen wieder am Anfang
+        d.voice = null;
+        if (d.auto) {
+          d.media = null;
+          d.state = 'empty';
+          d.auto = false;
+        } else {
+          d.state = 'cued';
+          d.posMs = d.media?.cueInMs ?? 0;
+        }
+      }
       return false;
     });
 
@@ -715,7 +913,13 @@ export class Playout {
     const cur = this.currentTrack();
     if (this.skipRequested) {
       this.skipRequested = false;
-      cur?.fade(0, msToFrames(500));
+      if (cur?.deck) {
+        const d = this.decks[cur.deck];
+        this.releaseVoice(d, 500);
+        d.state = d.auto ? 'empty' : 'cued';
+        if (d.auto) d.media = null;
+        d.posMs = d.media?.cueInMs ?? 0;
+      }
       // MANUAL/LIVE: nur ausblenden, die Automation verbraucht keinen Titel
       if (this.automationOn && this.program === null) this.startNextTrack();
       return;

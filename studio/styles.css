@@ -77,7 +77,15 @@ button, select, input, textarea { font: inherit; color: inherit; }
 .onair[data-state="on"] .dot { background: var(--green); box-shadow: 0 0 10px var(--green); animation: pulse 1.6s infinite; }
 .onair[data-state="live"] { color: #fecaca; border-color: rgba(239, 68, 68, .6); background: rgba(239, 68, 68, .16); }
 .onair[data-state="live"] .dot { background: var(--red); box-shadow: 0 0 10px var(--red); animation: pulse 1s infinite; }
-.mode-chip { padding: 6px 10px; border-radius: 999px; font-weight: 800; font-size: 11px; letter-spacing: .06em; border: 1px solid var(--line); background: rgba(255, 255, 255, .05); color: var(--muted); cursor: pointer; }
+/* Betriebsart: Manuell (selbst live) | 24/7 AutoDJ */
+.mode-switch { display: inline-flex; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+.mode-switch button { display: inline-flex; align-items: center; gap: 6px; padding: 7px 12px; border: 0; background: rgba(255, 255, 255, .04); color: var(--muted); font-weight: 800; font-size: 12px; letter-spacing: .04em; cursor: pointer; }
+.mode-switch button + button { border-left: 1px solid var(--line); }
+.mode-switch button:hover { color: var(--text); background: rgba(255, 255, 255, .08); }
+.mode-switch #btn-manual[aria-pressed="true"] { color: #fde68a; background: rgba(234, 179, 8, .16); }
+.mode-switch #btn-auto[aria-pressed="true"] { color: #86efac; background: rgba(34, 197, 94, .16); }
+.deck-vol[hidden] { display: none; }
+.mode-chip { padding: 6px 10px; border-radius: 999px; font-weight: 800; font-size: 11px; letter-spacing: .06em; border: 1px solid var(--line); background: rgba(255, 255, 255, .05); color: var(--muted); }
 .mode-chip[data-mode="AUTO"] { color: #86efac; border-color: rgba(34, 197, 94, .5); }
 .mode-chip[data-mode="MANUAL"] { color: #fde68a; border-color: rgba(234, 179, 8, .6); background: rgba(234, 179, 8, .12); }
 .mode-chip[data-mode="LIVE"] { color: #fecaca; border-color: rgba(239, 68, 68, .6); background: rgba(239, 68, 68, .16); }

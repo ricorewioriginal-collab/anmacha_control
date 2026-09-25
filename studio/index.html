@@ -68,9 +68,12 @@
         </div>
       </div>
       <div class="onair" id="onair" data-state="off"><span class="dot"></span><span id="onair-text">OFF AIR</span></div>
-      <button class="mode-chip" id="mode-chip" data-mode="OFF" title="Betriebsart">–</button>
+      <div class="mode-switch" role="group" aria-label="Betriebsart">
+        <button id="btn-manual" aria-pressed="false" title="Manuell: Du bist selbst live. Decks, Mikrofon und Cartwall bedienst du von Hand – nichts startet von selbst."><i data-icon="mic" data-size="16"></i> Manuell</button>
+        <button id="btn-auto" aria-pressed="false" title="24/7 AutoDJ: spielt rund um die Uhr Queue, Sendeuhr und Sendeplan mit Überblendung – auch ohne geöffnetes Fenster."><i data-icon="auto" data-size="16"></i> 24/7 AutoDJ</button>
+      </div>
+      <span class="mode-chip" id="mode-chip" data-mode="OFF" hidden></span>
       <div class="top-actions">
-        <button class="toggle" id="btn-auto" aria-pressed="false" title="Browser-Automation: Queue automatisch abspielen"><i data-icon="auto" data-size="16"></i> AUTO</button>
         <button class="toggle" id="btn-stream" aria-pressed="false" title="Studio-Summe als Automation-Quelle senden"><i data-icon="stream" data-size="16"></i> STREAM</button>
         <button class="toggle" id="btn-mic" aria-pressed="false" title="Mikrofon live senden (Übernahme nach Priorität)"><i data-icon="mic" data-size="16"></i> MIC LIVE</button>
         <button class="toggle" id="btn-listen" aria-pressed="false" title="Sendesignal mithören"><i data-icon="headphones" data-size="16"></i></button>

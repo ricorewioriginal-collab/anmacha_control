@@ -62,7 +62,7 @@ footer { text-align: center; color: var(--muted); font-size: 13px; padding: 24px
   <a href="#oberflaeche">Oberfläche &amp; Fenster</a>
   <div class="grp">Studio</div>
   <a href="#bibliothek">Bibliothek &amp; Ordner</a>
-  <a href="#decks">Decks A–D &amp; Vorhören</a>
+  <a href="#decks">Betriebsart &amp; Decks</a>
   <a href="#queue">Queue, Sendeuhr &amp; Rotation</a>
   <a href="#cardwall">Cardwall &amp; Schnelltrigger</a>
   <a href="#live">Live senden &amp; Quellen</a>
@@ -157,10 +157,19 @@ footer { text-align: center; color: var(--muted); font-size: 13px; padding: 24px
 </section>
 
 <section id="decks">
-  <h2>Decks A–D &amp; Vorhören</h2>
-  <p>A und B sind Musik-Decks, C ist für Jingles, D für Spezielles. Läuft die Server-Automation, <b>zeigen A/B an, was der Kern gerade sendet</b>, samt Pegel.</p>
+  <h2>Betriebsart, Decks A–D &amp; Vorhören</h2>
+  <h3>Manuell oder 24/7 AutoDJ</h3>
   <ul>
-    <li>▶/⏸ spielt ab, ⏭ lädt den nächsten Titel aus der Queue, ⏹ stoppt, ⏏ wirft aus. Der Regler setzt die Deck-Lautstärke.</li>
+    <li><b>Manuell:</b> Du bist selbst live. Decks, Mikrofon und Cartwall bedienst du von Hand, nichts startet von selbst. Wird es still, meldet AirDeck das, springt aber nicht selbst ein.</li>
+    <li><b>24/7 AutoDJ:</b> AirDeck spielt Queue, Sendeuhr und Sendeplan mit Überblendung, rund um die Uhr und auch ohne geöffnetes Fenster. Bei Stille springt der Notfall-Ordner ein.</li>
+    <li>Wechsel zu Manuell: Der laufende Titel spielt zu Ende. Eine Live-Quelle (Studio, App, Relay) hat immer Vorrang, danach gilt wieder die gewählte Betriebsart.</li>
+  </ul>
+  <h3>Decks</h3>
+  <p>Die Decks laufen in der AirDeck-Engine, das Studio ist die Fernbedienung. Was du siehst, ist genau das, was gesendet wird, auch auf jedem anderen verbundenen Gerät. A und B sind die Hauptdecks, der AutoDJ nutzt ein freies davon. C und D laufen parallel, etwa für Jingles oder Musikbetten.</p>
+  <ul>
+    <li>Titel ins Deck ziehen oder mit ⏭ den nächsten aus der Queue laden. ▶ startet, ⏸ hält an (die Position bleibt), ⏹ stoppt und springt an den Anfang, ⏏ wirft aus. Ein Klick auf den Fortschrittsbalken springt an diese Stelle.</li>
+    <li>In ein laufendes Deck lässt sich nichts laden, erst stoppen.</li>
+    <li>Die Pegelanzeige zeigt nur, was das Deck gerade wirklich spielt. Steht es, zeigt sie nichts.</li>
     <li><b>CUE</b> hört den Titel vor, ohne dass er auf Sendung geht. Das Ausgabegerät für CUE wählst du unter <a href="#audio">Audio &amp; Geräte</a>.</li>
   </ul>
 </section>

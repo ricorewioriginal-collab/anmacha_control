@@ -25,7 +25,7 @@ import { ShoutcastOutput } from './shoutcast.ts';
 import { fetchListeners } from './stats.ts';
 import { RelayTarget } from './relay.ts';
 import { detectFfmpeg, detectFfmpegAsync, inputDeviceArgs, listInputDevices, type FfmpegInfo } from './ffmpeg.ts';
-import { DEFAULT_PLAYOUT, DSP_PRESETS, EQ_BANDS, Playout } from './playout.ts';
+import { DEFAULT_PLAYOUT, DSP_PRESETS, DeckError, EQ_BANDS, Playout } from './playout.ts';
 import { SyncManager } from './sync.ts';
 import { appVersion, type AirDeckConfig, type Mode } from './config.ts';
 import { HealthManager } from './health.ts';
@@ -853,6 +853,40 @@ export class AirDeckApp {
     return Object.values(this.rt(stationId).decks);
   }
 
+  /**
+   * Deck bedienen (Engine auf dem Server ist maßgeblich, das Studio ist Fernbedienung).
+   * Läuft die Engine noch nicht, wird sie gestartet – in MANUAL spielt danach nichts von selbst.
+   */
+  deckAction(p: Principal, stationId: string, deckId: string, action: string, body: Record<string, unknown>): unknown {
+    if (!(DECK_IDS as readonly string[]).includes(deckId)) throw new AppError(404, 'not_found', 'Deck nicht gefunden');
+    if (!['load', 'play', 'pause', 'stop', 'eject', 'seek'].includes(action)) throw new AppError(404, 'not_found', 'Unbekannte Deck-Aktion');
+    let po = this.playouts.get(stationId);
+    if (!po && (action === 'load' || action === 'play')) {
+      this.startPlayout(p, stationId, {});
+      po = this.playouts.get(stationId);
+    }
+    if (!po) return this.playoutView(stationId);
+    const e = po.playout;
+    try {
+      if (action === 'load') e.deckLoad(deckId, this.svc.media.media(stationId, String(body.mediaId ?? '')));
+      else if (action === 'play') {
+        if (this.modeOf(stationId).mode === 'LIVE' && (deckId === 'A' || deckId === 'B')) throw new DeckError('Live-Quelle ist auf Sendung – für Einspieler Deck C/D oder die Cartwall nutzen');
+        if (typeof body.mediaId === 'string') e.deckLoad(deckId, this.svc.media.media(stationId, body.mediaId));
+        e.deckPlay(deckId);
+      } else if (action === 'pause') e.deckPause(deckId);
+      else if (action === 'stop') e.deckStop(deckId);
+      else if (action === 'eject') e.deckEject(deckId);
+      else e.deckSeek(deckId, Number(body.ms) || 0);
+    } catch (err) {
+      if (err instanceof DeckError) throw new AppError(409, 'deck', err.message);
+      throw err;
+    }
+    this.audit.write({ kind: 'deck', event: action, actor: p.id, stationId, deck: deckId });
+    const st = e.status();
+    this.publish('playout.state', stationId, st);
+    return st;
+  }
+
   // ---------- Server-Playout (24/7) ----------
 
   playoutView(stationId: string): unknown {
@@ -891,7 +925,7 @@ export class AirDeckApp {
         return m;
       },
       mediaPath: (m) => this.svc.media.mediaPath(stationId, m),
-      onNowPlaying: (m) => this.setNowPlaying(stationId, m.id, 'A'),
+      onNowPlaying: (m, deck) => this.setNowPlaying(stationId, m.id, deck),
       onStreamStart: (type) => {
         try {
           this.relayFor(stationId, source.target).close(source.id);
@@ -912,6 +946,11 @@ export class AirDeckApp {
         // (Live-Quelle → Automation; Automation → Backup-Quelle bzw. Notfall). Bei Erholung wieder anmelden.
         if (silent) {
           const program = this.playouts.get(stationId)?.playout.status().program ?? source.id;
+          // Manuell: Stille ist Sache der Moderation (Deck gestoppt, Pause) – melden, aber nichts übernehmen
+          if (program === source.id && this.modeOf(stationId).base === 'MANUAL') {
+            this.publish('playout.log', stationId, { event: 'silence_manual' });
+            return;
+          }
           this.silenced.set(stationId, program);
           this.engine.setHealth(program, false, 'silence');
           return;

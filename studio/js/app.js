@@ -63,13 +63,18 @@ const S = {
   /** @type {string|null} */ lastAutoDeck: null,
   /** @type {any} */ playout: null,
   playoutAt: 0,
-  /** @type {{ rmsDb: number, peakDb: number }|null} */ srvLevel: null,
+  /** @type {{ rmsDb: number, peakDb: number, decks?: Record<string, number> }|null} */ srvLevel: null,
+  srvLevelAt: 0,
   /** @type {{ rec: MediaRecorder, stream: MediaStream, sourceId: string }|null} */ mic: null,
   /** @type {HTMLAudioElement|null} */ listen: null,
   /** @type {any} */ me: null,
   /** @type {ReturnType<typeof setTimeout>|undefined} */ listenRetry: undefined,
 };
 const serverMode = () => !!S.playout?.status?.running;
+/** Engine im Kern verfügbar (ffmpeg): Decks, AutoDJ und Senden laufen dort, das Studio ist Fernbedienung. */
+const eng = () => !!S.playout?.supported;
+/** Pegel vom Kern nur verwenden, solange sie frisch sind (sonst stehen alte Werte in der Anzeige). */
+const freshLevel = () => (S.srvLevel && serverMode() && Date.now() - (S.srvLevelAt ?? 0) < 800 ? S.srvLevel : null);
 const AUDIO_FILE = /\.(mp3|ogg|opus|wav|flac|m4a|aac|webm)$/i;
 /** @type {Record<string, { show: () => any, onEvent?: (t: string, d: any) => void }>} */
 let views = {};
@@ -314,9 +319,10 @@ function onEvent(type, data) {
     case 'cardwall.changed': S.carts = data; renderCarts(); break;
     case 'cardwall.triggered': if (!data.server) playCart(data); break; // Fernauslösung ohne Server-Playout: lokal spielen
     case 'playout.state': if (S.playout) { S.playout.status = data; S.playoutAt = Date.now(); renderPlayout(); } break;
-    case 'playout.level': S.srvLevel = data; break;
+    case 'playout.level': S.srvLevel = data; S.srvLevelAt = Date.now(); break;
     case 'playout.log':
-      if (['encoder_crashed', 'silence_detected', 'decode_failed', 'autostart_failed'].includes(data.event)) status(`Server-Playout: ${data.event}${data.mediaId ? ` (${data.mediaId})` : ''}`, true);
+      if (data.event === 'silence_manual') status('Stille auf Sendung – Deck starten oder Mikrofon einschalten (Manuell: AirDeck springt nicht selbst ein)', true);
+      else if (['encoder_crashed', 'silence_detected', 'decode_failed', 'autostart_failed'].includes(data.event)) status(`Engine: ${{ encoder_crashed: 'Encoder neu gestartet', silence_detected: 'Stille erkannt', decode_failed: 'Titel nicht lesbar', autostart_failed: 'Autostart fehlgeschlagen' }[/** @type {string} */ (data.event)]}${data.mediaId ? ` (${data.mediaId})` : ''}`, true);
       if (['playout_started', 'playout_stopped'].includes(data.event)) run(async () => { S.playout = await api.get(url('/playout')); S.mode = await api.get(url('/mode')); renderPlayout(); renderMode(); renderLibrary(); });
       break;
     case 'stream.state_changed': {
@@ -389,6 +395,7 @@ function ensureAudio() {
 
 /** @param {string} deckId @param {any} media */
 function loadDeck(deckId, media) {
+  if (eng()) return void deckCmd(deckId, 'load', { mediaId: media.id });
   const a = ensureAudio();
   const d = a.decks[deckId];
   d.load(media, api.mediaUrl(S.station.id, media.id));
@@ -505,10 +512,14 @@ async function toggleStream() {
 
 function renderAutoState() {
   const server = serverMode();
-  $('st-auto').classList.toggle('on', server || S.auto);
-  $('btn-auto').setAttribute('aria-pressed', String(server || S.auto));
-  $('btn-auto').title = S.playout?.supported ? '24/7-Automation im Kern starten/stoppen (läuft ohne Fenster weiter)' : 'Browser-Automation (ffmpeg fehlt – Notbetrieb)';
-  $('st-auto-text').textContent = server ? 'Server-Automation läuft (24/7)' : S.auto ? 'Browser-Automation läuft' : 'Automation aus';
+  const autoDj = eng() ? server && S.mode?.base === 'AUTO' : S.auto;
+  $('st-auto').classList.toggle('on', autoDj);
+  $('st-auto-text').textContent = eng()
+    ? (!server ? 'Engine aus' : S.mode?.base === 'AUTO' ? '24/7 AutoDJ läuft' : 'Manuell – Engine bereit')
+    : S.auto ? 'AutoDJ im Browser läuft' : 'Manuell (Browser)';
+  $('btn-stream').hidden = eng();
+  for (const el of document.querySelectorAll('.deck-vol')) /** @type {HTMLElement} */ (el).hidden = eng();
+  renderMode();
   const po = S.playout?.status;
   const lvOn = server && po?.input === 'running' ? !!po.micOn : !!S.mic && S.mic.stream.getAudioTracks().some((t) => t.enabled);
   $('lv-mic').classList.toggle('on', lvOn);
@@ -537,7 +548,6 @@ function renderPlayout() {
   mic.disabled = st?.input !== 'running';
   mic.setAttribute('aria-pressed', String(!!st?.micOn));
   mic.textContent = st?.input === 'error' ? 'Mikro-Fehler' : st?.micOn ? '🎙 ON AIR' : '🎙 Mikro';
-  $('btn-auto').toggleAttribute('disabled', !!st?.running && !S.auto);
 }
 
 async function editPlayout() {
@@ -726,6 +736,22 @@ const deckEls = {};
 
 const DECK_ROLE = /** @type {Record<string, [string, string]>} */ ({ A: ['Musik', 'music'], B: ['Musik', 'music'], C: ['Jingle', 'jingle'], D: ['Spezial', 'star'] });
 
+/** Deck in der Engine bedienen und den neuen Stand sofort anzeigen. @param {string} id @param {string} action @param {any} [body] */
+async function deckCmd(id, action, body = {}) {
+  const r = await run(() => api.post(url(`/decks/${id}/${action}`), body));
+  if (!r) return;
+  const st = r.decks ? r : r.status;
+  if (S.playout && st) {
+    S.playout.status = st;
+    S.playoutAt = Date.now();
+  } else if (!S.playout?.status) S.playout = (await run(() => api.get(url('/playout')))) ?? S.playout;
+  renderPlayout();
+  renderEngineDecks(true);
+}
+
+/** @param {string} id */
+const engDeck = (id) => /** @type {any} */ (S.playout?.status?.decks?.find((/** @type {any} */ d) => d.id === id) ?? null);
+
 function buildDecks() {
   const root = $('decks');
   for (const id of DECKS) {
@@ -746,7 +772,7 @@ function buildDecks() {
       cue: h('button', { class: 'deck-btn cue', title: 'CUE: vorhören (PFL, nicht auf Sendung)', 'aria-pressed': 'false', onclick: () => togglePfl(id) }, 'CUE'),
     };
     const progress = h('div', { class: 'progress', title: 'Klicken zum Springen', onclick: (/** @type {MouseEvent} */ e) => seek(id, e) }, els.bar);
-    const vol = h('input', { type: 'range', min: '0', max: '1', step: '0.01', value: '1', 'aria-label': `Deck ${id} Lautstärke`, oninput: (/** @type {Event} */ e) => ensureAudio().decks[id].setVolume(Number(/** @type {HTMLInputElement} */ (e.target).value)) });
+    const vol = h('input', { type: 'range', class: 'deck-vol', min: '0', max: '1', step: '0.01', value: '1', 'aria-label': `Deck ${id} Lautstärke`, oninput: (/** @type {Event} */ e) => ensureAudio().decks[id].setVolume(Number(/** @type {HTMLInputElement} */ (e.target).value)) });
     const card = h('div', { class: 'deck', 'data-deck': id, 'data-status': 'empty' },
       h('div', { class: 'deck-head' }, icon(ico, 16), h('span', {}, `Deck ${id}`), h('span', { class: 'role' }, `– ${role}`), els.status),
       h('div', { class: 'deck-body' }, els.cover,
@@ -754,12 +780,12 @@ function buildDecks() {
         h('div', { class: 'vu-deck' }, els.meter)),
       progress,
       h('div', { class: 'deck-ctrl' },
-        h('button', { class: 'deck-btn', title: 'Zum Anfang', onclick: () => { const d = ensureAudio().decks[id]; if (d.media) d.el.currentTime = (d.media.cueInMs ?? 0) / 1000; } }, icon('prev', 14)),
+        h('button', { class: 'deck-btn', title: 'Zum Anfang', onclick: () => { if (eng()) return void deckCmd(id, 'seek', { ms: 0 }); const d = ensureAudio().decks[id]; if (d.media) d.el.currentTime = (d.media.cueInMs ?? 0) / 1000; } }, icon('prev', 14)),
         els.play,
         h('button', { class: 'deck-btn', title: 'Nächsten Titel aus der Queue laden', onclick: () => loadFromQueue(id) }, icon('next', 14)),
         els.cue,
-        h('button', { class: 'deck-btn', title: 'Stop', onclick: () => { ensureAudio().decks[id].stop(); run(() => api.put(url(`/decks/${id}`), { status: 'cued' })); renderDeck(id); } }, icon('stop', 14)),
-        h('button', { class: 'deck-btn', title: 'Auswerfen', onclick: () => { stopPfl(id); ensureAudio().decks[id].eject(); run(() => api.put(url(`/decks/${id}`), { mediaId: null, status: 'empty' })); renderDeck(id); } }, icon('eject', 14)),
+        h('button', { class: 'deck-btn', title: 'Stop', onclick: () => { if (eng()) return void deckCmd(id, 'stop'); ensureAudio().decks[id].stop(); run(() => api.put(url(`/decks/${id}`), { status: 'cued' })); renderDeck(id); } }, icon('stop', 14)),
+        h('button', { class: 'deck-btn', title: 'Auswerfen', onclick: () => { stopPfl(id); if (eng()) return void deckCmd(id, 'eject'); ensureAudio().decks[id].eject(); run(() => api.put(url(`/decks/${id}`), { mediaId: null, status: 'empty' })); renderDeck(id); } }, icon('eject', 14)),
         vol),
       h('div', { class: 'deck-stats' }, h('div', {}, h('span', {}, 'BPM'), els.bpm), h('div', {}, h('span', {}, 'Gain'), els.gain), h('div', {}, h('span', {}, 'Länge'), els.total)),
     );
@@ -775,6 +801,11 @@ function buildDecks() {
 
 /** @param {string} id */
 async function togglePlay(id) {
+  if (eng()) {
+    const d = engDeck(id);
+    if (!d || d.state === 'empty') return status(`Deck ${id} ist leer – Titel hineinziehen oder ⏭ aus der Queue laden`, true);
+    return deckCmd(id, d.state === 'playing' ? 'pause' : 'play');
+  }
   const d = ensureAudio().decks[id];
   if (d.playing) {
     d.pause();
@@ -785,6 +816,7 @@ async function togglePlay(id) {
 
 /** @param {string} id */
 async function loadFromQueue(id) {
+  if (eng() && engDeck(id)?.state === 'playing') return status(`Deck ${id} spielt gerade – erst stoppen`, true);
   const res = await run(() => api.post(url('/queue/next')));
   if (res?.media) loadDeck(id, res.media);
   else if (res) status('Queue ist leer', true);
@@ -792,6 +824,12 @@ async function loadFromQueue(id) {
 
 /** @param {string} id @param {MouseEvent} e */
 function seek(id, e) {
+  const rect0 = /** @type {HTMLElement} */ (e.currentTarget).getBoundingClientRect();
+  if (eng()) {
+    const ed = engDeck(id);
+    if (ed?.mediaId && ed.durationMs) void deckCmd(id, 'seek', { ms: Math.round(((e.clientX - rect0.left) / rect0.width) * ed.durationMs) });
+    return;
+  }
   const d = audio?.decks[id];
   if (!d?.media || !d.durationMs) return;
   const rect = /** @type {HTMLElement} */ (e.currentTarget).getBoundingClientRect();
@@ -849,13 +887,15 @@ function stopPfl(id) {
 
 /** CUE: Titel des Decks separat vorhören (nicht auf Sendung), optional auf eigenem Ausgabegerät. @param {string} id */
 async function togglePfl(id) {
-  const d = audio?.decks[id];
   if (pfl?.id === id) return stopPfl(id);
   stopPfl('');
-  if (!d?.media) return status('Deck ist leer', true);
-  const el = new Audio(api.mediaUrl(S.station.id, d.media.id));
+  const ed = eng() ? engDeck(id) : null;
+  const d = audio?.decks[id];
+  const mediaId = eng() ? ed?.mediaId : d?.media?.id;
+  if (!mediaId) return status('Deck ist leer', true);
+  const el = new Audio(api.mediaUrl(S.station.id, mediaId));
   el.volume = Number(/** @type {HTMLInputElement} */ ($('fx-pfl')).value);
-  el.currentTime = d.el.currentTime;
+  el.currentTime = eng() ? (ed?.positionMs ?? 0) / 1000 : d.el.currentTime;
   await applySink(el, pref(AUDIO_PREF.cue));
   el.play().catch(() => status('Vorhören nicht möglich', true));
   pfl = { id, el };
@@ -1042,27 +1082,52 @@ async function queueDrop(dt, index) {
 
 // ---------- Render: Quellen / Ausgänge / Now Playing ----------
 
-const MODE_LABEL = /** @type {Record<string, string>} */ ({ AUTO: 'AUTO', MANUAL: 'MANUELL', LIVE: 'LIVE', EMERGENCY: 'NOTFALL' });
-const MODE_HINT = /** @type {Record<string, string>} */ ({
-  AUTO: 'Automation spielt Queue, Sendeuhr und Sendeplan. Klick: auf MANUELL umschalten.',
-  MANUAL: 'Automation pausiert – Titel mit ▶ „Jetzt senden“ starten. Klick: zurück auf AUTO.',
-  LIVE: 'Live-Quelle auf Sendung, Automation pausiert. Nach dem Live-Ende gilt wieder die Grundbetriebsart.',
-  EMERGENCY: 'Notfall: Automation hat nichts Reguläres (Notfall-Ordner) oder die Quelle ist ausgefallen.',
-});
+const MODE_LABEL = /** @type {Record<string, string>} */ ({ AUTO: 'AUTODJ', MANUAL: 'MANUELL', LIVE: 'LIVE', EMERGENCY: 'NOTFALL' });
+
+/** Grundbetriebsart: in der Engine S.mode.base, ohne ffmpeg die Browser-Automation. */
+const baseMode = () => (eng() ? S.mode?.base ?? 'AUTO' : S.auto ? 'AUTO' : 'MANUAL');
 
 function renderMode() {
+  const base = baseMode();
+  $('btn-manual').setAttribute('aria-pressed', String(base === 'MANUAL'));
+  $('btn-auto').setAttribute('aria-pressed', String(base === 'AUTO'));
+  // Hinweis-Chip nur, wenn etwas anderes gilt als gewählt: Live-Quelle, Notfall oder Engine aus
   const chip = $('mode-chip');
   const m = S.mode;
-  chip.dataset.mode = m?.bus ? m.mode : 'OFF';
-  chip.textContent = m?.bus ? MODE_LABEL[m.mode] ?? m.mode : `Grundart: ${MODE_LABEL[m?.base ?? 'AUTO']}`;
-  chip.title = m?.bus ? `${MODE_HINT[m.mode] ?? ''}${m.live ? ` Auf Sendung: ${m.live}.` : ''}` : 'Der Sendebus läuft nicht. Klick wechselt die Grundbetriebsart (AUTO/MANUELL) für den nächsten Start.';
+  const over = eng() && m?.bus && m.mode !== m.base ? m.mode : eng() && !serverMode() && base === 'AUTO' ? 'OFF' : null;
+  chip.hidden = !over;
+  chip.dataset.mode = over ?? 'OFF';
+  chip.textContent = over === 'OFF' ? 'ENGINE AUS' : over ? MODE_LABEL[over] ?? over : '';
+  chip.title = over === 'LIVE' ? `Live-Quelle auf Sendung${m?.live ? `: ${m.live}` : ''} – danach gilt wieder ${MODE_LABEL[base]}.`
+    : over === 'EMERGENCY' ? 'Notfall: nichts Reguläres mehr in Queue/Sendeplan (Notfall-Ordner) oder die Quelle ist ausgefallen.'
+    : 'Die Engine ist gestoppt – „24/7 AutoDJ“ anklicken startet sie.';
 }
 
-async function toggleBaseMode() {
-  const next = (S.mode?.base ?? 'AUTO') === 'AUTO' ? 'MANUAL' : 'AUTO';
-  if (next === 'MANUAL' && S.mode?.bus && !confirm('Auf MANUELL umschalten? Die Automation startet dann keine Titel mehr selbst.')) return;
-  S.mode = (await run(() => api.put(url('/mode'), { mode: next }))) ?? S.mode;
+/** Betriebsart wählen. AutoDJ startet die Engine bei Bedarf; Manuell lässt den laufenden Titel ausspielen. @param {'AUTO'|'MANUAL'} next */
+async function setBaseMode(next) {
+  if (!eng()) {
+    // Notbetrieb ohne ffmpeg: Automation im Browser (endet, wenn das Fenster geschlossen wird)
+    if (next === 'AUTO' && !S.auto && !confirm('Auf diesem System fehlt ffmpeg. Browser-Automation starten? (Sie stoppt, wenn das Fenster geschlossen wird.)')) return;
+    S.auto = next === 'AUTO';
+    status(S.auto ? 'AutoDJ im Browser läuft' : 'Manuell');
+    renderMode();
+    renderAutoState();
+    if (S.auto) {
+      await ensureAudio().resume();
+      if (!AUTO_DECKS.some((id) => audio?.decks[id].playing)) autoNext();
+    }
+    return;
+  }
+  if (S.mode?.base !== next) S.mode = (await run(() => api.put(url('/mode'), { mode: next }))) ?? S.mode;
+  if (next === 'AUTO' && !serverMode()) {
+    if (S.streaming) await toggleStream();
+    S.playout = (await run(() => api.post(url('/playout/start'), {}))) ?? S.playout;
+    S.mode = (await run(() => api.get(url('/mode')))) ?? S.mode;
+  }
+  status(next === 'AUTO' ? '24/7 AutoDJ: Queue, Sendeuhr und Sendeplan laufen automatisch' : 'Manuell: Der laufende Titel spielt zu Ende, danach bedienst du alles selbst');
   renderMode();
+  renderSources();
+  renderPlayout();
   renderLibrary();
 }
 
@@ -1328,32 +1393,9 @@ function bindStatic() {
   $('btn-fill').addEventListener('click', () => run(() => api.post(url('/queue/fill'))));
   $('btn-clear').addEventListener('click', () => confirm('Queue leeren?') && run(() => api.post(url('/queue/clear'))));
   $('chk-autofill').addEventListener('change', (e) => run(() => api.patch(url('/automation'), { autoFill: /** @type {HTMLInputElement} */ (e.target).checked })));
-  $('btn-auto').addEventListener('click', async () => {
-    // Der Kern ist die maßgebliche Automation (läuft auch ohne geöffnetes Fenster weiter).
-    if (S.playout?.supported && !S.auto) {
-      if (serverMode()) {
-        if (!confirm('24/7-Automation stoppen? Der Sender fällt auf die nächste Quelle zurück.')) return;
-        S.playout = (await run(() => api.post(url('/playout/stop')))) ?? S.playout;
-      } else {
-        if (S.streaming) await toggleStream();
-        S.playout = (await run(() => api.post(url('/playout/start'), {}))) ?? S.playout;
-      }
-      renderPlayout();
-      return;
-    }
-    // Notbetrieb ohne ffmpeg: Automation im Browser (endet, wenn das Fenster geschlossen wird)
-    if (!S.auto && !confirm('Auf diesem System fehlt ffmpeg. Browser-Automation starten? (Sie stoppt, wenn das Fenster geschlossen wird.)')) return;
-    S.auto = !S.auto;
-    $('btn-auto').setAttribute('aria-pressed', String(S.auto));
-    status(S.auto ? 'Automation EIN' : 'Automation AUS');
-    renderAutoState();
-    if (S.auto) {
-      await ensureAudio().resume();
-      if (!AUTO_DECKS.some((id) => audio?.decks[id].playing)) autoNext();
-    }
-  });
+  $('btn-auto').addEventListener('click', () => void setBaseMode('AUTO'));
+  $('btn-manual').addEventListener('click', () => void setBaseMode('MANUAL'));
   $('btn-stream').addEventListener('click', toggleStream);
-  $('mode-chip').addEventListener('click', () => void toggleBaseMode());
   $('btn-mic').addEventListener('click', toggleMic);
   $('btn-listen').addEventListener('click', () => toggleListen());
   $('btn-audio').addEventListener('click', editAudio);
@@ -1380,7 +1422,7 @@ function bindStatic() {
     });
   }
   $('po-start').addEventListener('click', () => {
-    if (S.auto) { S.auto = false; $('btn-auto').setAttribute('aria-pressed', 'false'); }
+    if (S.auto) { S.auto = false; renderMode(); }
     if (S.streaming) toggleStream();
     run(async () => { S.playout = await api.post(url('/playout/start'), {}); renderPlayout(); });
   });
@@ -1734,82 +1776,80 @@ function meter(el, db) {
   el.style.width = `${Math.max(0, Math.min(100, ((db + 60) / 60) * 100))}%`;
 }
 
-/** Decks A/B zeigen, was der Kern gerade sendet (Server-Automation ist maßgeblich). */
-function renderServerDecks() {
+const DECK_STATE_LABEL = /** @type {Record<string, string>} */ ({ empty: 'leer', cued: 'bereit', playing: 'on air', paused: 'pause' });
+const dbHeight = (/** @type {number} */ db) => `${Math.max(0, Math.min(100, ((db + 60) / 60) * 100))}%`;
+
+/**
+ * Decks aus der Engine anzeigen (alle vier). Position läuft zwischen den Statusmeldungen weiter,
+ * der Pegel kommt je Deck vom Kern – ohne frische Werte oder im Stillstand steht er auf null.
+ * @param {boolean} [force]
+ */
+function renderEngineDecks(force = false) {
   const st = S.playout?.status;
-  if (!st?.running) {
-    for (const id of AUTO_DECKS) {
-      if (deckEls[id]?.card.dataset.srv) {
-        delete deckEls[id].card.dataset.srv;
-        renderDeck(id);
-        deckEls[id].meter.style.height = '0';
-      }
-    }
-    return;
-  }
-  const elapsed = Date.now() - (S.playoutAt || Date.now());
-  for (const id of AUTO_DECKS) {
+  const lv = freshLevel();
+  const elapsed = st?.running ? Date.now() - (S.playoutAt || Date.now()) : 0;
+  for (const id of DECKS) {
     const els = deckEls[id];
-    if (audio?.decks[id]?.media) continue; // Browser-Deck ist manuell belegt
-    const cur = st.current?.deck === id ? st.current : null;
-    const fading = st.fading?.deck === id ? st.fading : null;
-    const m = cur ? S.libById.get(cur.mediaId) : fading ? S.libById.get(fading.mediaId) : null;
-    const key = `${cur?.mediaId ?? ''}|${fading?.mediaId ?? ''}`;
-    if (els.card.dataset.srv !== key) {
-      els.card.dataset.srv = key;
-      els.card.dataset.status = cur ? 'playing' : 'empty';
-      els.status.textContent = cur ? 'on air' : fading ? 'fade' : 'leer';
+    if (!els) continue;
+    const d = st?.running ? engDeck(id) : null;
+    const state = d?.state ?? 'empty';
+    const m = d?.mediaId ? S.libById.get(d.mediaId) ?? { id: d.mediaId, title: d.title, artist: d.artist } : null;
+    const key = `${state}|${d?.mediaId ?? ''}|${d?.auto ? 1 : 0}`;
+    if (force || els.card.dataset.eng !== key) {
+      els.card.dataset.eng = key;
+      els.card.dataset.status = state;
+      els.status.textContent = `${DECK_STATE_LABEL[state] ?? state}${d?.auto && state === 'playing' ? ' · AutoDJ' : ''}`;
       els.title.textContent = m?.title ?? '–';
-      els.artist.textContent = m?.artist ?? '';
+      els.artist.textContent = m ? `${m.artist || CATEGORY_LABEL[m.category] || ''}` : '';
+      els.play.setAttribute('aria-pressed', String(state === 'playing'));
+      els.play.replaceChildren(icon(state === 'playing' ? 'pause' : 'play', 16));
       els.bpm.textContent = m?.bpm ? String(m.bpm) : '–';
-      els.total.textContent = fmt(cur?.durationMs ?? m?.durationMs);
+      els.gain.textContent = `${(m?.gainDb ?? 0).toFixed(1)} dB`;
+      els.total.textContent = fmt(d?.durationMs ?? m?.durationMs);
       els.cover.replaceWith((els.cover = coverEl(m, 'cover', id)));
     }
-    if (cur) {
-      const pos = cur.positionMs + elapsed;
-      const rem = cur.durationMs != null ? Math.max(0, cur.durationMs - pos) : null;
-      els.elapsed.textContent = fmt(pos);
-      els.remain.textContent = rem != null ? `-${fmt(rem)}` : '∞';
-      els.remain.classList.toggle('warn', rem != null && rem < 20_000 && rem >= 10_000);
-      els.remain.classList.toggle('end', rem != null && rem < 10_000);
-      els.bar.style.width = cur.durationMs ? `${Math.min(100, (pos / cur.durationMs) * 100)}%` : '0';
-      const lv = S.srvLevel?.rmsDb ?? -90;
-      els.meter.style.height = `${Math.max(0, Math.min(100, ((lv + 60) / 60) * 100))}%`;
-    } else {
-      els.elapsed.textContent = '0:00';
-      els.remain.textContent = '--:--';
-      els.bar.style.width = '0';
-      els.meter.style.height = '0';
-    }
+    const dur = d?.durationMs ?? null;
+    const pos = d ? d.positionMs + (state === 'playing' ? elapsed : 0) : 0;
+    const rem = dur != null ? Math.max(0, dur - pos) : null;
+    els.elapsed.textContent = d?.mediaId ? fmt(pos) : '0:00';
+    els.remain.textContent = rem != null && d?.mediaId ? `-${fmt(rem)}` : '--:--';
+    els.remain.classList.toggle('warn', state === 'playing' && rem != null && rem < 20_000 && rem >= 10_000);
+    els.remain.classList.toggle('end', state === 'playing' && rem != null && rem < 10_000);
+    els.bar.style.width = dur ? `${Math.min(100, (pos / dur) * 100)}%` : '0';
+    els.meter.style.height = state === 'playing' && lv?.decks ? dbHeight(lv.decks[id] ?? -90) : '0';
   }
 }
 
 function liveProgress() {
-  renderServerDecks();
-  if (serverMode() && S.srvLevel) {
-    const lv = S.srvLevel;
+  if (eng()) {
+    renderEngineDecks();
+    // Summenpegel nur mit frischen Werten vom Kern, sonst Stille anzeigen
+    const lv = freshLevel() ?? { rmsDb: -90, peakDb: -90 };
     meter($('m-rms'), lv.rmsDb);
     meter($('m-peak'), lv.peakDb);
     $('m-rms-v').textContent = lv.rmsDb <= -90 ? '-∞' : lv.rmsDb.toFixed(1);
     $('m-peak-v').textContent = lv.peakDb <= -90 ? '-∞' : lv.peakDb.toFixed(1);
-    $('lufs-v').textContent = lv.rmsDb <= -90 ? '– dB' : `${lv.rmsDb.toFixed(1)} dB RMS · Server`;
+    $('lufs-v').textContent = lv.rmsDb <= -90 ? '– dB' : `${lv.rmsDb.toFixed(1)} dB RMS`;
   }
   // Now Playing: Fortschritt aus laufendem Deck bzw. Server-Playout
   const po = S.playout?.status;
-  const playing = DECKS.map((id) => audio?.decks[id]).find((d) => d?.playing && d.media?.id === S.nowPlaying?.mediaId);
-  const pos = playing ? playing.positionMs : po?.running ? po.current?.positionMs : null;
-  const dur = playing ? playing.durationMs : po?.running ? po.current?.durationMs : null;
+  const playing = eng() ? null : DECKS.map((id) => audio?.decks[id]).find((d) => d?.playing && d.media?.id === S.nowPlaying?.mediaId);
+  const npDeck = eng() && po?.running ? po.decks?.find((/** @type {any} */ d) => d.state === 'playing' && d.mediaId === S.nowPlaying?.mediaId) : null;
+  const pos = playing ? playing.positionMs : npDeck ? npDeck.positionMs + (Date.now() - (S.playoutAt || Date.now())) : null;
+  const dur = playing ? playing.durationMs : npDeck ? npDeck.durationMs : null;
   $('np-time').textContent = pos != null ? `${fmt(pos)} / ${fmt(dur)}` : '';
   $('np-progress').style.width = pos != null && dur ? `${Math.min(100, (pos / dur) * 100)}%` : '0';
   $('m-time').textContent = $('np-time').textContent;
   $('m-progress').style.width = $('np-progress').style.width;
-  const running = serverMode() || S.auto;
+  const running = eng() ? serverMode() && S.mode?.base === 'AUTO' : S.auto;
   const mp = $('m-play');
   if (mp.dataset.on !== String(running)) {
     mp.dataset.on = String(running);
     mp.replaceChildren(icon(running ? 'pause' : 'play', 30));
   }
-  if (micAnalyser) {
+  const micLive = !!S.mic && S.mic.stream.getAudioTracks().some((t) => t.enabled && t.readyState === 'live');
+  if (!micLive) $('lv-meter').style.height = '0';
+  else if (micAnalyser) {
     micAnalyser.getFloatTimeDomainData(micBuf);
     let sum = 0;
     for (const v of micBuf) sum += v * v;
@@ -1820,7 +1860,7 @@ function liveProgress() {
 
 function tick() {
   liveProgress();
-  if (!audio) return;
+  if (!audio || eng()) return;
   for (const id of DECKS) {
     const d = audio.decks[id];
     const els = deckEls[id];

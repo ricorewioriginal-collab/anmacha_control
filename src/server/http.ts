@@ -75,7 +75,7 @@ export const ON_AIR_OPS = new RegExp('^/api/v1/(?:' + [
   'stations/[^/]+/sources/[^/]+/(?:chunks|health|release|takeover)',
   'stations/[^/]+/playout/(?:mic|skip|start|stop)',
   'stations/[^/]+/(?:mode|onair)',
-  'stations/[^/]+/(?:decks/[^/]+|now-playing|metadata)',
+  'stations/[^/]+/(?:decks/[^/]+(?:/[a-z]+)?|now-playing|metadata)',
   'stations/[^/]+/queue(?:/.*)?',
   'stations/[^/]+/(?:cardwall/[^/]+/trigger|quick/[^/]+)',
   'stations/[^/]+/(?:playlists/[^/]+/play|clock-events/[^/]+/fire)',
@@ -269,6 +269,7 @@ export function createHttpServer(app: AirDeckApp, studioDir: string): Server {
     return app.setNowPlaying(sid(c), String(b.mediaId ?? ''), String(b.deck ?? 'A') as never);
   });
   add('GET', '/api/v1/stations/:sid/decks', 'automation:read', (c) => app.decks(sid(c)));
+  add('POST', '/api/v1/stations/:sid/decks/:deck/:action', 'automation:write', async (c) => app.deckAction(c.p, sid(c), c.params.deck!, c.params.action!, await c.body()));
   add('PUT', '/api/v1/stations/:sid/decks/:deck', 'automation:write', async (c) => app.setDeck(sid(c), c.params.deck!, (await c.body()) as never));
 
   // --- Server-Playout (24/7) ---
