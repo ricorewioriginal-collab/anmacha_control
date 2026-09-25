@@ -301,15 +301,16 @@ jobs:
           curl -fs http://127.0.0.1:8750/api/v1/health | grep -q '"ok":true'
           echo "Neustart über systemd (Exit-Code 75) OK: PID $PID1 -> $PID2"
           # Entfernen (purge): Programmdateien und Konfiguration weg, Daten (Datenbank, Medien) bleiben.
-          # Vor dem Stopp kurz Luft lassen, damit der gerade erst neu gestartete Dienst seine
-          # SQLite-Datei sicher angelegt hat (WAL-Checkpoint), bevor der Dienst beendet wird.
-          sleep 2
-          test -f /var/lib/airdeck/airdeck.db || (echo "Diagnose: airdeck.db fehlt schon vor dem Stopp/Purge" && ls -la /var/lib/airdeck && sudo journalctl -u airdeck-server --no-pager -n 100 && exit 1)
+          # /var/lib/airdeck gehört dem Dienstkonto „airdeck“ und ist nur für dieses (und root) lesbar (750) –
+          # der Runner-Benutzer selbst darf ohne sudo gar nicht hineinschauen. Genau das war die eigentliche
+          # Ursache des bisherigen Fehlschlags: „test -f“ ohne sudo meldete „nicht gefunden“, obwohl die
+          # Datenbank die ganze Zeit da war (siehe Diagnose: „Permission denied“ statt einer leeren Liste).
+          sudo test -f /var/lib/airdeck/airdeck.db || (echo "Diagnose: airdeck.db fehlt schon vor dem Stopp/Purge" && sudo ls -la /var/lib/airdeck && sudo journalctl -u airdeck-server --no-pager -n 100 && exit 1)
           sudo systemctl stop airdeck-server.service
           sudo dpkg -P airdeck
           test ! -e /opt/airdeck
           test ! -e /etc/airdeck/airdeck.conf
-          test -f /var/lib/airdeck/airdeck.db || (echo "Daten wurden beim Entfernen gelöscht" && ls -la /var/lib/airdeck && sudo journalctl -u airdeck-server --no-pager -n 100 && exit 1)
+          sudo test -f /var/lib/airdeck/airdeck.db || (echo "Daten wurden beim Entfernen gelöscht" && sudo ls -la /var/lib/airdeck && exit 1)
           echo "Linux-Paket: Installation, Dienst, Neustart, Health-Check und Purge OK"
       - uses: actions/upload-artifact@v4
         with:
