@@ -261,7 +261,7 @@ export function createHttpServer(app: AirDeckApp, studioDir: string): Server {
   add('POST', '/api/v1/stations/:sid/playout/stop', 'automation:write', (c) => app.stopPlayout(c.p, sid(c)));
   add('POST', '/api/v1/stations/:sid/playout/mic', 'automation:write', async (c) => app.setMic(sid(c), (await c.body()).on === true));
   // Zustandsberichte (angemeldet): Laufzeit, Abhängigkeiten, Datenbank, Audio, Encoder, Stream, KI
-  add('GET', '/api/v1/system', null, () => ({ ...(app.system() as object), ...app.health.system() }));
+  add('GET', '/api/v1/system', null, () => ({ ...(app.svc.system.system() as object), ...app.health.system() }));
   add('GET', '/api/v1/database', null, () => app.databaseReport());
   add('GET', '/api/v1/audio', null, () => app.health.audio());
   add('GET', '/api/v1/encoder', null, (c) => app.health.encoder((s) => canSee(c.p, s)));
@@ -361,19 +361,19 @@ export function createHttpServer(app: AirDeckApp, studioDir: string): Server {
   });
 
   // --- Updates ---
-  add('GET', '/api/v1/update', 'automation:read', (c) => app.checkUpdate(c.url.searchParams.get('force') === '1'));
-  add('GET', '/api/v1/update/settings', null, (c) => (globalAdmin(c), app.updateSettingsView()));
-  add('PUT', '/api/v1/update/settings', null, async (c) => (globalAdmin(c), app.setUpdateSettings(await c.body())));
+  add('GET', '/api/v1/update', 'automation:read', (c) => app.svc.system.checkUpdate(c.url.searchParams.get('force') === '1'));
+  add('GET', '/api/v1/update/settings', null, (c) => (globalAdmin(c), app.svc.system.updateSettingsView()));
+  add('PUT', '/api/v1/update/settings', null, async (c) => (globalAdmin(c), app.svc.system.setUpdateSettings(await c.body())));
   add('POST', '/api/v1/update/install', null, (c) => {
     globalAdmin(c);
-    return app.installUpdate(() => {
+    return app.svc.system.installUpdate(() => {
       app.shutdown();
       process.exit(0);
     });
   });
   // APK für die Android-App über diesen AirDeck laden (funktioniert auch bei privatem Repository)
   add('GET', '/api/v1/update/apk', 'automation:read', async (c) => {
-    const info = (await app.checkUpdate()) as { assets: { apk?: import('./update.ts').UpdateAsset }; error?: string };
+    const info = (await app.svc.system.checkUpdate()) as { assets: { apk?: import('./update.ts').UpdateAsset }; error?: string };
     if (!info.assets.apk) throw new AppError(404, 'no_apk', info.error ?? 'Keine APK im Release');
     const r = await app.updater.open(info.assets.apk, app.secrets.get('update:token'));
     c.res.writeHead(200, { 'Content-Type': 'application/vnd.android.package-archive', 'Content-Disposition': 'attachment; filename="AirDeck-Android.apk"', ...(info.assets.apk.size ? { 'Content-Length': info.assets.apk.size } : {}) });
@@ -417,7 +417,7 @@ export function createHttpServer(app: AirDeckApp, studioDir: string): Server {
   // --- Liquidsoap-Skript (ohne Passwörter) ---
   add('GET', '/api/v1/stations/:sid/liquidsoap', 'outputs:read', (c) => {
     const q = c.url.searchParams;
-    const r = app.liquidsoap(sid(c), { port: q.get('port') ? Number(q.get('port')) : undefined, mount: q.get('mount') ?? undefined, processing: q.get('processing') !== '0' });
+    const r = app.svc.system.liquidsoap(sid(c), { port: q.get('port') ? Number(q.get('port')) : undefined, mount: q.get('mount') ?? undefined, processing: q.get('processing') !== '0' });
     if (q.get('format') === 'json') return r;
     c.res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8', 'Content-Disposition': `attachment; filename="airdeck-${sid(c)}.liq"` });
     c.res.end(r.script);
@@ -430,14 +430,14 @@ export function createHttpServer(app: AirDeckApp, studioDir: string): Server {
   add('POST', '/api/v1/stations/:sid/media/loudness', 'media:write', async (c) => app.analyzeLibrary(sid(c), (await c.body()).force === true));
 
   // --- Nextcloud-Brücke ---
-  add('GET', '/api/v1/nextcloud', null, (c) => (globalAdmin(c), app.nextcloudConfig()));
-  add('PUT', '/api/v1/nextcloud', null, async (c) => (globalAdmin(c), app.setNextcloud(await c.body())));
-  add('GET', '/api/v1/nextcloud/list', 'media:read', (c) => app.nextcloudList(c.url.searchParams.get('path') ?? '/'));
+  add('GET', '/api/v1/nextcloud', null, (c) => (globalAdmin(c), app.svc.nextcloud.nextcloudConfig()));
+  add('PUT', '/api/v1/nextcloud', null, async (c) => (globalAdmin(c), app.svc.nextcloud.setNextcloud(await c.body())));
+  add('GET', '/api/v1/nextcloud/list', 'media:read', (c) => app.svc.nextcloud.nextcloudList(c.url.searchParams.get('path') ?? '/'));
   add('POST', '/api/v1/stations/:sid/nextcloud/import', 'media:write', async (c) => {
     const b = await c.body();
-    return app.nextcloudImport(sid(c), Array.isArray(b.paths) ? b.paths.map(String) : [], { category: str(b.category), folder: str(b.folder) });
+    return app.svc.nextcloud.nextcloudImport(sid(c), Array.isArray(b.paths) ? b.paths.map(String) : [], { category: str(b.category), folder: str(b.folder) });
   });
-  add('POST', '/api/v1/stations/:sid/recordings/:id/nextcloud', 'media:write', async (c) => app.nextcloudUploadRecording(sid(c), c.params.id!, String((await c.body()).dir ?? '')));
+  add('POST', '/api/v1/stations/:sid/recordings/:id/nextcloud', 'media:write', async (c) => app.svc.nextcloud.nextcloudUploadRecording(sid(c), c.params.id!, String((await c.body()).dir ?? '')));
 
   // --- Programm beenden (Windows-Hintergrundprozess, Tray, „AirDeck beenden“) ---
   add('POST', '/api/v1/system/shutdown', null, (c) => {
@@ -448,8 +448,8 @@ export function createHttpServer(app: AirDeckApp, studioDir: string): Server {
   });
 
   // --- Android-App / Netzwerk ---
-  add('GET', '/api/v1/app/connect', null, (c) => (globalAdmin(c), app.appConnect()));
-  add('PUT', '/api/v1/app/network', null, async (c) => (globalAdmin(c), app.setNetwork((await c.body()).lan === true)));
+  add('GET', '/api/v1/app/connect', null, (c) => (globalAdmin(c), app.svc.system.appConnect()));
+  add('PUT', '/api/v1/app/network', null, async (c) => (globalAdmin(c), app.svc.system.setNetwork((await c.body()).lan === true)));
 
   // --- KI-Automation ---
   const aiErr = (err: unknown) => (err instanceof AppError ? err : new AppError(err instanceof AiError && err.code === 'not_found' ? 404 : err instanceof AiError && ['invalid', 'unknown_provider'].includes(err.code) ? 400 : 502, 'ai_error', (err as Error).message));
@@ -492,12 +492,12 @@ export function createHttpServer(app: AirDeckApp, studioDir: string): Server {
   add('POST', '/api/v1/stations/:sid/integrations/test', 'stations:write', (c) => app.testIntegrations(sid(c)));
 
   // --- laut.fm ---
-  add('GET', '/api/v1/stations/:sid/lautfm', 'lautfm:read', (c) => app.lautfmConfig(sid(c)));
-  add('PUT', '/api/v1/stations/:sid/lautfm', 'lautfm:write', async (c) => app.setLautfmConfig(c.p, sid(c), await c.body()));
+  add('GET', '/api/v1/stations/:sid/lautfm', 'lautfm:read', (c) => app.svc.lautfm.lautfmConfig(sid(c)));
+  add('PUT', '/api/v1/stations/:sid/lautfm', 'lautfm:write', async (c) => app.svc.lautfm.setLautfmConfig(c.p, sid(c), await c.body()));
   add('POST', '/api/v1/stations/:sid/lautfm/live-output', 'outputs:write', async (c) => {
     const b = await c.body();
     const prio = b.priority === undefined || b.priority === null || b.priority === '' ? undefined : Number(b.priority);
-    return app.lautfmCreateOutput(c.p, sid(c), prio);
+    return app.svc.lautfm.lautfmCreateOutput(c.p, sid(c), prio);
   });
 
   // --- Cardwall ---
@@ -595,13 +595,13 @@ export function createHttpServer(app: AirDeckApp, studioDir: string): Server {
     }
     // Offizielle Android-App: mitgelieferte APK (Windows-Paket) oder aus dem Release – öffentlich, damit das Handy sie direkt laden kann
     if (path === '/download/AirDeck-Android.apk' && req.method === 'GET') {
-      const local = app.localApk();
+      const local = app.svc.system.localApk();
       if (local) {
         res.writeHead(200, { 'Content-Type': 'application/vnd.android.package-archive', 'Content-Disposition': 'attachment; filename="AirDeck-Android.apk"', 'Content-Length': statSync(local).size });
         return void createReadStream(local).pipe(res);
       }
       try {
-        const info = (await app.checkUpdate()) as { assets: { apk?: import('./update.ts').UpdateAsset }; error?: string };
+        const info = (await app.svc.system.checkUpdate()) as { assets: { apk?: import('./update.ts').UpdateAsset }; error?: string };
         if (!info.assets.apk) return json(res, 404, { error: 'no_apk', message: info.error ?? 'Keine APK verfügbar' });
         const r = await app.updater.open(info.assets.apk, app.secrets.get('update:token'));
         res.writeHead(200, { 'Content-Type': 'application/vnd.android.package-archive', 'Content-Disposition': 'attachment; filename="AirDeck-Android.apk"', ...(info.assets.apk.size ? { 'Content-Length': info.assets.apk.size } : {}) });
@@ -650,9 +650,9 @@ export function createHttpServer(app: AirDeckApp, studioDir: string): Server {
       if (!AirDeckApp.hasScope(p, scope)) return json(res, 403, { error: 'insufficient_scope', scope });
       if (!canSee(p, station)) return json(res, 403, { error: 'forbidden' });
       try {
-        const cfg = app.lautfmConfig(station);
+        const cfg = app.svc.lautfm.lautfmConfig(station);
         if (!allowedRadioadminPath(ra![2]!, cfg.stationId)) return json(res, 403, { error: 'forbidden_path', message: 'Pfad nicht erlaubt oder laut.fm-Station nicht gewählt' });
-        const token = app.lautfmToken(station);
+        const token = app.svc.lautfm.lautfmToken(station);
         if (!token) return json(res, 409, { error: 'no_token', message: 'Kein laut.fm-Radioadmin-Token hinterlegt' });
         return forward(req, res, RADIOADMIN + ra![2] + url.search, token, 300_000, cfg.origin);
       } catch (err) {

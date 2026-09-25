@@ -34,7 +34,14 @@ import {
   parseFileName,
 } from '../core/automation.ts';
 
-const AUDIO_FILE_RE = /\.(mp3|ogg|opus|wav|flac|m4a|aac|webm)$/i;
+import {
+  ALL_SCOPES, AUDIO_FILE_RE, AppError, SLUG, SYSTEM_PRINCIPAL, canSee, hashToken, newId, normalizeMount, posInt, publicOutput, publicSource,
+  relayKey, safeColor, timingSafeEqualStr, wrap,
+  type ActiveRecording, type ApiToken, type BridgeConfig, type HubEvent, type NowPlaying, type PersistedState, type PlayLogEntry,
+  type Playlist, type PlayoutConfig, type Principal, type Recording, type Station, type StationData, type StationRuntime,
+} from './model.ts';
+// Bisherige Importe aus app.ts bleiben gültig
+export * from './model.ts';
 import { AuditLog, readJson, writeFileAtomic } from './store.ts';
 import { DbDocStore, importJsonFilesSync, type DocStore } from './repo/docs.ts';
 import { openSqliteSync } from './db/index.ts';
@@ -56,6 +63,7 @@ import { DEFAULT_ORIGIN, ORIGIN_RE, PUBLIC_API, RADIOADMIN, loginUrl, type Lautf
 import { SyncManager } from './sync.ts';
 import { appVersion, type AirDeckConfig, type Mode } from './config.ts';
 import { HealthManager } from './health.ts';
+import { createServices, type Services } from './services/index.ts';
 import { DEFAULT_SOURCE, Updater, type UpdateSource } from './update.ts';
 import { AiService } from './ai/service.ts';
 import { AiDirector, DEFAULT_AI, type AiStationConfig, type AiSource } from './ai/director.ts';
@@ -66,207 +74,41 @@ import { UserStore } from './users.ts';
 import { lautfmStatus, listenUrlOf, type StreamStatus } from './status.ts';
 import { PullRelay, fetchAzuracast, fetchIcecastMount, type ExternalNow } from './bridge.ts';
 
-/** Anbindung eines bestehenden Systems (AzuraCast, Icecast, beliebiger Stream) an einen AirDeck-Sender. */
-export interface BridgeConfig {
-  id: string;
-  name: string;
-  kind: 'azuracast' | 'icecast' | 'stream';
-  /** Basis-URL (AzuraCast/Icecast) bzw. Stream-URL (stream) */
-  url: string;
-  /** AzuraCast: Kurzname oder ID des Senders; Icecast: Mount */
-  station?: string;
-  /** Status spiegeln (Now Playing, Hörer, Verlauf) */
-  mirror: boolean;
-  /** Stream als Quelle übernehmen (Pull-Relay) */
-  pull: boolean;
-  /** Explizite Stream-URL für das Relay (sonst aus dem Status) */
-  pullUrl?: string;
-  /** Quelle, die das Relay speist (wird automatisch angelegt) */
-  sourceId?: string;
-  priority: number;
-}
 import { readFileSync, writeFileSync } from 'node:fs';
 import { NOTIFY_EVENTS, Notifier, validateExportPath, validateWebhookUrl, type IntegrationsConfig, type NotifyEvent } from './notify.ts';
-
-export interface Station {
-  id: string;
-  name: string;
-  slogan: string;
-  primaryColor: string;
-  accentColor: string;
-  /** Eigenes Logo: Dateiendung + Version (z. B. "png:lq3x"), Datei liegt in data/logos */
-  logo?: string;
-  /** Öffentliche Statusseite/Widget (Standard: an) */
-  publicStatus?: boolean;
-  genre?: string;
-}
-
-interface StationData {
-  library: MediaItem[];
-  queue: QueueEntry[];
-  cardwall: CartSlot[];
-  clock: ClockTemplate;
-  rotation: RotationRules;
-  history: string[];
-  clockCursor: number;
-  autoFill: boolean;
-  minQueue: number;
-  playout?: PlayoutConfig;
-  playlists?: Playlist[];
-  jobs?: ScheduledJob[];
-  clockEvents?: ClockEvent[];
-  plans?: ProgramPlan[];
-  recPlans?: RecordingPlan[];
-  recordings?: Recording[];
-  playLog?: PlayLogEntry[];
-  planCursor?: Record<string, number>;
-  lautfm?: LautfmConfig;
-  integrations?: IntegrationsConfig;
-  ai?: AiStationConfig;
-  bridges?: BridgeConfig[];
-}
-
-export interface Playlist {
-  id: string;
-  name: string;
-  color: string;
-  items: string[];
-}
-
-export interface Recording {
-  id: string;
-  label: string;
-  startedAt: number;
-  endedAt?: number;
-  bytes: number;
-  contentType: string;
-  file: string;
-  planId?: string;
-}
-
-export interface PlayLogEntry {
-  at: number;
-  mediaId: string;
-  title: string;
-  artist: string;
-  category: string;
-}
-
-interface ActiveRecording {
-  rec: Recording;
-  stream: WriteStream | null;
-  tap: RelayTap;
-  target: string;
-}
-
-export interface PlayoutConfig extends PlayoutOptions {
-  /** Nach Serverstart automatisch wieder senden (24/7) */
-  autostart: boolean;
-  /** Quelle, als die das Playout sendet (Standard: Automation-Quelle des Senders) */
-  sourceId?: string;
-  /** Notfall-Ordner: spielt, wenn Queue, Sendeuhr und Sendeplan nichts liefern */
-  emergencyFolder?: string;
-}
-
-interface PersistedState {
-  version: 1;
-  stations: Station[];
-  sources: SourceConfig[];
-  outputs: OutputConfig[];
-  data: Record<string, StationData>;
-}
-
-export interface ApiToken {
-  id: string;
-  name: string;
-  hash: string;
-  scopes: string[];
-  roles: string[];
-  stationIds: string[];
-  createdAt: string;
-}
-
-export interface Principal extends Actor {
-  scopes: string[];
-  tokenId: string;
-  /** Angemeldeter Benutzer (Sitzung), sonst API-Token */
-  user?: { id: string; username: string; name: string; mustChangePassword?: boolean };
-}
-
-export interface NowPlaying {
-  mediaId: string | null;
-  deck: DeckId | null;
-  startedAt: number | null;
-}
-
-interface StationRuntime {
-  station: Station;
-  data: StationData;
-  queue: PlayQueue;
-  decks: Record<DeckId, DeckState>;
-  nowPlaying: NowPlaying;
-}
-
-export type HubEvent = { type: string; stationId?: string; payload: unknown };
-
-export class AppError extends Error {
-  readonly status: number;
-  readonly code: string;
-  constructor(status: number, code: string, message: string) {
-    super(message);
-    this.status = status;
-    this.code = code;
-  }
-}
-
-export const ALL_SCOPES = [
-  'now_playing:read', 'schedule:read', 'stream:read', 'branding:read', 'queue:read', 'queue:write',
-  'cardwall:read', 'cardwall:trigger', 'sources:read', 'sources:write', 'automation:read', 'automation:write',
-  'media:read', 'media:write', 'stations:write', 'outputs:read', 'outputs:write', 'audit:read', 'tokens:write',
-  'lautfm:read', 'lautfm:write', 'ai:read', 'ai:write', 'bridge:write',
-] as const;
-
-const SLUG = /^[a-z0-9][a-z0-9-]{0,39}$/;
-
-export function hashToken(token: string): string {
-  return createHash('sha256').update(token).digest('hex');
-}
-
-export function newId(prefix: string): string {
-  return `${prefix}_${randomBytes(6).toString('hex')}`;
-}
-
 export class AirDeckApp {
+  /** Dienstmodule (services/) */
+  readonly svc: Services;
   readonly dataDir: string;
   readonly mediaDir: string;
   readonly engine: SourcePriorityEngine;
   readonly secrets: SecretStore;
   readonly audit: AuditLog;
-  private readonly stations = new Map<string, StationRuntime>();
-  private readonly outputs = new Map<string, BroadcastOutput>();
-  private readonly relays = new Map<string, RelayTarget>();
-  private readonly playouts = new Map<string, { playout: Playout; source: SourceConfig }>();
+  readonly stations = new Map<string, StationRuntime>();
+  readonly outputs = new Map<string, BroadcastOutput>();
+  readonly relays = new Map<string, RelayTarget>();
+  readonly playouts = new Map<string, { playout: Playout; source: SourceConfig }>();
   /** kann sich im Betrieb ändern: fehlgeschlagene Erkennung wird im Hintergrund wiederholt */
   ffmpeg: FfmpegInfo | null;
   readonly health: HealthManager;
   readonly mode: Mode;
   readonly version: string;
   readonly paths: AirDeckConfig['paths'];
-  private ffmpegRetry: NodeJS.Timeout | null = null;
-  private tickCount = 0;
-  private lastSchedAt = Date.now();
-  private readonly activePlanId = new Map<string, string | null>();
-  private readonly recorders = new Map<string, ActiveRecording>();
-  private readonly notifier: Notifier;
-  private readonly lastOutStatus = new Map<string, string>();
-  private readonly subscribers = new Set<(e: HubEvent) => void>();
+  ffmpegRetry: NodeJS.Timeout | null = null;
+  tickCount = 0;
+  lastSchedAt = Date.now();
+  readonly activePlanId = new Map<string, string | null>();
+  readonly recorders = new Map<string, ActiveRecording>();
+  readonly notifier: Notifier;
+  readonly lastOutStatus = new Map<string, string>();
+  readonly subscribers = new Set<(e: HubEvent) => void>();
   /** Datenhaltung: Datenbank (Standard SQLite im Datenordner) */
   readonly docs: DocStore;
   /** von der App selbst geöffnete Datenbank (wird beim Beenden geschlossen) */
-  private readonly ownDb: { close(): Promise<void> } | null;
-  private tokens: ApiToken[];
-  private tickTimer: NodeJS.Timeout | null = null;
-  private levelTimer: NodeJS.Timeout | null = null;
+  readonly ownDb: { close(): Promise<void> } | null;
+  tokens: ApiToken[];
+  tickTimer: NodeJS.Timeout | null = null;
+  levelTimer: NodeJS.Timeout | null = null;
 
   readonly sync: SyncManager;
 
@@ -284,6 +126,7 @@ export class AirDeckApp {
 
   constructor(dataDir: string, opts: { stableMs?: number; cooldownMs?: number; appRoot?: string; ffmpeg?: FfmpegInfo | null; secrets?: SecretStore; sync?: SyncManager; build?: string; packaged?: boolean; headless?: boolean; config?: AirDeckConfig; ffmpegRetryS?: number[]; docs?: DocStore } = {}) {
     this.dataDir = dataDir;
+    this.svc = createServices(this);
     if (opts.docs) {
       this.docs = opts.docs;
       this.ownDb = null;
@@ -402,11 +245,11 @@ export class AirDeckApp {
   }
 
   /** false, wenn Tests bzw. Hilfsinstanzen ffmpeg ausdrücklich abgeschaltet haben */
-  private ffmpegDisabled = false;
-  private ffmpegRetryS = [10, 30, 60, 120, 300];
+  ffmpegDisabled = false;
+  ffmpegRetryS = [10, 30, 60, 120, 300];
 
   /** ffmpeg-Erkennung ist beim Start fehlgeschlagen (z. B. Zeitüberschreitung unter Last): im Hintergrund erneut suchen. */
-  private scheduleFfmpegRetry(attempt: number): void {
+  scheduleFfmpegRetry(attempt: number): void {
     const delay = this.ffmpegRetryS[attempt];
     if (delay === undefined) {
       this.audit.write({ kind: 'system', event: 'ffmpeg_missing', attempts: attempt });
@@ -427,7 +270,7 @@ export class AirDeckApp {
   }
 
   // 24/7: Playouts, die vor dem Neustart liefen, automatisch wieder starten
-  private autostartPlayouts(): void {
+  autostartPlayouts(): void {
     if (!this.ffmpeg) return;
     for (const [id, rt] of this.stations) {
       if (!rt.data.playout?.autostart || this.playouts.get(id)?.playout.status().running) continue;
@@ -526,7 +369,7 @@ export class AirDeckApp {
     return () => this.subscribers.delete(fn);
   }
 
-  private publish(type: string, stationId: string | undefined, payload: unknown): void {
+  publish(type: string, stationId: string | undefined, payload: unknown): void {
     if (stationId) this.notifyFrom(type, stationId, payload);
     const e = { type, stationId, payload };
     for (const s of this.subscribers) {
@@ -538,7 +381,7 @@ export class AirDeckApp {
     }
   }
 
-  private onEngineEvent(e: EngineEvent): void {
+  onEngineEvent(e: EngineEvent): void {
     if (e.type !== 'SOURCE_HEALTH_CHANGED' || e.data?.healthy === false) {
       this.audit.write({ kind: 'source', ...e });
     }
@@ -548,7 +391,7 @@ export class AirDeckApp {
     this.publish('sources.changed', e.stationId, this.engine.list(e.stationId));
   }
 
-  private tick(): void {
+  tick(): void {
     this.engine.tick();
     try {
       this.processSchedules();
@@ -586,7 +429,7 @@ export class AirDeckApp {
 
   // ---------- Sender ----------
 
-  private mountStation(station: Station, data?: StationData): StationRuntime {
+  mountStation(station: Station, data?: StationData): StationRuntime {
     const d: StationData = {
       // unbekannte/optionale Felder (laut.fm, Integrationen, KI …) bleiben beim Neustart erhalten
       ...data,
@@ -661,7 +504,7 @@ export class AirDeckApp {
     return s;
   }
 
-  private static readonly LOGO_TYPES: Record<string, string> = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp', 'image/gif': 'gif' };
+  static readonly LOGO_TYPES: Record<string, string> = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp', 'image/gif': 'gif' };
 
   /** Eigenes Senderlogo speichern (PNG/JPG/WebP/GIF, max. 2 MB; SVG bewusst nicht wegen Skripten). */
   setStationLogo(id: string, contentType: string, data: Buffer): Station {
@@ -692,7 +535,7 @@ export class AirDeckApp {
     return s;
   }
 
-  private removeLogoFile(id: string): void {
+  removeLogoFile(id: string): void {
     for (const ext of Object.values(AirDeckApp.LOGO_TYPES)) rmSync(join(this.dataDir, 'logos', `${id}.${ext}`), { force: true });
   }
 
@@ -872,7 +715,7 @@ export class AirDeckApp {
     return this.relayFor(stationId, normalizeMount(mount)).addListener(res);
   }
 
-  private relayFor(stationId: string, target: string): RelayTarget {
+  relayFor(stationId: string, target: string): RelayTarget {
     const key = relayKey(stationId, target);
     let r = this.relays.get(key);
     if (!r) {
@@ -884,7 +727,7 @@ export class AirDeckApp {
 
   // ---------- Ausgänge ----------
 
-  private mountOutput(cfg: OutputConfig): BroadcastOutput {
+  mountOutput(cfg: OutputConfig): BroadcastOutput {
     this.outputs.get(cfg.id)?.stop();
     const Cls = cfg.type === 'shoutcast' ? ShoutcastOutput : IcecastOutput;
     const o = new Cls(cfg, () => this.secrets.get(cfg.passwordRef), (s: OutputState) => this.publish('stream.state_changed', cfg.stationId, { id: cfg.id, ...s }));
@@ -989,8 +832,8 @@ export class AirDeckApp {
 
   // ---------- Lautheitsanalyse (EBU R128) – nacheinander, damit der Sendebetrieb nicht leidet ----------
 
-  private readonly loudQueue: { stationId: string; id: string }[] = [];
-  private loudBusy = false;
+  readonly loudQueue: { stationId: string; id: string }[] = [];
+  loudBusy = false;
 
   queueLoudness(stationId: string, id: string): void {
     if (!this.ffmpeg || this.loudQueue.some((x) => x.stationId === stationId && x.id === id)) return;
@@ -1015,7 +858,7 @@ export class AirDeckApp {
     return { total: lib.length, measured: lib.filter((m) => m.lufs != null).length, pending: this.loudQueue.filter((x) => x.stationId === stationId).length, running: this.loudBusy };
   }
 
-  private async runLoudness(): Promise<void> {
+  async runLoudness(): Promise<void> {
     if (this.loudBusy || !this.ffmpeg) return;
     this.loudBusy = true;
     try {
@@ -1279,36 +1122,6 @@ export class AirDeckApp {
     return { supported: true, devices: listInputDevices(this.ffmpeg.ffmpeg), monitor: !!this.ffmpeg.ffplay, eqBands: EQ_BANDS };
   }
 
-  private cpuPrev = cpus().map((c) => c.times);
-
-  /** Systemwerte für das Monitoring (CPU, RAM, Stream-Durchsatz). */
-  system(): unknown {
-    const now = cpus().map((c) => c.times);
-    let idle = 0;
-    let total = 0;
-    now.forEach((t, i) => {
-      const p = this.cpuPrev[i] ?? t;
-      const d = (k: keyof typeof t) => t[k] - p[k];
-      const sum = d('user') + d('nice') + d('sys') + d('idle') + d('irq');
-      total += sum;
-      idle += d('idle');
-    });
-    this.cpuPrev = now;
-    const outBytes = [...this.outputs.values()].reduce((a, o) => a + o.state.bytesSent, 0);
-    const t = Date.now();
-    const rate = this.lastOut ? ((outBytes - this.lastOut.bytes) / Math.max(1, t - this.lastOut.at)) * 1000 : 0;
-    this.lastOut = { bytes: outBytes, at: t };
-    return {
-      cpu: total > 0 ? Math.round((1 - idle / total) * 100) : 0,
-      ram: Math.round((1 - freemem() / totalmem()) * 100),
-      uptimeS: Math.round(osUptime()),
-      processMb: Math.round(process.memoryUsage().rss / 1048576),
-      streamBytesPerSec: Math.max(0, Math.round(rate)),
-      outputsConnected: [...this.outputs.values()].filter((o) => o.state.status === 'connected').length,
-    };
-  }
-  private lastOut: { bytes: number; at: number } | null = null;
-
   /** Cover-Bild aus der Audiodatei (eingebettetes Bild), zwischengespeichert. */
   async cover(stationId: string, mediaId: string): Promise<string | null> {
     const m = this.media(stationId, mediaId);
@@ -1396,7 +1209,7 @@ export class AirDeckApp {
   }
 
   /** Notfall-Auswahl, wenn Queue und Sendeuhr nichts liefern: beliebiger Musiktitel, sonst irgendein Titel. */
-  private emergencyPick(stationId: string): MediaItem | null {
+  emergencyPick(stationId: string): MediaItem | null {
     const rt = this.rt(stationId);
     const lib = rt.data.library;
     const folder = rt.data.playout?.emergencyFolder;
@@ -1633,7 +1446,7 @@ export class AirDeckApp {
     this.planningChanged(stationId);
   }
 
-  private jobTarget(stationId: string, input: Record<string, unknown>): JobTarget {
+  jobTarget(stationId: string, input: Record<string, unknown>): JobTarget {
     const kind = input.kind as JobTarget['kind'];
     const mode = (['now', 'track', 'fx'] as const).includes(input.mode as never) ? (input.mode as JobTarget['mode']) : 'track';
     const label = typeof input.label === 'string' ? input.label.slice(0, 80) : undefined;
@@ -1657,19 +1470,19 @@ export class AirDeckApp {
     }
   }
 
-  private planningChanged(stationId: string): void {
+  planningChanged(stationId: string): void {
     this.publish('planning.changed', stationId, this.planning(stationId));
     this.changed();
   }
 
   /** Nächsten Titel starten – im Server-Playout direkt, sonst übernimmt das Studio (Event). */
-  private advance(stationId: string): void {
+  advance(stationId: string): void {
     const po = this.playouts.get(stationId);
     if (po) po.playout.skip();
     else this.publish('automation.command', stationId, { action: 'next' });
   }
 
-  private executeTarget(stationId: string, t: JobTarget, origin: string): void {
+  executeTarget(stationId: string, t: JobTarget, origin: string): void {
     const rt = this.rt(stationId);
     if (t.kind === 'playlist') {
       this.playPlaylist(stationId, t.playlistId!);
@@ -1699,7 +1512,7 @@ export class AirDeckApp {
     this.publish('schedule.fired', stationId, { label: t.label, kind: t.kind, mode: t.mode, origin });
   }
 
-  private processSchedules(): void {
+  processSchedules(): void {
     const now = Date.now();
     const from = this.lastSchedAt;
     this.lastSchedAt = now;
@@ -1801,7 +1614,7 @@ export class AirDeckApp {
     this.changed();
   }
 
-  private recWrite(active: ActiveRecording, chunk: Buffer): void {
+  recWrite(active: ActiveRecording, chunk: Buffer): void {
     if (!active.stream) return;
     // Platte zu langsam: lieber Lücke als Speicher volllaufen lassen
     if (active.stream.writableLength > 8 * 1024 * 1024) return;
@@ -1855,7 +1668,7 @@ export class AirDeckApp {
   // ---------- Benachrichtigungen, Webhooks, Now-Playing-Export ----------
 
   /** Übersetzt interne Ereignisse in externe Meldungen (Webhook/Telegram/Datei). */
-  private notifyFrom(type: string, stationId: string, payload: unknown): void {
+  notifyFrom(type: string, stationId: string, payload: unknown): void {
     const cfg = this.stations.get(stationId)?.data.integrations;
     if (!cfg) return;
     const p = (payload ?? {}) as Record<string, any>;
@@ -1955,59 +1768,12 @@ export class AirDeckApp {
 
   // ---------- Updates ----------
 
-  updateConfig(): UpdateSource & { autoCheck: boolean } {
-    const s = this.docs.get<Partial<UpdateSource> & { autoCheck?: boolean }>('update', {});
-    return { ...DEFAULT_SOURCE, ...s, tokenRef: 'update:token', autoCheck: s.autoCheck ?? true };
-  }
-
-  updateSettingsView(): unknown {
-    const s = this.updateConfig();
-    return {
-      repo: s.repo, tag: s.tag, manifestUrl: s.manifestUrl ?? '', autoCheck: s.autoCheck, hasToken: this.secrets.has('update:token'),
-      build: this.updater.current, canInstall: process.platform === 'win32' && this.packaged,
-    };
-  }
-
-  setUpdateSettings(input: Record<string, unknown>): unknown {
-    const cur = this.updateConfig();
-    const repo = typeof input.repo === 'string' && input.repo ? input.repo.trim() : cur.repo;
-    if (!/^[\w.-]+\/[\w.-]+$/.test(repo)) throw new AppError(400, 'invalid_repo', 'Repository im Format besitzer/name angeben');
-    const manifestUrl = typeof input.manifestUrl === 'string' ? input.manifestUrl.trim() : cur.manifestUrl ?? '';
-    if (manifestUrl && !/^https:\/\//.test(manifestUrl)) throw new AppError(400, 'invalid_url', 'Update-Adresse muss https:// sein');
-    if (typeof input.token === 'string') {
-      if (input.token) this.secrets.set('update:token', input.token.trim());
-      else this.secrets.delete('update:token');
-    }
-    this.docs.set('update', {
-      repo, tag: typeof input.tag === 'string' && input.tag ? input.tag : cur.tag, manifestUrl: manifestUrl || undefined,
-      autoCheck: typeof input.autoCheck === 'boolean' ? input.autoCheck : cur.autoCheck,
-    });
-    return this.updateSettingsView();
-  }
-
-  checkUpdate(force = false): Promise<unknown> {
-    return this.updater.check(this.updateConfig(), this.secrets.get('update:token'), force);
-  }
-
-  /** Windows (installiertes Programm): Setup laden, prüfen, still installieren, AirDeck beenden. */
-  async installUpdate(exit: () => void): Promise<unknown> {
-    if (process.platform !== 'win32' || !this.packaged) throw new AppError(409, 'not_supported', 'Automatische Installation nur im installierten Windows-Programm – sonst bitte manuell herunterladen');
-    const info = await this.updater.check(this.updateConfig(), this.secrets.get('update:token'), true);
-    if (info.error) throw new AppError(502, 'update_check_failed', info.error);
-    if (!info.available || !info.assets.setup) throw new AppError(409, 'no_update', 'Kein neueres Update verfügbar');
-    const file = await this.updater.download(info.assets.setup, this.secrets.get('update:token'));
-    this.audit.write({ kind: 'update', event: 'install', from: this.updater.current, to: info.latest });
-    this.updater.runWindowsSetup(file, this.headless);
-    setTimeout(exit, 1500).unref();
-    return { installing: true, to: info.latest };
-  }
-
   // ---------- Brücke zu bestehenden Systemen ----------
 
-  private readonly bridgeStatus = new Map<string, { at: number; data?: ExternalNow; error?: string; busy?: boolean }>();
-  private readonly pulls = new Map<string, PullRelay>();
+  readonly bridgeStatus = new Map<string, { at: number; data?: ExternalNow; error?: string; busy?: boolean }>();
+  readonly pulls = new Map<string, PullRelay>();
   /** Von außen gemeldetes Now Playing (Bridge-API), pro Sender */
-  private readonly externalNow = new Map<string, ExternalNow & { at: number }>();
+  readonly externalNow = new Map<string, ExternalNow & { at: number }>();
 
   bridges(stationId: string): unknown[] {
     return (this.rt(stationId).data.bridges ?? []).map((b) => ({
@@ -2073,13 +1839,13 @@ export class AirDeckApp {
     return this.bridges(stationId).find((x) => (x as { id: string }).id === b.id);
   }
 
-  private stopPull(id: string): void {
+  stopPull(id: string): void {
     this.pulls.get(id)?.stop();
     this.pulls.delete(id);
   }
 
   /** Relay starten: Stream-URL explizit, sonst aus dem gespiegelten Status (AzuraCast-Mount/Icecast-Mount). */
-  private async startPull(stationId: string, b: BridgeConfig): Promise<void> {
+  async startPull(stationId: string, b: BridgeConfig): Promise<void> {
     let url = b.kind === 'stream' ? b.url : b.pullUrl;
     if (!url) {
       const s = await this.pollBridge(stationId, b, true);
@@ -2107,7 +1873,7 @@ export class AirDeckApp {
   }
 
   /** Status einer Anbindung abfragen (mit Zwischenspeicher, nie parallel). */
-  private async pollBridge(stationId: string, b: BridgeConfig, force = false): Promise<ExternalNow | undefined> {
+  async pollBridge(stationId: string, b: BridgeConfig, force = false): Promise<ExternalNow | undefined> {
     const st = this.bridgeStatus.get(b.id) ?? { at: 0 };
     if (st.busy || (!force && Date.now() - st.at < 15_000)) return st.data;
     st.busy = true;
@@ -2128,17 +1894,17 @@ export class AirDeckApp {
     return st.data;
   }
 
-  private startBridges(): void {
+  startBridges(): void {
     for (const [id, rt] of this.stations) for (const b of rt.data.bridges ?? []) if (b.pull) void this.startPull(id, b);
   }
 
-  private tickBridges(): void {
+  tickBridges(): void {
     for (const [id, rt] of this.stations) for (const b of rt.data.bridges ?? []) if (b.mirror && b.kind !== 'stream') void this.pollBridge(id, b);
   }
 
   // ---------- Bridge-API für Entwickler: externe Schlüssel → AirDeck-Sender (idempotent) ----------
 
-  private bridgeMap(): Record<string, string> {
+  bridgeMap(): Record<string, string> {
     return { ...this.docs.get<Record<string, string>>('bridge-keys', {}) };
   }
 
@@ -2196,10 +1962,10 @@ export class AirDeckApp {
 
   // ---------- Stream-Status (öffentlich, wie Icecast) ----------
 
-  private readonly statusCache = new Map<string, { at: number; data: Promise<StreamStatus> }>();
-  private readonly startedAt = new Date().toISOString();
+  readonly statusCache = new Map<string, { at: number; data: Promise<StreamStatus> }>();
+  readonly startedAt = new Date().toISOString();
 
-  private cached(key: string, ttlMs: number, fn: () => Promise<StreamStatus>): Promise<StreamStatus> {
+  cached(key: string, ttlMs: number, fn: () => Promise<StreamStatus>): Promise<StreamStatus> {
     const hit = this.statusCache.get(key);
     if (hit && Date.now() - hit.at < ttlMs) return hit.data;
     const data = fn();
@@ -2275,152 +2041,9 @@ export class AirDeckApp {
 
   // ---------- Liquidsoap ----------
 
-  liquidsoap(stationId: string, opts: { port?: number; mount?: string; processing?: boolean }): { script: string; env: string[] } {
-    const rt = this.rt(stationId);
-    const outputs = [...this.outputs.values()].filter((o) => o.cfg.stationId === stationId).map((o) => o.cfg);
-    const port = Number.isInteger(opts.port) && opts.port! > 1023 && opts.port! < 65536 ? opts.port! : 8005;
-    return liquidsoapScript(outputs, {
-      stationName: rt.station.name, harborPort: port, harborMount: String(opts.mount ?? 'airdeck').replace(/[^\w/-]/g, '').slice(0, 40) || 'airdeck',
-      bitrateKbps: rt.data.playout?.bitrateKbps ?? 128, processing: opts.processing !== false,
-    });
-  }
-
   // ---------- Nextcloud-Brücke ----------
 
-  nextcloudConfig(): (NextcloudConfig & { hasPassword: boolean }) | { configured: false } {
-    const c = this.docs.get<NextcloudConfig | null>('nextcloud', null);
-    return c ? { ...c, hasPassword: this.secrets.has('nextcloud:password') } : { configured: false };
-  }
-
-  setNextcloud(input: Record<string, unknown>): unknown {
-    if (input.remove === true) {
-      rmSync(join(this.dataDir, 'nextcloud.json'), { force: true });
-      this.secrets.delete('nextcloud:password');
-      return { configured: false };
-    }
-    const url = String(input.url ?? '').trim().replace(/\/+$/, '');
-    if (!/^https?:\/\/[^\s/]+/.test(url)) throw new AppError(400, 'invalid_url', 'Nextcloud-Adresse mit https:// angeben');
-    const user = String(input.user ?? '').trim();
-    if (!user) throw new AppError(400, 'invalid_user', 'Benutzername fehlt');
-    let root: string;
-    try {
-      root = cleanPath(String(input.root ?? '/'));
-    } catch {
-      throw new AppError(400, 'invalid_path', 'Ungültiger Startordner');
-    }
-    if (typeof input.password === 'string' && input.password) this.secrets.set('nextcloud:password', input.password.trim());
-    if (!this.secrets.has('nextcloud:password')) throw new AppError(400, 'no_password', 'App-Passwort fehlt (Nextcloud → Einstellungen → Sicherheit → App-Passwort)');
-    this.docs.set('nextcloud', { url, user, root });
-    this.audit.write({ kind: 'nextcloud', event: 'config', url, user });
-    return this.nextcloudConfig();
-  }
-
-  private nc(): { client: Nextcloud; root: string } {
-    const c = this.docs.get<NextcloudConfig | null>('nextcloud', null);
-    const pw = this.secrets.get('nextcloud:password');
-    if (!c || !pw) throw new AppError(409, 'not_configured', 'Nextcloud ist noch nicht eingerichtet');
-    return { client: new Nextcloud(c, pw), root: c.root };
-  }
-
-  private ncCall<T>(fn: () => Promise<T>): Promise<T> {
-    return fn().catch((err) => {
-      if (err instanceof NextcloudError) throw new AppError(err.status === 401 ? 502 : err.status, 'nextcloud', err.message);
-      throw err;
-    });
-  }
-
-  /** Ordner in der Nextcloud (relativ zum Startordner). */
-  async nextcloudList(path: string): Promise<unknown> {
-    const { client, root } = this.nc();
-    const rel = cleanPath(path);
-    const entries = await this.ncCall(() => client.list(cleanPath(`${root}/${rel}`)));
-    return {
-      path: rel,
-      entries: entries.map((e) => ({ ...e, path: cleanPath(e.path.slice(root === '/' ? 0 : root.length)), audio: !e.dir && AUDIO_FILE_RE.test(e.name) })),
-    };
-  }
-
-  /** Dateien/Ordner (rekursiv, max. 500 Dateien) in die Bibliothek übernehmen. */
-  async nextcloudImport(stationId: string, paths: string[], opts: { category?: string; folder?: string }): Promise<{ imported: number; skipped: number; errors: string[] }> {
-    const { client, root } = this.nc();
-    const rt = this.rt(stationId);
-    const category = (MEDIA_CATEGORIES as readonly string[]).includes(String(opts.category)) ? (opts.category as MediaItem['category']) : 'music';
-    const files: { path: string; name: string; folder: string }[] = [];
-    const walk = async (rel: string, folder: string, depth: number): Promise<void> => {
-      const list = await this.ncCall(() => client.list(cleanPath(`${root}/${rel}`)));
-      for (const e of list) {
-        if (files.length >= 500) return;
-        const r = cleanPath(`${rel}/${e.name}`);
-        if (e.dir && depth < 4) await walk(r, folder ? `${folder} / ${e.name}` : e.name, depth + 1);
-        else if (!e.dir && AUDIO_FILE_RE.test(e.name)) files.push({ path: r, name: e.name, folder });
-      }
-    };
-    for (const p of paths.slice(0, 200)) {
-      const rel = cleanPath(p);
-      const name = rel.split('/').pop() ?? '';
-      if (AUDIO_FILE_RE.test(name)) files.push({ path: rel, name, folder: opts.folder ?? '' });
-      else await walk(rel, opts.folder || name, 0);
-    }
-    const errors: string[] = [];
-    let imported = 0;
-    let skipped = 0;
-    for (const f of files) {
-      // bereits übernommene Datei (gleicher Nextcloud-Pfad) nicht doppelt laden
-      if (rt.data.library.some((m) => m.source === `nextcloud:${f.path}`)) {
-        skipped++;
-        continue;
-      }
-      const id = newId('m');
-      const ext = extname(f.name).toLowerCase();
-      const file = `${id}${ext}`;
-      try {
-        await this.ncCall(() => client.download(cleanPath(`${root}/${f.path}`), join(this.mediaDir, stationId, file), 500 * 1024 * 1024));
-        const meta = parseFileName(f.name);
-        this.addMedia(stationId, { id, title: meta.title || f.name, artist: meta.artist, category, file, durationMs: null, addedAt: Date.now(), folder: f.folder.slice(0, 80) || undefined, originalName: f.name, source: `nextcloud:${f.path}` });
-        imported++;
-      } catch (err) {
-        errors.push(`${f.name}: ${(err as Error).message}`);
-      }
-    }
-    this.audit.write({ kind: 'nextcloud', event: 'import', stationId, imported, skipped, errors: errors.length });
-    return { imported, skipped, errors: errors.slice(0, 20) };
-  }
-
-  /** Mitschnitt in die Nextcloud hochladen. */
-  async nextcloudUploadRecording(stationId: string, recId: string, targetDir: string): Promise<unknown> {
-    const { client, root } = this.nc();
-    const { path, rec } = this.recordingFile(stationId, recId);
-    const ext = rec.contentType.includes('ogg') ? 'ogg' : rec.contentType.includes('aac') ? 'aac' : rec.contentType.includes('webm') ? 'webm' : 'mp3';
-    const name = `${new Date(rec.startedAt).toISOString().slice(0, 16).replace(/[:T]/g, '-')} ${rec.label}`.replace(/[\\/:*?"<>|]+/g, '_').slice(0, 120);
-    const target = cleanPath(`${root}/${targetDir || 'AirDeck-Mitschnitte'}/${name}.${ext}`);
-    await this.ncCall(() => client.upload(path, target, rec.contentType));
-    this.audit.write({ kind: 'nextcloud', event: 'upload', stationId, recId });
-    return { uploaded: target };
-  }
-
   // ---------- Android-App / Netzwerk ----------
-
-  /** Mitgelieferte APK (Windows-Paket) oder null. */
-  localApk(): string | null {
-    const f = join(this.appRoot, 'android', 'AirDeck-Android.apk');
-    return existsSync(f) ? f : null;
-  }
-
-  appConnect(): unknown {
-    const lanSetting = readJson<{ lan?: boolean }>(join(this.dataDir, 'network.json'), {}).lan === true;
-    const listening = this.listenHost === '0.0.0.0' || this.listenHost === '::';
-    const addresses: string[] = [];
-    for (const list of Object.values(networkInterfaces())) {
-      for (const a of list ?? []) if (a.family === 'IPv4' && !a.internal) addresses.push(`http://${a.address}:${this.listenPort}`);
-    }
-    return { lan: lanSetting, listening, restartNeeded: lanSetting !== listening && !process.env.AIRDECK_HOST, addresses, apk: this.localApk() ? 'local' : 'release' };
-  }
-
-  setNetwork(lan: boolean): unknown {
-    writeFileAtomic(join(this.dataDir, 'network.json'), JSON.stringify({ lan }));
-    this.audit.write({ kind: 'network', event: 'lan', lan });
-    return this.appConnect();
-  }
 
   // ---------- KI-Automation ----------
 
@@ -2515,83 +2138,6 @@ export class AirDeckApp {
 
   // ---------- laut.fm ----------
 
-  lautfmConfig(stationId: string): LautfmConfig & { origin: string; hasToken: boolean; loginUrl: string } {
-    const cfg = this.rt(stationId).data.lautfm ?? {};
-    const origin = cfg.origin ?? DEFAULT_ORIGIN;
-    return { ...cfg, origin, hasToken: this.secrets.has(`lautfm:${stationId}`), loginUrl: loginUrl(origin) };
-  }
-
-  lautfmToken(stationId: string): string | undefined {
-    return this.secrets.get(`lautfm:${stationId}`);
-  }
-
-  setLautfmConfig(p: Principal, stationId: string, input: Record<string, unknown>): unknown {
-    const rt = this.rt(stationId);
-    const cfg: LautfmConfig = { ...rt.data.lautfm };
-    if (input.stationId !== undefined) {
-      const n = Number(input.stationId);
-      cfg.stationId = input.stationId === null || input.stationId === '' ? undefined : Number.isSafeInteger(n) && n > 0 ? n : cfg.stationId;
-    }
-    if (typeof input.origin === 'string') {
-      const o = input.origin.trim();
-      if (o && !ORIGIN_RE.test(o)) throw new AppError(400, 'invalid_origin', 'Callback/Origin: nur Buchstaben, Ziffern und . _ : / -');
-      cfg.origin = o && o !== DEFAULT_ORIGIN ? o : undefined;
-    }
-    if (typeof input.stationName === 'string') cfg.stationName = input.stationName.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '') || undefined;
-    if (typeof input.token === 'string') {
-      if (input.token) this.secrets.set(`lautfm:${stationId}`, input.token.trim());
-      else this.secrets.delete(`lautfm:${stationId}`);
-    }
-    rt.data.lautfm = cfg;
-    this.audit.write({ kind: 'lautfm', event: 'config', actor: p.id, stationId, token: typeof input.token === 'string' ? (input.token ? 'set' : 'removed') : 'unchanged' });
-    this.changed();
-    return this.lautfmConfig(stationId);
-  }
-
-  /** Radioadmin-Anfrage mit gespeichertem Token (serverseitig). */
-  async radioadmin(stationId: string, method: string, path: string, body?: unknown): Promise<{ status: number; data: unknown }> {
-    const token = this.lautfmToken(stationId);
-    if (!token) throw new AppError(409, 'no_token', 'Kein laut.fm-Radioadmin-Token hinterlegt');
-    const r = await fetch(RADIOADMIN + path, {
-      method,
-      headers: { Authorization: `Bearer ${token}`, Origin: this.lautfmConfig(stationId).origin, Accept: 'application/json', ...(body ? { 'Content-Type': 'application/json' } : {}) },
-      body: body ? JSON.stringify(body) : undefined,
-      signal: AbortSignal.timeout(20_000),
-    }).catch(() => {
-      throw new AppError(502, 'upstream_unreachable', 'laut.fm nicht erreichbar');
-    });
-    const text = await r.text();
-    let data: unknown = text;
-    try {
-      data = JSON.parse(text);
-    } catch {
-      // Text-Antwort (z. B. Passwort)
-    }
-    return { status: r.status, data };
-  }
-
-  /**
-   * Live-Zugang der laut.fm-Station als AirDeck-Ausgang übernehmen (Icecast-Source mit optionalem ?prio=).
-   * Nutzt GET /stations/{id}/live und ggf. /live/password aus der Radioadmin-API.
-   */
-  async lautfmCreateOutput(p: Principal, stationId: string, priority?: number): Promise<unknown> {
-    const cfg = this.lautfmConfig(stationId);
-    if (!cfg.stationId) throw new AppError(409, 'no_station', 'Zuerst die laut.fm-Station wählen');
-    const live = await this.radioadmin(stationId, 'GET', `/stations/${cfg.stationId}/live`);
-    if (live.status !== 200 || typeof live.data !== 'object' || !live.data) throw new AppError(live.status === 403 ? 403 : 502, 'lautfm_error', `laut.fm antwortete ${live.status}`);
-    const d = live.data as { protocol?: string; server?: string; port?: number; mountpoint?: string; user?: string; password?: string; bitrate?: number };
-    let password = d.password;
-    if (!password) {
-      const pw = await this.radioadmin(stationId, 'GET', `/stations/${cfg.stationId}/live/password`);
-      if (pw.status === 200 && typeof pw.data === 'string') password = pw.data;
-    }
-    if (!d.server || !d.mountpoint || !password) throw new AppError(502, 'lautfm_incomplete', 'laut.fm lieferte keine vollständigen Live-Zugangsdaten');
-    return this.saveOutput(p, stationId, null, {
-      name: `laut.fm ${cfg.stationName ?? cfg.stationId}`, type: 'icecast', host: d.server, port: d.port ?? (d.protocol === 'https' ? 443 : 80),
-      tls: d.protocol === 'https', mount: d.mountpoint, username: d.user ?? 'source', password, priority, sourceTarget: '/live',
-    });
-  }
-
   // ---------- Cardwall ----------
 
   cardwall(stationId: string): CartSlot[] {
@@ -2628,7 +2174,7 @@ export class AirDeckApp {
 
   // ---------- intern ----------
 
-  private autoFill(rt: StationRuntime, force = false): void {
+  autoFill(rt: StationRuntime, force = false): void {
     if (!rt.data.autoFill && !force) return;
     // KI plant die Musik: Sendeuhr springt nur ein, wenn die Queue leer ist (Rückfall)
     const ai = rt.data.ai;
@@ -2657,7 +2203,7 @@ export class AirDeckApp {
     rt.data.clockCursor = fillFromClock(rt.queue, rt.data.library, rt.data.clock, rt.data.history, rt.data.clockCursor, rt.data.minQueue, rt.data.rotation);
   }
 
-  private publishQueue(stationId: string): void {
+  publishQueue(stationId: string): void {
     this.publish('queue.changed', stationId, this.queueView(stationId));
     this.changed();
   }
@@ -2680,11 +2226,11 @@ export class AirDeckApp {
     return JSON.stringify(this.snapshot(), null, 1);
   }
 
-  private changed(): void {
+  changed(): void {
     this.docs.touch('airdeck');
   }
 
-  private snapshot(): PersistedState {
+  snapshot(): PersistedState {
     const data: Record<string, StationData> = {};
     for (const [id, rt] of this.stations) data[id] = { ...rt.data, queue: rt.queue.list() };
     return {
@@ -2696,81 +2242,22 @@ export class AirDeckApp {
     };
   }
 
-  private rt(id: string): StationRuntime {
+  rt(id: string): StationRuntime {
     const rt = this.stations.get(id);
     if (!rt) throw new AppError(404, 'not_found', 'Sender nicht gefunden');
     return rt;
   }
 
-  private sourceOf(stationId: string, id: string): SourceConfig {
+  sourceOf(stationId: string, id: string): SourceConfig {
     const s = this.engine.get(id);
     if (!s || s.stationId !== stationId) throw new AppError(404, 'not_found', 'Quelle nicht gefunden');
     return s;
   }
 
-  private outputOf(stationId: string, id: string): BroadcastOutput {
+  outputOf(stationId: string, id: string): BroadcastOutput {
     const o = this.outputs.get(id);
     if (!o || o.cfg.stationId !== stationId) throw new AppError(404, 'not_found', 'Ausgang nicht gefunden');
     return o;
   }
 }
 
-// ---------- Hilfsfunktionen ----------
-
-const SYSTEM_PRINCIPAL: Principal = { id: 'system', tokenId: 'system', roles: ['admin'], stationIds: ['*'], scopes: ['*'] };
-
-export function canSee(p: Principal, stationId: string): boolean {
-  return p.stationIds.includes('*') || p.stationIds.includes(stationId);
-}
-
-function relayKey(stationId: string, target: string): string {
-  return `${stationId}${target}`;
-}
-
-export function normalizeMount(m: unknown): string {
-  const s = String(m ?? '').trim();
-  const withSlash = s.startsWith('/') ? s : `/${s}`;
-  if (!/^\/[a-zA-Z0-9._\-/]{1,100}$/.test(withSlash) || withSlash.includes('..')) {
-    throw new AppError(400, 'invalid_mount', 'Ungültiger Mountpoint/Target');
-  }
-  return withSlash;
-}
-
-function posInt(v: unknown): number | undefined {
-  const n = Number(v);
-  return v !== null && v !== '' && Number.isFinite(n) && n > 0 ? Math.floor(n) : undefined;
-}
-
-function safeColor(v: unknown, fallback: string): string {
-  return typeof v === 'string' && /^#[0-9a-fA-F]{6}$/.test(v) ? v : fallback;
-}
-
-function timingSafeEqualStr(a: string, b: string): boolean {
-  const ha = createHash('sha256').update(a).digest();
-  const hb = createHash('sha256').update(b).digest();
-  let diff = 0;
-  for (let i = 0; i < ha.length; i++) diff |= ha[i]! ^ hb[i]!;
-  return diff === 0;
-}
-
-function wrap<T>(fn: () => T): T {
-  try {
-    return fn();
-  } catch (err) {
-    if (err instanceof PriorityError) {
-      const status = err.code === 'not_found' ? 404 : err.code === 'forbidden' ? 403 : err.code.startsWith('invalid') ? 400 : 409;
-      throw new AppError(status, err.code, err.message);
-    }
-    throw err;
-  }
-}
-
-function publicSource<T extends SourceConfig>(s: T, secrets: SecretStore): Omit<T, 'credentialRef'> & { hasPassword: boolean } {
-  const { credentialRef, ...rest } = s;
-  return { ...rest, hasPassword: !!credentialRef && secrets.has(credentialRef) };
-}
-
-function publicOutput(o: BroadcastOutput, secrets: SecretStore): Record<string, unknown> {
-  const { passwordRef, ...cfg } = o.cfg;
-  return { ...cfg, hasPassword: secrets.has(passwordRef), state: { ...o.state } };
-}

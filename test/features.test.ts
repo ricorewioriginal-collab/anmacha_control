@@ -196,7 +196,7 @@ test('Schnelltrigger nach Kategorie, Systemwerte', () => {
     assert.equal((app.queueView('main') as { items: { origin: string }[] }).items[0]!.origin, 'schedule');
     assert.throws(() => app.quickTrigger('main', 'news'), /Keine Titel/);
     assert.throws(() => app.quickTrigger('main', 'x'), /Kategorie/);
-    const s = app.system() as { cpu: number; ram: number };
+    const s = app.svc.system.system() as { cpu: number; ram: number };
     assert.ok(s.ram > 0 && s.ram <= 100 && s.cpu >= 0 && s.cpu <= 100);
   } finally {
     done();

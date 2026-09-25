@@ -61,32 +61,38 @@ test('Nextcloud-Brücke: durchsuchen, übernehmen (ohne Doppelte), Mitschnitt ho
   const dir = mkdtempSync(join(tmpdir(), 'airdeck-nc-'));
   const app = new AirDeckApp(dir, { stableMs: 0, ffmpeg: null });
   try {
-    assert.throws(() => app.setNextcloud({ url: 'ftp://x', user: 'a', password: 'b' }), /https/);
-    app.setNextcloud({ url: `http://127.0.0.1:${(srv.address() as { port: number }).port}/`, user: 'rico r', password: 'app-pw', root: '/Radio' });
+    assert.throws(() => app.svc.nextcloud.setNextcloud({ url: 'ftp://x', user: 'a', password: 'b' }), /https/);
+    app.svc.nextcloud.setNextcloud({ url: `http://127.0.0.1:${(srv.address() as { port: number }).port}/`, user: 'rico r', password: 'app-pw', root: '/Radio' });
     assert.ok(!storedText(app).includes('app-pw'), 'Passwort nie im Klartext');
 
-    const top = (await app.nextcloudList('/Hits')) as { entries: { name: string; path: string; dir: boolean; audio: boolean }[] };
+    const top = (await app.svc.nextcloud.nextcloudList('/Hits')) as { entries: { name: string; path: string; dir: boolean; audio: boolean }[] };
     assert.deepEqual(top.entries.map((e) => [e.name, e.dir, e.audio]), [['Deep', true, false], ['Cover.jpg', false, false], ['Kygo - Firestone.mp3', false, true]]);
     assert.equal(top.entries[2]!.path, '/Hits/Kygo - Firestone.mp3');
-    await assert.rejects(app.nextcloudList('/../..'), /Ungültiger Pfad/);
+    await assert.rejects(app.svc.nextcloud.nextcloudList('/../..'), /Ungültiger Pfad/);
 
-    const r = await app.nextcloudImport('main', ['/Hits'], { category: 'music' });
+    const r = await app.svc.nextcloud.nextcloudImport('main', ['/Hits'], { category: 'music' });
     assert.deepEqual(r, { imported: 2, skipped: 0, errors: [] });
     const lib = app.library('main');
     const levels = lib.find((m) => m.title === 'Levels')!;
     assert.equal(levels.artist, 'Avicii');
     assert.equal(levels.folder, 'Hits / Deep');
     assert.equal(readFileSync(app.mediaPath('main', levels), 'utf8'), 'ID3-levels');
-    assert.deepEqual(await app.nextcloudImport('main', ['/Hits/Kygo - Firestone.mp3'], {}), { imported: 0, skipped: 1, errors: [] });
+    assert.deepEqual(await app.svc.nextcloud.nextcloudImport('main', ['/Hits/Kygo - Firestone.mp3'], {}), { imported: 0, skipped: 1, errors: [] });
 
     // Mitschnitt hochladen
     const rec = { id: 'r1', label: 'Morning Show', startedAt: Date.UTC(2026, 8, 24, 7, 0), bytes: 4, contentType: 'audio/mpeg', file: 'r1.mp3' };
     (app as unknown as { rt(id: string): { data: { recordings: unknown[] } } }).rt('main').data.recordings.push(rec);
     mkdirSync(join(dir, 'recordings', 'main'), { recursive: true });
     writeFileSync(join(dir, 'recordings', 'main', 'r1.mp3'), 'DATA');
-    const up = (await app.nextcloudUploadRecording('main', 'r1', 'Replays')) as { uploaded: string };
+    const up = (await app.svc.nextcloud.nextcloudUploadRecording('main', 'r1', 'Replays')) as { uploaded: string };
     assert.equal(up.uploaded, '/Radio/Replays/2026-09-24-07-00 Morning Show.mp3');
     assert.equal(uploads['/Radio/Replays/2026-09-24-07-00 Morning Show.mp3'], 'DATA');
+    // Entfernen wirkt (auch nach Neustart): Einstellung und Passwort sind weg
+    assert.deepEqual(app.svc.nextcloud.setNextcloud({ remove: true }), { configured: false });
+    assert.deepEqual(app.svc.nextcloud.nextcloudConfig(), { configured: false });
+    app.docs.flushSync();
+    const again = new AirDeckApp(dir, { stableMs: 0, ffmpeg: null });
+    assert.deepEqual(again.svc.nextcloud.nextcloudConfig(), { configured: false });
   } finally {
     app.shutdown();
     srv.close();
