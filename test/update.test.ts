@@ -14,7 +14,7 @@ function mockFetch(opts: { status?: number; digest?: string } = {}) {
   const calls: { url: string; headers: Record<string, string> }[] = [];
   const fn = (async (url: string, init?: RequestInit) => {
     calls.push({ url, headers: (init?.headers ?? {}) as Record<string, string> });
-    if (url.includes('/releases/tags/')) {
+    if (url.includes('/releases/tags/') || url.endsWith('/releases/latest')) {
       if (opts.status) return new Response('{}', { status: opts.status });
       return Response.json({
         body: `Automatisch gebaut aus ${SHA}`, published_at: '2026-09-24T10:00:00Z',
@@ -82,4 +82,16 @@ test('Eigene Update-Adresse (Manifest)', async () => {
   assert.equal(info.latest, 'feedbee');
   assert.equal(info.assets.setup?.digest, 'sha256:ab');
   assert.equal(info.available, true);
+});
+
+test('Release-Kanal: „latest“ und der eingefrorene Kanal „nightly“ nutzen das neueste Release', async () => {
+  const { releasePath } = await import('../src/server/update.ts');
+  assert.equal(releasePath('latest'), 'releases/latest');
+  assert.equal(releasePath('nightly'), 'releases/latest');
+  assert.equal(releasePath(''), 'releases/latest');
+  assert.equal(releasePath('build-7'), 'releases/tags/build-7');
+  const { fn, calls } = mockFetch();
+  const info = await new Updater('1234567', fn).check({ repo: 'x/y', tag: 'nightly' });
+  assert.ok(calls[0]!.url.endsWith('/repos/x/y/releases/latest'));
+  assert.equal(info.assets.setup?.name, 'AirDeck-Setup.exe');
 });

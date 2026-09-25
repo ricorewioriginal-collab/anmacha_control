@@ -251,10 +251,13 @@ jobs:
           ls -la out
       - uses: softprops/action-gh-release@v2
         with:
-          tag_name: nightly
-          name: AirDeck – aktueller Stand
-          prerelease: true
-          make_latest: false
+          # Releases sind im Repository unveränderlich: jeder Build bekommt ein eigenes Release,
+          # die Download-Links zeigen über „latest“ immer auf das neueste
+          tag_name: build-${{ github.run_number }}
+          target_commitish: ${{ github.sha }}
+          name: AirDeck – Build ${{ github.run_number }}
+          prerelease: false
+          make_latest: true
           body: |
             Automatisch gebaut und getestet aus ${{ github.sha }}.
             • AirDeck-Setup.exe – Windows-Installer (ohne Adminrechte, Deutsch/English, mit Audio-Engine und Android-APK)

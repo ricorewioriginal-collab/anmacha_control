@@ -1,4 +1,4 @@
-// Update-Funktion: prüft den Download-Bereich (GitHub-Release "nightly") oder eine eigene Update-Adresse,
+// Update-Funktion: prüft den Download-Bereich (neuestes GitHub-Release) oder eine eigene Update-Adresse,
 // lädt das Windows-Setup, prüft die SHA-256-Prüfsumme und installiert still. Android lädt die neue APK.
 // Private Repositories: Zugriffstoken (nur Lesen) wird verschlüsselt im Secret-Store gehalten.
 
@@ -37,7 +37,13 @@ export interface UpdateInfo {
   error?: string;
 }
 
-export const DEFAULT_SOURCE: UpdateSource = { repo: 'ricorewioriginal-collab/anmacha_control', tag: 'nightly' };
+export const DEFAULT_SOURCE: UpdateSource = { repo: 'ricorewioriginal-collab/anmacha_control', tag: 'latest' };
+
+/** Releases sind unveränderlich: jeder Build hat ein eigenes Release, „latest“ zeigt auf das neueste.
+ *  Der frühere Kanal „nightly“ wird nicht mehr aktualisiert und gilt deshalb ebenfalls als „latest“. */
+export function releasePath(tag: string): string {
+  return !tag || tag === 'latest' || tag === 'nightly' ? 'releases/latest' : `releases/tags/${encodeURIComponent(tag)}`;
+}
 
 /** Build-Kennung aus dem Release-Text ("Automatisch gebaut aus <sha>"). */
 export function buildFromBody(body: string | null | undefined): string | null {
@@ -83,7 +89,7 @@ export class Updater {
           if (a?.url) info.assets[k] = { name: k, size: a.size ?? 0, digest: a.sha256 ? `sha256:${a.sha256}` : null, url: a.url };
         }
       } else {
-        const r = await this.fetchFn(`https://api.github.com/repos/${src.repo}/releases/tags/${encodeURIComponent(src.tag)}`, {
+        const r = await this.fetchFn(`https://api.github.com/repos/${src.repo}/${releasePath(src.tag)}`, {
           headers: this.headers(token), signal: AbortSignal.timeout(10_000),
         });
         if (r.status === 404 || r.status === 401) throw new Error('Release nicht erreichbar – bei privatem Repository ein Zugriffstoken unter „Updates“ hinterlegen');

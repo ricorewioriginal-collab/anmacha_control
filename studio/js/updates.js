@@ -85,7 +85,7 @@ export function mountUpdates(api) {
       const r = await run(() => api.post('/update/install'));
       if (r) status(`Update ${r.to} wird installiert – AirDeck startet gleich neu …`);
     } else {
-      status(`Neue Version ${info.latest}: bitte Setup bzw. Server-Paket manuell aktualisieren (Download im Release „${cfg?.tag ?? 'nightly'}“)`);
+      status(`Neue Version ${info.latest}: bitte Setup bzw. Server-Paket manuell aktualisieren (Download im Release „${cfg?.tag ?? 'latest'}“)`);
     }
   }
 

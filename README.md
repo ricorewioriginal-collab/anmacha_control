@@ -15,12 +15,12 @@ AirDeck ist eine eigenständige Sendesoftware für Webradio. Sie bietet Automati
 
 | | Datei | Hinweis |
 |---|---|---|
-| 🪟 **Windows-Installer** | [**AirDeck-Setup.exe**](https://github.com/ricorewioriginal-collab/anmacha_control/releases/download/nightly/AirDeck-Setup.exe) | Installation ohne Adminrechte. Deutsch/English, mit Audio-Engine (ffmpeg/LAME) und Android-APK |
-| 🪟 **Windows portable** | [**AirDeck-Windows-Portable.zip**](https://github.com/ricorewioriginal-collab/anmacha_control/releases/download/nightly/AirDeck-Windows-Portable.zip) | Ohne Installation: entpacken, `AirDeck.exe` starten |
-| 🤖 **Android-App** | [**AirDeck-Android.apk**](https://github.com/ricorewioriginal-collab/anmacha_control/releases/download/nightly/AirDeck-Android.apk) | Touch-Studio, MIC LIVE und Mithören. Die APK gibt es auch direkt aus AirDeck unter `http://<PC>:8750/download/AirDeck-Android.apk` |
+| 🪟 **Windows-Installer** | [**AirDeck-Setup.exe**](https://github.com/ricorewioriginal-collab/anmacha_control/releases/latest/download/AirDeck-Setup.exe) | Installation ohne Adminrechte. Deutsch/English, mit Audio-Engine (ffmpeg/LAME) und Android-APK |
+| 🪟 **Windows portable** | [**AirDeck-Windows-Portable.zip**](https://github.com/ricorewioriginal-collab/anmacha_control/releases/latest/download/AirDeck-Windows-Portable.zip) | Ohne Installation: entpacken, `AirDeck.exe` starten |
+| 🤖 **Android-App** | [**AirDeck-Android.apk**](https://github.com/ricorewioriginal-collab/anmacha_control/releases/latest/download/AirDeck-Android.apk) | Touch-Studio, MIC LIVE und Mithören. Die APK gibt es auch direkt aus AirDeck unter `http://<PC>:8750/download/AirDeck-Android.apk` |
 | 🐳 **Server (Docker)** | `docker compose up -d` | siehe [docs/DOCKER.md](docs/DOCKER.md) |
 
-Alle Dateien stehen auf der Seite [**Releases → AirDeck – aktueller Stand**](https://github.com/ricorewioriginal-collab/anmacha_control/releases/tag/nightly). Sie werden nach jeder Änderung automatisch gebaut und getestet. Solange das Repository privat ist, funktionieren die Links nur für angemeldete Mitglieder.
+Alle Dateien stehen auf der Seite [**Releases → neuestes Release**](https://github.com/ricorewioriginal-collab/anmacha_control/releases/latest). Sie werden nach jeder Änderung automatisch gebaut und getestet. Solange das Repository privat ist, funktionieren die Links nur für angemeldete Mitglieder.
 Windows kann bei nicht signierten Dateien warnen: „Weitere Informationen“ → „Trotzdem ausführen“ (Details in [docs/INSTALLATION.md](docs/INSTALLATION.md)).
 
 ## Funktionen
