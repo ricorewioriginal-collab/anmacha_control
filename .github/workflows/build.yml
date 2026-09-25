@@ -300,12 +300,16 @@ jobs:
           fi
           curl -fs http://127.0.0.1:8750/api/v1/health | grep -q '"ok":true'
           echo "Neustart über systemd (Exit-Code 75) OK: PID $PID1 -> $PID2"
-          # Entfernen (purge): Programmdateien und Konfiguration weg, Daten (Datenbank, Medien) bleiben
+          # Entfernen (purge): Programmdateien und Konfiguration weg, Daten (Datenbank, Medien) bleiben.
+          # Vor dem Stopp kurz Luft lassen, damit der gerade erst neu gestartete Dienst seine
+          # SQLite-Datei sicher angelegt hat (WAL-Checkpoint), bevor der Dienst beendet wird.
+          sleep 2
+          test -f /var/lib/airdeck/airdeck.db || (echo "Diagnose: airdeck.db fehlt schon vor dem Stopp/Purge" && ls -la /var/lib/airdeck && sudo journalctl -u airdeck-server --no-pager -n 100 && exit 1)
           sudo systemctl stop airdeck-server.service
           sudo dpkg -P airdeck
           test ! -e /opt/airdeck
           test ! -e /etc/airdeck/airdeck.conf
-          test -f /var/lib/airdeck/airdeck.db || (echo "Daten wurden beim Entfernen gelöscht" && exit 1)
+          test -f /var/lib/airdeck/airdeck.db || (echo "Daten wurden beim Entfernen gelöscht" && ls -la /var/lib/airdeck && sudo journalctl -u airdeck-server --no-pager -n 100 && exit 1)
           echo "Linux-Paket: Installation, Dienst, Neustart, Health-Check und Purge OK"
       - uses: actions/upload-artifact@v4
         with:
