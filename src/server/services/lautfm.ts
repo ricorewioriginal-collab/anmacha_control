@@ -2,7 +2,7 @@
 
 import type { AirDeckApp } from '../app.ts';
 import { AppError, type Principal } from '../model.ts';
-import { DEFAULT_ORIGIN, ORIGIN_RE, RADIOADMIN, loginUrl, type LautfmConfig } from '../lautfm.ts';
+import { DEFAULT_ORIGIN, ORIGIN_RE, RADIOADMIN, TOKEN_RE, cleanToken, detectOrigin, loginUrl, type LautfmConfig, type RaStation } from '../lautfm.ts';
 
 export class LautfmService {
   private readonly app: AirDeckApp;
@@ -44,26 +44,76 @@ export class LautfmService {
     return this.lautfmConfig(stationId);
   }
 
+  /**
+   * Verbinden: Token prüfen und dabei den passenden Origin selbst ermitteln.
+   * laut.fm akzeptiert ein Token nur mit dem Origin, für den es ausgestellt wurde – beim Login über
+   * die Webseite ist das die Adresse des Studios, bei einem Skript-Token der Name aus „callback_url=“.
+   * Wer das nicht genau weiß, soll trotzdem verbinden können: AirDeck probiert die Kandidaten durch.
+   */
+  async connect(p: Principal, stationId: string, input: { token?: unknown; origin?: unknown; pageOrigin?: unknown }): Promise<unknown> {
+    const token = input.token === undefined ? this.lautfmToken(stationId) : cleanToken(input.token);
+    if (!token) throw new AppError(400, 'no_token', 'Bitte ein laut.fm-Token eingeben');
+    if (!TOKEN_RE.test(token)) throw new AppError(400, 'invalid_token', 'Das sieht nicht wie ein laut.fm-Token aus (lange Zeichenfolge ohne Leerzeichen)');
+    const cfg = this.app.rt(stationId).data.lautfm ?? {};
+    const found = await detectOrigin(token, [input.origin, input.pageOrigin, cfg.origin, DEFAULT_ORIGIN, 'anmacha_dashboard']);
+    if (!found.stations) {
+      const why = found.unreachable ? 'laut.fm ist gerade nicht erreichbar – bitte später erneut versuchen.' : 'laut.fm hat das Token abgelehnt. Prüfe es unter radioadmin.laut.fm/tokens (gültig, nicht widerrufen) und gib ggf. den Namen aus „callback_url=“ als Origin an.';
+      throw new AppError(found.unreachable ? 502 : 400, found.unreachable ? 'upstream_unreachable' : 'token_rejected', why);
+    }
+    const stations = found.stations;
+    const keep = stations.find((s) => s.id === cfg.stationId);
+    const pick = keep ?? (stations.length === 1 ? stations[0] : stations.find((s) => s.role === 'owner'));
+    this.app.secrets.set(`lautfm:${stationId}`, token);
+    const next: LautfmConfig = { ...cfg, origin: found.origin === DEFAULT_ORIGIN ? undefined : found.origin, stationId: pick?.id, stationName: pick?.name ?? cfg.stationName };
+    this.app.rt(stationId).data.lautfm = next;
+    this.app.audit.write({ kind: 'lautfm', event: 'connect', actor: p.id, stationId, origin: found.origin, stations: stations.length });
+    this.app.changed();
+    return { ...this.lautfmConfig(stationId), stations };
+  }
+
+  /** Verbindung prüfen; stimmt der gespeicherte Origin nicht mehr, wird er neu ermittelt. */
+  async check(stationId: string): Promise<{ ok: boolean; origin?: string; stations?: RaStation[]; message?: string }> {
+    const token = this.lautfmToken(stationId);
+    if (!token) return { ok: false, message: 'Kein Token hinterlegt' };
+    const cfg = this.app.rt(stationId).data.lautfm ?? {};
+    const found = await detectOrigin(token, [cfg.origin ?? DEFAULT_ORIGIN, DEFAULT_ORIGIN, 'anmacha_dashboard']);
+    if (!found.stations) return { ok: false, message: found.unreachable ? 'laut.fm nicht erreichbar' : 'Token abgelehnt – bitte neu verbinden' };
+    if ((cfg.origin ?? DEFAULT_ORIGIN) !== found.origin) {
+      this.app.rt(stationId).data.lautfm = { ...cfg, origin: found.origin === DEFAULT_ORIGIN ? undefined : found.origin };
+      this.app.changed();
+    }
+    return { ok: true, origin: found.origin, stations: found.stations };
+  }
+
   /** Radioadmin-Anfrage mit gespeichertem Token (serverseitig). */
   async radioadmin(stationId: string, method: string, path: string, body?: unknown): Promise<{ status: number; data: unknown }> {
     const token = this.lautfmToken(stationId);
     if (!token) throw new AppError(409, 'no_token', 'Kein laut.fm-Radioadmin-Token hinterlegt');
-    const r = await fetch(RADIOADMIN + path, {
-      method,
-      headers: { Authorization: `Bearer ${token}`, Origin: this.lautfmConfig(stationId).origin, Accept: 'application/json', ...(body ? { 'Content-Type': 'application/json' } : {}) },
-      body: body ? JSON.stringify(body) : undefined,
-      signal: AbortSignal.timeout(20_000),
-    }).catch(() => {
-      throw new AppError(502, 'upstream_unreachable', 'laut.fm nicht erreichbar');
-    });
-    const text = await r.text();
-    let data: unknown = text;
-    try {
-      data = JSON.parse(text);
-    } catch {
-      // Text-Antwort (z. B. Passwort)
+    const send = async (origin: string) => {
+      const r = await fetch(RADIOADMIN + path, {
+        method,
+        headers: { Authorization: `Bearer ${token}`, Origin: origin, Accept: 'application/json', 'User-Agent': 'AirDeck', ...(body ? { 'Content-Type': 'application/json' } : {}) },
+        body: body ? JSON.stringify(body) : undefined,
+        signal: AbortSignal.timeout(20_000),
+      }).catch(() => {
+        throw new AppError(502, 'upstream_unreachable', 'laut.fm nicht erreichbar');
+      });
+      const text = await r.text();
+      let data: unknown = text;
+      try {
+        data = JSON.parse(text);
+      } catch {
+        // Text-Antwort (z. B. Passwort)
+      }
+      return { status: r.status, data };
+    };
+    const res = await send(this.lautfmConfig(stationId).origin);
+    // Abgelehnt? Einmal den Origin neu ermitteln (z. B. Token über anderen Weg erzeugt) und wiederholen
+    if (res.status === 401 || res.status === 403) {
+      const c = await this.check(stationId);
+      if (c.ok && c.origin !== undefined) return send(c.origin);
     }
-    return { status: r.status, data };
+    return res;
   }
 
   /**

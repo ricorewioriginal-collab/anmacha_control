@@ -561,6 +561,8 @@ export function createHttpServer(app: AirDeckApp, studioDir: string): Server {
   // --- laut.fm ---
   add('GET', '/api/v1/stations/:sid/lautfm', 'lautfm:read', (c) => app.svc.lautfm.lautfmConfig(sid(c)));
   add('PUT', '/api/v1/stations/:sid/lautfm', 'lautfm:write', async (c) => app.svc.lautfm.setLautfmConfig(c.p, sid(c), await c.body()));
+  add('POST', '/api/v1/stations/:sid/lautfm/connect', 'lautfm:write', async (c) => app.svc.lautfm.connect(c.p, sid(c), await c.body()));
+  add('POST', '/api/v1/stations/:sid/lautfm/check', 'lautfm:read', (c) => app.svc.lautfm.check(sid(c)));
   add('POST', '/api/v1/stations/:sid/lautfm/live-output', 'outputs:write', async (c) => {
     const b = await c.body();
     const prio = b.priority === undefined || b.priority === null || b.priority === '' ? undefined : Number(b.priority);

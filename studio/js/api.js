@@ -24,7 +24,17 @@ export function saveServer(/** @type {string} */ url) {
   } catch {}
 }
 
+/** Rückkehr vom laut.fm-Login (#lautfm_radioadmin_token=…): Token bis zum Verbinden kurz merken. */
+export const LAUTFM_PENDING = 'airdeck.lautfm.pending';
+
 export function readToken() {
+  const lf = /[#&]lautfm_radioadmin_token=([^&]+)/.exec(location.hash);
+  if (lf) {
+    try {
+      sessionStorage.setItem(LAUTFM_PENDING, decodeURIComponent(lf[1]));
+    } catch {}
+    history.replaceState(null, '', location.pathname + location.search);
+  }
   const srv = /[#&]server=([^&]+)/.exec(location.hash);
   if (srv) saveServer(decodeURIComponent(srv[1]));
   const m = /[#&]token=([^&]+)/.exec(location.hash);

@@ -31,6 +31,61 @@ export interface LautfmConfig {
   stationName?: string;
 }
 
+export const TOKEN_RE = /^[A-Za-z0-9._~+/=-]{16,400}$/;
+
+/** Token aus Kopieren/Einfügen säubern: „Bearer “, Anführungszeichen, Leerraum. */
+export function cleanToken(v: unknown): string {
+  return String(v ?? '').trim().replace(/^bearer\s+/i, '').replace(/^["']+|["']+$/g, '').trim();
+}
+
+export interface RaStation {
+  id: number;
+  name: string;
+  displayName: string;
+  role: string;
+}
+
+/** /stations liefert je nach Version ein Array oder { stations: [...] } – beides verstehen. */
+export function normalizeStations(data: unknown): RaStation[] | null {
+  const list = Array.isArray(data) ? data : data && typeof data === 'object' && Array.isArray((data as { stations?: unknown }).stations) ? (data as { stations: unknown[] }).stations : null;
+  if (!list) return null;
+  const out: RaStation[] = [];
+  for (const s of list) {
+    if (!s || typeof s !== 'object') continue;
+    const o = s as Record<string, unknown>;
+    const id = Number(o.id);
+    if (!Number.isSafeInteger(id) || id <= 0) continue;
+    const name = String(o.name ?? '').trim().toLowerCase();
+    out.push({ id, name, displayName: String(o.display_name ?? o.name ?? ''), role: String(o.role ?? 'dj').toLowerCase() });
+  }
+  return out;
+}
+
+/**
+ * Probiert Origin-Kandidaten gegen GET /stations. Der erste Kandidat bekommt bis zu drei Versuche
+ * (frisch ausgestellte Tokens sind bei laut.fm nicht sofort überall gültig), die übrigen je einen.
+ */
+export async function detectOrigin(token: string, candidates: unknown[], waitMs = 400): Promise<{ origin: string; stations: RaStation[] | null; unreachable: boolean }> {
+  const list = [...new Set(candidates.map((c) => String(c ?? '').trim()).filter((c) => c && ORIGIN_RE.test(c)))];
+  let reached = false;
+  for (let i = 0; i < list.length; i++) {
+    for (let attempt = 1; attempt <= (i === 0 ? 3 : 1); attempt++) {
+      try {
+        const r = await fetch(`${RADIOADMIN}/stations`, { headers: { Authorization: `Bearer ${token}`, Origin: list[i]!, Accept: 'application/json', 'User-Agent': 'AirDeck' }, signal: AbortSignal.timeout(8000) });
+        reached = true;
+        if (r.ok) {
+          const st = normalizeStations(await r.json().catch(() => null));
+          if (st) return { origin: list[i]!, stations: st, unreachable: false };
+        } else await r.body?.cancel();
+      } catch {
+        // Netzwerkfehler: nächster Versuch
+      }
+      if (i === 0 && attempt < 3) await new Promise((ok) => setTimeout(ok, waitMs));
+    }
+  }
+  return { origin: list[0] ?? DEFAULT_ORIGIN, stations: null, unreachable: !reached };
+}
+
 /**
  * Erlaubte Radioadmin-Pfade: nur die eigene Station bzw. Listen/Status.
  * `;incomplete` / `;queued` sind Teil der offiziellen Pfade.

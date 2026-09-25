@@ -275,10 +275,10 @@ footer { text-align: center; color: var(--muted); font-size: 13px; padding: 24px
   <h2>laut.fm</h2>
   <h3>Verbinden</h3>
   <ol>
-    <li>laut.fm → „Token bei laut.fm holen“ (öffnet <code>radioadmin.laut.fm/login?callback_url=airdeck</code>), anmelden und den Zugriff bestätigen.</li>
-    <li>Token kopieren → „Token eingeben“ → Station wählen.</li>
+    <li><b>Mit laut.fm anmelden:</b> laut.fm → „Mit laut.fm anmelden“. Du meldest dich bei laut.fm an und landest automatisch wieder in AirDeck. Die Station wird selbst gewählt (bei mehreren fragt AirDeck nach).</li>
+    <li><b>Oder Token einfügen:</b> „Token einfügen …“ und ein vorhandenes Token eintragen. Auch „Bearer …“ oder Anführungszeichen stören nicht.</li>
   </ol>
-  <div class="warn">Das Token gehört zur callback_url. AirDeck schickt denselben Wert als Origin-Header (Standard <code>airdeck</code>). Wurde das Token mit einer anderen callback_url erzeugt, trag genau diese unter „Callback / Origin“ ein. Deine Tokens siehst du unter radioadmin.laut.fm/tokens.</div>
+  <div class="warn">laut.fm akzeptiert ein Token nur zusammen mit dem Origin, für den es ausgestellt wurde. AirDeck findet ihn selbst heraus: Adresse des Studios, <code>airdeck</code>, <code>anmacha_dashboard</code> oder ein von dir angegebener Name aus „callback_url=…“. Lehnt laut.fm später ab, prüft AirDeck die Verbindung einmal neu, bevor es eine Fehlermeldung zeigt. Deine Tokens siehst du unter radioadmin.laut.fm/tokens.</div>
   <h3>Bereiche</h3>
   <ul>
     <li><b>Übersicht:</b> Station, Streaming-Status, aktuelle Playlist, Hörer, Radioadmin-Status, zuletzt gespielt, nächste Interpreten.</li>

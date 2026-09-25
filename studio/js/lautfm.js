@@ -5,6 +5,7 @@
 
 import { DAYS, clockTime, fmt, formDialog, h, run, status } from './ui.js';
 import { ALGO_TEMPLATES } from './lautfm-algos.js';
+import { LAUTFM_PENDING } from './api.js';
 
 const TABS = /** @type {const} */ ([
   ['overview', 'Übersicht'], ['playlists', 'Playlists'], ['tracks', 'Titel'], ['algos', 'Algorithmen'], ['schedule', 'Sendeplan'],
@@ -21,8 +22,18 @@ export function mountLautfm(root, ctx) {
   /** @type {any[]} */ let playlists = [];
   /** @type {HTMLAudioElement|null} */ let pre = null;
 
-  /** Radioadmin-Aufruf über den AirDeck-Proxy. @param {string} method @param {string} path @param {any} [body] */
-  const ra = (method, path, body) => ctx.api.req(method, ctx.url(`/lautfm/ra${path}`), body);
+  /** Radioadmin-Aufruf über den AirDeck-Proxy; bei Ablehnung einmal die Verbindung prüfen (Origin neu ermitteln) und wiederholen. @param {string} method @param {string} path @param {any} [body] */
+  const ra = async (method, path, body) => {
+    try {
+      return await ctx.api.req(method, ctx.url(`/lautfm/ra${path}`), body);
+    } catch (e) {
+      const code = /** @type {any} */ (e)?.status;
+      if (code !== 401 && code !== 403) throw e;
+      const c = await ctx.api.post(ctx.url('/lautfm/check')).catch(() => null);
+      if (!c?.ok) throw new Error('laut.fm hat den Zugriff abgelehnt – bitte unter „Verbindung …“ neu verbinden');
+      return ctx.api.req(method, ctx.url(`/lautfm/ra${path}`), body);
+    }
+  };
   const st = () => `/stations/${cfg.stationId}`;
   /** @param {string} title @param {...(Node|string|null|false)} body */
   const card = (title, ...body) => h('section', { class: 'panel' }, h('div', { class: 'panel-head' }, h('h2', {}, title)), ...body);
@@ -32,6 +43,38 @@ export function mountLautfm(root, ctx) {
 
   async function show() {
     cfg = await ctx.api.get(ctx.url('/lautfm'));
+    let pending = null;
+    try {
+      pending = sessionStorage.getItem(LAUTFM_PENDING);
+      sessionStorage.removeItem(LAUTFM_PENDING);
+    } catch {}
+    if (pending) return connect({ token: pending });
+    render();
+  }
+
+  /** Bei laut.fm anmelden: laut.fm schickt uns mit dem Token im Adress-Anker zurück (siehe api.js). */
+  function login() {
+    const back = location.origin + location.pathname + location.search;
+    location.assign(`https://radioadmin.laut.fm/login?callback_url=${encodeURIComponent(back)}`);
+  }
+
+  /** Token prüfen (Origin ermittelt der Server selbst), dann ggf. Station wählen. @param {{ token?: string, origin?: string }} input */
+  async function connect(input) {
+    const r = await run(() => ctx.api.post(ctx.url('/lautfm/connect'), { ...input, pageOrigin: location.origin }));
+    if (!r) return render();
+    cfg = r;
+    /** @type {any[]} */ const list = r.stations ?? [];
+    if (!list.length) status('Token gültig, aber diesem laut.fm-Konto ist keine Station zugeordnet', true);
+    else if (!r.stationId || (list.length > 1 && input.token)) {
+      const pick = await formDialog('Station wählen', [
+        { name: 'stationId', label: 'Station', value: String(r.stationId ?? list[0].id), options: list.map((s) => /** @type {[string,string]} */ ([String(s.id), `${s.displayName || s.name} (${s.role})`])) },
+      ], 'Übernehmen');
+      if (pick) {
+        const chosen = list.find((s) => String(s.id) === pick.stationId);
+        cfg = (await run(() => ctx.api.put(ctx.url('/lautfm'), { stationId: Number(pick.stationId), stationName: chosen?.name ?? '' }))) ?? cfg;
+      }
+    }
+    if (cfg?.hasToken && cfg?.stationId) status(`Mit laut.fm verbunden: ${cfg.stationName ?? cfg.stationId}`);
     render();
   }
 
@@ -44,43 +87,30 @@ export function mountLautfm(root, ctx) {
     root.replaceChildren(head, content);
     if (connected) renderTab();
     else content.replaceChildren(card('Mit laut.fm verbinden',
-      h('p', {}, 'AirDeck verwaltet deine laut.fm-Station direkt über die offizielle Radioadmin-API – ohne eigenen Server.'),
+      h('p', {}, 'AirDeck verwaltet deine laut.fm-Station direkt über die offizielle Radioadmin-API.'),
       h('ol', {},
-        h('li', {}, 'Auf „Token bei laut.fm holen“ klicken und bei laut.fm anmelden – der Zugriff für „', h('code', {}, cfg?.origin ?? 'airdeck'), '“ wird bestätigt und das Token angezeigt.'),
-        h('li', {}, 'Token kopieren, hier unter „Token eingeben“ einfügen, Station wählen – fertig.')),
+        h('li', {}, h('b', {}, 'Mit laut.fm anmelden: '), 'Du meldest dich bei laut.fm an und kommst automatisch hierher zurück.'),
+        h('li', {}, h('b', {}, 'Oder Token einfügen: '), 'ein vorhandenes Token (z. B. von radioadmin.laut.fm/tokens) einfügen. Welcher Origin dazu gehört, findet AirDeck selbst heraus.')),
       h('p', { class: 'muted' }, 'Das Token wird verschlüsselt auf diesem Gerät gespeichert und nie an den Browser zurückgegeben.'),
       h('div', { class: 'row' },
-        h('button', { class: 'btn', onclick: () => window.open(cfg?.loginUrl ?? 'https://radioadmin.laut.fm/login?callback_url=airdeck', '_blank', 'noopener') }, 'Token bei laut.fm holen'),
-        h('button', { class: 'btn primary', onclick: configure }, 'Token eingeben …'))));
+        h('button', { class: 'btn primary', onclick: login }, 'Mit laut.fm anmelden'),
+        h('button', { class: 'btn', onclick: configure }, 'Token einfügen …'),
+        h('button', { class: 'btn ghost', onclick: () => window.open(cfg?.loginUrl ?? 'https://radioadmin.laut.fm/login?callback_url=airdeck', '_blank', 'noopener') }, 'Skript-Token erzeugen'))));
   }
 
   async function configure() {
     const v = await formDialog('laut.fm-Verbindung', [
-      { name: 'token', label: cfg?.hasToken ? 'Radioadmin-Token (leer = unverändert)' : 'Radioadmin-Token', type: 'password', value: '', hint: `Token holen: ${cfg?.loginUrl ?? ''} · Übersicht: radioadmin.laut.fm/tokens` },
-      { name: 'origin', label: 'Callback / Origin des Tokens', value: cfg?.origin ?? 'airdeck', hint: 'Muss exakt der callback_url entsprechen, mit der das Token erzeugt wurde (Standard: airdeck)' },
-      ...(cfg?.hasToken ? [{ name: 'remove', label: 'Token entfernen', type: 'checkbox', value: false }] : []),
-    ], 'Weiter');
+      { name: 'token', label: cfg?.hasToken ? 'Radioadmin-Token (leer = gespeichertes prüfen)' : 'Radioadmin-Token', type: 'password', value: '', hint: 'Übersicht deiner Tokens: radioadmin.laut.fm/tokens' },
+      { name: 'origin', label: 'Origin (optional)', value: cfg?.origin && cfg.origin !== 'airdeck' ? cfg.origin : '', hint: 'Leer lassen = automatisch. Nur nötig bei einem Token mit eigenem Namen aus „callback_url=…“.' },
+      ...(cfg?.hasToken ? [{ name: 'remove', label: 'Verbindung trennen (Token löschen)', type: 'checkbox', value: false }] : []),
+    ], 'Verbinden');
     if (!v) return;
     if (v.remove) {
       cfg = await run(() => ctx.api.put(ctx.url('/lautfm'), { token: '', stationId: null }));
       return render();
     }
-    cfg = (await run(() => ctx.api.put(ctx.url('/lautfm'), { origin: v.origin, ...(v.token ? { token: v.token } : {}) }))) ?? cfg;
-    if (!cfg?.hasToken) return render();
-    // Stationen des Tokens abrufen und auswählen
-    const list = await run(() => ra('GET', '/stations'));
-    if (!Array.isArray(list) || !list.length) {
-      if (Array.isArray(list)) status('Token gültig, aber keine Station zugeordnet', true);
-      return render();
-    }
-    const pick = list.length === 1 ? { stationId: String(list[0].id) } : await formDialog('Station wählen', [
-      { name: 'stationId', label: 'Station', value: String(cfg.stationId ?? list[0].id), options: list.map((s) => /** @type {[string,string]} */ ([String(s.id), `${s.name} (${s.role ?? ''})`])) },
-    ], 'Übernehmen');
-    if (!pick) return render();
-    const chosen = list.find((s) => String(s.id) === pick.stationId);
-    cfg = await run(() => ctx.api.put(ctx.url('/lautfm'), { stationId: Number(pick.stationId), stationName: chosen?.name ?? '' }));
-    status(`Mit laut.fm-Station „${chosen?.name}“ verbunden`);
-    render();
+    if (!v.token && !cfg?.hasToken) return status('Bitte ein Token einfügen', true);
+    await connect({ ...(v.token ? { token: v.token } : {}), ...(v.origin ? { origin: v.origin } : {}) });
   }
 
   function renderTab() {
