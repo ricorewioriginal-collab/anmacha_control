@@ -382,36 +382,36 @@ export function createHttpServer(app: AirDeckApp, studioDir: string): Server {
   });
 
   // --- Brücke zu bestehenden Systemen (AzuraCast, Icecast, Streams) ---
-  add('GET', '/api/v1/stations/:sid/bridges', 'sources:read', (c) => app.bridges(sid(c)));
-  add('POST', '/api/v1/stations/:sid/bridges', 'sources:write', async (c) => app.saveBridge(c.p, sid(c), null, await c.body()));
-  add('PATCH', '/api/v1/stations/:sid/bridges/:id', 'sources:write', async (c) => app.saveBridge(c.p, sid(c), c.params.id!, await c.body()));
-  add('DELETE', '/api/v1/stations/:sid/bridges/:id', 'sources:write', (c) => app.saveBridge(c.p, sid(c), c.params.id!, { remove: true }));
+  add('GET', '/api/v1/stations/:sid/bridges', 'sources:read', (c) => app.svc.bridges.bridges(sid(c)));
+  add('POST', '/api/v1/stations/:sid/bridges', 'sources:write', async (c) => app.svc.bridges.saveBridge(c.p, sid(c), null, await c.body()));
+  add('PATCH', '/api/v1/stations/:sid/bridges/:id', 'sources:write', async (c) => app.svc.bridges.saveBridge(c.p, sid(c), c.params.id!, await c.body()));
+  add('DELETE', '/api/v1/stations/:sid/bridges/:id', 'sources:write', (c) => app.svc.bridges.saveBridge(c.p, sid(c), c.params.id!, { remove: true }));
 
   // --- Bridge-API für Entwickler: externe Schlüssel, idempotent ---
   const bridgeKey = (c: Ctx) => decodeURIComponent(c.params.key!);
   add('GET', '/api/v1/bridge/mappings', 'bridge:write', (c) => {
-    const all = app.bridgeMappings();
+    const all = app.svc.bridges.bridgeMappings();
     return Object.fromEntries(Object.entries(all).filter(([, s]) => canSee(c.p, s)));
   });
   add('PUT', '/api/v1/bridge/stations/:key', 'bridge:write', async (c) => {
     const key = bridgeKey(c);
-    const known = app.bridgeMappings()[key];
+    const known = app.svc.bridges.bridgeMappings()[key];
     if (known ? !canSee(c.p, known) : !c.p.stationIds.includes('*')) throw new AppError(403, 'forbidden', known ? 'Kein Zugriff auf diesen Sender' : 'Nur globale Tokens legen Sender an');
-    return app.bridgeUpsertStation(key, await c.body());
+    return app.svc.bridges.bridgeUpsertStation(key, await c.body());
   });
   add('POST', '/api/v1/bridge/stations/:key/now-playing', 'bridge:write', async (c) => {
     const key = bridgeKey(c);
-    if (!canSee(c.p, app.bridgeStation(key))) throw new AppError(403, 'forbidden', 'Kein Zugriff auf diesen Sender');
-    return app.bridgeNowPlaying(key, await c.body());
+    if (!canSee(c.p, app.svc.bridges.bridgeStation(key))) throw new AppError(403, 'forbidden', 'Kein Zugriff auf diesen Sender');
+    return app.svc.bridges.bridgeNowPlaying(key, await c.body());
   });
   // Für Sendesoftware, die nur einfache HTTP-GET-Aufrufe kann (SAM, mAirList, RadioDJ): Parameter in der URL, Token als ?token=
   add('GET', '/api/v1/bridge/stations/:key/now-playing', 'bridge:write', (c) => {
     const key = bridgeKey(c);
-    if (!canSee(c.p, app.bridgeStation(key))) throw new AppError(403, 'forbidden', 'Kein Zugriff auf diesen Sender');
+    if (!canSee(c.p, app.svc.bridges.bridgeStation(key))) throw new AppError(403, 'forbidden', 'Kein Zugriff auf diesen Sender');
     const q = c.url.searchParams;
     const n = (k: string) => (q.get(k) && Number.isFinite(Number(q.get(k))) ? Number(q.get(k)) : undefined);
     const dur = n('durationMs') ?? (n('duration') !== undefined ? n('duration')! * 1000 : undefined);
-    return app.bridgeNowPlaying(key, { artist: q.get('artist') ?? '', title: q.get('title') ?? '', album: q.get('album') ?? undefined, durationMs: dur, listeners: n('listeners'), startedAt: q.get('startedAt') ?? undefined });
+    return app.svc.bridges.bridgeNowPlaying(key, { artist: q.get('artist') ?? '', title: q.get('title') ?? '', album: q.get('album') ?? undefined, durationMs: dur, listeners: n('listeners'), startedAt: q.get('startedAt') ?? undefined });
   });
 
   // --- Liquidsoap-Skript (ohne Passwörter) ---
@@ -487,9 +487,9 @@ export function createHttpServer(app: AirDeckApp, studioDir: string): Server {
   add('POST', '/api/v1/stations/:sid/ai/speech', 'ai:write', async (c) => app.aiSpeech(sid(c), await c.body()));
 
   // --- Benachrichtigungen / Webhooks / Now-Playing-Export ---
-  add('GET', '/api/v1/stations/:sid/integrations', 'stations:write', (c) => app.integrations(sid(c)));
-  add('PUT', '/api/v1/stations/:sid/integrations', 'stations:write', async (c) => app.setIntegrations(c.p, sid(c), await c.body()));
-  add('POST', '/api/v1/stations/:sid/integrations/test', 'stations:write', (c) => app.testIntegrations(sid(c)));
+  add('GET', '/api/v1/stations/:sid/integrations', 'stations:write', (c) => app.svc.notifications.integrations(sid(c)));
+  add('PUT', '/api/v1/stations/:sid/integrations', 'stations:write', async (c) => app.svc.notifications.setIntegrations(c.p, sid(c), await c.body()));
+  add('POST', '/api/v1/stations/:sid/integrations/test', 'stations:write', (c) => app.svc.notifications.testIntegrations(sid(c)));
 
   // --- laut.fm ---
   add('GET', '/api/v1/stations/:sid/lautfm', 'lautfm:read', (c) => app.svc.lautfm.lautfmConfig(sid(c)));
@@ -577,10 +577,10 @@ export function createHttpServer(app: AirDeckApp, studioDir: string): Server {
       const pub = { 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'no-cache', 'X-Content-Type-Options': 'nosniff' };
       if (!st[2]) {
         res.writeHead(200, { ...pub, 'Content-Type': 'application/json; charset=utf-8' });
-        return void res.end(JSON.stringify({ stations: app.publicStations() }));
+        return void res.end(JSON.stringify({ stations: app.svc.status.publicStations() }));
       }
       try {
-        const data: StreamStatus = st[1] ? await app.lautfmPublicStatus(st[2]) : await app.streamStatus(st[2], String(req.headers.host ?? 'localhost'));
+        const data: StreamStatus = st[1] ? await app.svc.status.lautfmPublicStatus(st[2]) : await app.svc.status.streamStatus(st[2], String(req.headers.host ?? 'localhost'));
         const fmt = st[3];
         const [type, body] = fmt === 'xml' ? ['application/xml; charset=utf-8', toIcecastXml(data)]
           : fmt === 'm3u' ? ['audio/x-mpegurl; charset=utf-8', toM3u(data)]

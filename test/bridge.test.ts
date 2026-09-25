@@ -78,7 +78,7 @@ test('Pull-Relay: bestehender Stream wird AirDeck-Quelle mit Priorität, geht an
   const admin = { id: 't', tokenId: 't', roles: ['admin'], stationIds: ['*'], scopes: ['*'] };
   try {
     app.saveOutput(admin, 'main', null, { name: 'Ice', type: 'icecast', host: '127.0.0.1', port: (ice.address() as { port: number }).port, mount: '/radio', username: 'source', password: 'ice-geheim-1', sourceTarget: '/live' });
-    const b = app.saveBridge(admin, 'main', null, { kind: 'stream', name: 'Alte Automation', url: `http://127.0.0.1:${(stream.address() as { port: number }).port}/live`, pull: true, priority: 5 }) as { id: string; sourceId: string };
+    const b = app.svc.bridges.saveBridge(admin, 'main', null, { kind: 'stream', name: 'Alte Automation', url: `http://127.0.0.1:${(stream.address() as { port: number }).port}/live`, pull: true, priority: 5 }) as { id: string; sourceId: string };
     const src = () => app.engine.get(b.sourceId)!;
     assert.equal(src().type, 'url_stream');
     assert.equal(src().priority, 5);
@@ -89,10 +89,10 @@ test('Pull-Relay: bestehender Stream wird AirDeck-Quelle mit Priorität, geht an
     await until(() => connections >= 2, 8000);
     await until(() => received.join('').includes('EXTERN2|'), 8000);
     // Nochmal speichern (z. B. Priorität ändern) legt keine zweite Quelle an
-    app.saveBridge(admin, 'main', b.id, { priority: 7 });
+    app.svc.bridges.saveBridge(admin, 'main', b.id, { priority: 7 });
     assert.equal(app.engine.list('main').filter((s) => s.type === 'url_stream').length, 1);
     assert.equal(src().priority, 7);
-    app.saveBridge(admin, 'main', b.id, { remove: true });
+    app.svc.bridges.saveBridge(admin, 'main', b.id, { remove: true });
     assert.equal(app.engine.get(b.sourceId), undefined);
   } finally {
     app.shutdown();

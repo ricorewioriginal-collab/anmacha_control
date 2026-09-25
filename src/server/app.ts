@@ -100,7 +100,6 @@ export class AirDeckApp {
   readonly activePlanId = new Map<string, string | null>();
   readonly recorders = new Map<string, ActiveRecording>();
   readonly notifier: Notifier;
-  readonly lastOutStatus = new Map<string, string>();
   readonly subscribers = new Set<(e: HubEvent) => void>();
   /** Datenhaltung: Datenbank (Standard SQLite im Datenordner) */
   readonly docs: DocStore;
@@ -239,7 +238,7 @@ export class AirDeckApp {
     }, 200);
     this.levelTimer.unref();
     // Brücken: Relays zu bestehenden Systemen wieder aufnehmen
-    this.startBridges();
+    this.svc.bridges.startBridges();
     this.autostartPlayouts();
     if (!this.ffmpeg && !this.ffmpegDisabled) this.scheduleFfmpegRetry(0);
   }
@@ -286,8 +285,8 @@ export class AirDeckApp {
     if (this.ffmpegRetry) clearTimeout(this.ffmpegRetry);
     this.ai.flush();
     this.users.flush();
-    for (const r of this.pulls.values()) r.stop();
-    this.pulls.clear();
+    for (const r of this.svc.bridges.pulls.values()) r.stop();
+    this.svc.bridges.pulls.clear();
     if (this.tickTimer) clearInterval(this.tickTimer);
     if (this.levelTimer) clearInterval(this.levelTimer);
     for (const { playout } of this.playouts.values()) playout.stop();
@@ -370,7 +369,7 @@ export class AirDeckApp {
   }
 
   publish(type: string, stationId: string | undefined, payload: unknown): void {
-    if (stationId) this.notifyFrom(type, stationId, payload);
+    if (stationId) this.svc.notifications.notifyFrom(type, stationId, payload);
     const e = { type, stationId, payload };
     for (const s of this.subscribers) {
       try {
@@ -412,7 +411,7 @@ export class AirDeckApp {
     // KI-Musikplanung alle 10 s prüfen (nur wenn aktiviert, sonst kostenlos)
     if (this.tickCount % 20 === 0) for (const id of this.stations.keys()) this.director.tick(id);
     // Status-Spiegel der Brücken (je Anbindung höchstens alle 15 s)
-    if (this.tickCount % 30 === 0) this.tickBridges();
+    if (this.tickCount % 30 === 0) this.svc.bridges.tickBridges();
     if (++this.tickCount % 2 === 0) {
       for (const [id, { playout }] of this.playouts) this.publish('playout.state', id, playout.status());
     }
@@ -1667,377 +1666,14 @@ export class AirDeckApp {
 
   // ---------- Benachrichtigungen, Webhooks, Now-Playing-Export ----------
 
-  /** Übersetzt interne Ereignisse in externe Meldungen (Webhook/Telegram/Datei). */
-  notifyFrom(type: string, stationId: string, payload: unknown): void {
-    const cfg = this.stations.get(stationId)?.data.integrations;
-    if (!cfg) return;
-    const p = (payload ?? {}) as Record<string, any>;
-    let event: NotifyEvent | null = null;
-    let data: Record<string, unknown> = {};
-    switch (type) {
-      case 'now_playing.changed':
-        event = 'now_playing';
-        data = { mediaId: p.mediaId, title: p.media?.title, artist: p.media?.artist, album: p.media?.album, category: p.media?.category, durationMs: p.media?.durationMs };
-        break;
-      case 'source.takeover_completed':
-        event = 'on_air_changed';
-        data = { source: this.engine.get(p.sourceId)?.name ?? p.sourceId, priority: p.data?.priority, target: p.target };
-        break;
-      case 'source.off_air':
-        event = 'off_air';
-        data = { target: p.target };
-        break;
-      case 'source.source_failed':
-        event = 'source_failed';
-        data = { source: this.engine.get(p.sourceId)?.name ?? p.sourceId, reason: p.data?.reason };
-        break;
-      case 'playout.log':
-        if (p.event === 'silence_detected') event = 'silence';
-        else if (p.event === 'silence_recovered') event = 'silence_recovered';
-        else if (p.event === 'encoder_crashed') event = 'encoder_crashed';
-        data = { detail: p.stderr };
-        break;
-      case 'stream.state_changed': {
-        const prev = this.lastOutStatus.get(p.id);
-        this.lastOutStatus.set(p.id, p.status);
-        if (prev === p.status) break;
-        const name = this.outputs.get(p.id)?.cfg.name ?? p.id;
-        if (p.status === 'error') event = 'stream_error';
-        else if (p.status === 'connected') event = 'stream_connected';
-        data = { output: name, error: p.error };
-        break;
-      }
-      case 'schedule.fired':
-        event = 'schedule_fired';
-        data = { label: p.label, kind: p.kind, mode: p.mode };
-        break;
-    }
-    if (event) this.notifier.emit(cfg, { event, station: stationId, at: new Date().toISOString(), data });
-  }
-
-  integrations(stationId: string): unknown {
-    const cfg = this.rt(stationId).data.integrations ?? { webhooks: [] };
-    return {
-      events: NOTIFY_EVENTS,
-      webhooks: cfg.webhooks.map(({ secretRef, ...w }) => ({ ...w, hasSecret: !!secretRef && this.secrets.has(secretRef) })),
-      telegram: cfg.telegram ? { chatId: cfg.telegram.chatId, enabled: cfg.telegram.enabled, hasToken: this.secrets.has(cfg.telegram.botTokenRef) } : null,
-      nowPlayingFile: cfg.nowPlayingFile ?? null,
-    };
-  }
-
-  setIntegrations(p: Principal, stationId: string, input: Record<string, any>): unknown {
-    const rt = this.rt(stationId);
-    const cur: IntegrationsConfig = rt.data.integrations ?? { webhooks: [] };
-    try {
-      if (Array.isArray(input.webhooks)) {
-        cur.webhooks = input.webhooks.slice(0, 10).map((w: Record<string, any>) => {
-          const prev = cur.webhooks.find((x) => x.id === w.id);
-          const id = prev?.id ?? newId('wh');
-          const secretRef = prev?.secretRef ?? `webhook:${stationId}:${id}`;
-          if (typeof w.secret === 'string' && w.secret) this.secrets.set(secretRef, w.secret);
-          const events = (Array.isArray(w.events) ? w.events : []).filter((e: string) => (NOTIFY_EVENTS as readonly string[]).includes(e));
-          return { id, url: validateWebhookUrl(String(w.url ?? '')), events, secretRef, enabled: w.enabled !== false };
-        });
-      }
-      if (input.telegram === null) cur.telegram = undefined;
-      else if (input.telegram && typeof input.telegram === 'object') {
-        const botTokenRef = cur.telegram?.botTokenRef ?? `telegram:${stationId}`;
-        if (typeof input.telegram.botToken === 'string' && input.telegram.botToken) this.secrets.set(botTokenRef, input.telegram.botToken.trim());
-        cur.telegram = { chatId: String(input.telegram.chatId ?? '').slice(0, 64), botTokenRef, enabled: input.telegram.enabled !== false };
-      }
-      if (input.nowPlayingFile === null || input.nowPlayingFile === '') cur.nowPlayingFile = undefined;
-      else if (typeof input.nowPlayingFile === 'string') cur.nowPlayingFile = validateExportPath(input.nowPlayingFile);
-    } catch (err) {
-      throw new AppError(400, 'invalid_integration', (err as Error).message);
-    }
-    rt.data.integrations = cur;
-    this.audit.write({ kind: 'notify', event: 'config', actor: p.id, stationId });
-    this.changed();
-    return this.integrations(stationId);
-  }
-
-  /** Testmeldung an alle Webhooks/Telegram senden und Ergebnisse zurückgeben. */
-  async testIntegrations(stationId: string): Promise<unknown> {
-    const cfg = this.rt(stationId).data.integrations;
-    if (!cfg) return { webhooks: [], telegram: null };
-    const payload = { event: 'schedule_fired' as const, station: stationId, at: new Date().toISOString(), data: { test: true, label: 'AirDeck Testmeldung' } };
-    const webhooks = await Promise.all(cfg.webhooks.map(async (w) => ({ id: w.id, ok: await this.notifier.deliverWebhook(w, payload) })));
-    const telegram = cfg.telegram ? await this.notifier.deliverTelegram(cfg.telegram.chatId, cfg.telegram.botTokenRef, `✅ AirDeck ${stationId}: Testmeldung`) : null;
-    return { webhooks, telegram };
-  }
-
   // ---------- Updates ----------
 
   // ---------- Brücke zu bestehenden Systemen ----------
 
-  readonly bridgeStatus = new Map<string, { at: number; data?: ExternalNow; error?: string; busy?: boolean }>();
-  readonly pulls = new Map<string, PullRelay>();
-  /** Von außen gemeldetes Now Playing (Bridge-API), pro Sender */
-  readonly externalNow = new Map<string, ExternalNow & { at: number }>();
-
-  bridges(stationId: string): unknown[] {
-    return (this.rt(stationId).data.bridges ?? []).map((b) => ({
-      ...b, hasKey: this.secrets.has(`bridge:${b.id}`),
-      status: this.bridgeStatus.get(b.id) ?? null,
-      relay: this.pulls.has(b.id) ? { state: this.pulls.get(b.id)!.state, error: this.pulls.get(b.id)!.lastError, bytes: this.pulls.get(b.id)!.bytes } : null,
-    }));
-  }
-
-  saveBridge(p: Principal, stationId: string, id: string | null, input: Record<string, any>): unknown {
-    const rt = this.rt(stationId);
-    const list = (rt.data.bridges ??= []);
-    const cur = id ? list.find((b) => b.id === id) : undefined;
-    if (id && !cur) throw new AppError(404, 'not_found', 'Anbindung nicht gefunden');
-    if (input.remove === true && cur) {
-      this.stopPull(cur.id);
-      if (cur.sourceId && this.engine.get(cur.sourceId)) this.removeSource(p, stationId, cur.sourceId);
-      rt.data.bridges = list.filter((b) => b !== cur);
-      this.secrets.delete(`bridge:${cur.id}`);
-      this.bridgeStatus.delete(cur.id);
-      this.changed();
-      return { removed: true };
-    }
-    const kind = ['azuracast', 'icecast', 'stream'].includes(input.kind) ? input.kind : cur?.kind ?? 'stream';
-    const url = String(input.url ?? cur?.url ?? '').trim().replace(/\/+$/, '');
-    if (!/^https?:\/\/[^\s]+$/.test(url)) throw new AppError(400, 'invalid_url', 'Adresse mit http(s):// angeben');
-    const pullUrl = typeof input.pullUrl === 'string' ? input.pullUrl.trim() : cur?.pullUrl ?? '';
-    if (pullUrl && !/^https?:\/\/[^\s]+$/.test(pullUrl)) throw new AppError(400, 'invalid_url', 'Stream-Adresse mit http(s):// angeben');
-    const b: BridgeConfig = {
-      id: cur?.id ?? newId('br'),
-      name: String(input.name ?? cur?.name ?? kind).trim().slice(0, 60) || kind,
-      kind, url,
-      station: typeof input.station === 'string' ? input.station.trim().slice(0, 80) || undefined : cur?.station,
-      mirror: typeof input.mirror === 'boolean' ? input.mirror : cur?.mirror ?? kind !== 'stream',
-      pull: typeof input.pull === 'boolean' ? input.pull : cur?.pull ?? kind === 'stream',
-      pullUrl: pullUrl || undefined,
-      sourceId: cur?.sourceId,
-      priority: Number.isInteger(input.priority) && input.priority > 0 && input.priority < 1000 ? input.priority : cur?.priority ?? 20,
-    };
-    if (kind === 'azuracast' && !b.station) throw new AppError(400, 'invalid_station', 'AzuraCast: Kurzname oder ID des Senders angeben');
-    if (kind === 'icecast' && !b.station) b.station = '/stream';
-    if (typeof input.apiKey === 'string') {
-      if (input.apiKey) this.secrets.set(`bridge:${b.id}`, input.apiKey.trim());
-      else this.secrets.delete(`bridge:${b.id}`);
-    }
-    // Relay-Quelle anlegen/aktualisieren (Typ url_stream, eigene Priorität)
-    if (b.pull) {
-      const existing = b.sourceId ? this.engine.get(b.sourceId) : undefined;
-      if (!existing) {
-        const src = this.addSource(p, stationId, { name: `Relay: ${b.name}`, type: 'url_stream', target: '/live', priority: b.priority, takeoverPolicy: 'auto', allowedRoles: ['operator'] }) as { id: string };
-        b.sourceId = src.id;
-      } else if (existing.priority !== b.priority || existing.name !== `Relay: ${b.name}`) {
-        this.updateSource(p, stationId, existing.id, { priority: b.priority, name: `Relay: ${b.name}` });
-      }
-    }
-    if (cur) Object.assign(cur, b);
-    else list.push(b);
-    this.audit.write({ kind: 'bridge', event: cur ? 'updated' : 'created', actor: p.id, stationId, bridge: b.id, bridgeKind: b.kind, pull: b.pull, mirror: b.mirror });
-    this.changed();
-    this.stopPull(b.id);
-    if (b.pull) void this.startPull(stationId, b);
-    if (b.mirror) void this.pollBridge(stationId, b, true);
-    return this.bridges(stationId).find((x) => (x as { id: string }).id === b.id);
-  }
-
-  stopPull(id: string): void {
-    this.pulls.get(id)?.stop();
-    this.pulls.delete(id);
-  }
-
-  /** Relay starten: Stream-URL explizit, sonst aus dem gespiegelten Status (AzuraCast-Mount/Icecast-Mount). */
-  async startPull(stationId: string, b: BridgeConfig): Promise<void> {
-    let url = b.kind === 'stream' ? b.url : b.pullUrl;
-    if (!url) {
-      const s = await this.pollBridge(stationId, b, true);
-      url = s?.listenUrls[0];
-    }
-    const src = b.sourceId ? this.engine.list(stationId).find((x) => x.id === b.sourceId) : undefined;
-    if (!url || !src || !(this.rt(stationId).data.bridges ?? []).includes(b)) {
-      if (!url) this.audit.write({ kind: 'bridge', event: 'relay_no_url', stationId, bridge: b.id });
-      return;
-    }
-    const relay = new PullRelay(url, {
-      open: (type) => {
-        try {
-          this.ingestOpen(src, type);
-        } catch (err) {
-          this.audit.write({ kind: 'bridge', event: 'relay_rejected', stationId, bridge: b.id, message: (err as Error).message });
-        }
-      },
-      data: (chunk) => this.ingestData(src, chunk),
-      close: () => this.ingestClose(src),
-      log: (event, data) => this.audit.write({ kind: 'bridge', event, stationId, bridge: b.id, ...data }),
-    });
-    this.pulls.set(b.id, relay);
-    relay.start();
-  }
-
-  /** Status einer Anbindung abfragen (mit Zwischenspeicher, nie parallel). */
-  async pollBridge(stationId: string, b: BridgeConfig, force = false): Promise<ExternalNow | undefined> {
-    const st = this.bridgeStatus.get(b.id) ?? { at: 0 };
-    if (st.busy || (!force && Date.now() - st.at < 15_000)) return st.data;
-    st.busy = true;
-    this.bridgeStatus.set(b.id, st);
-    try {
-      const key = this.secrets.get(`bridge:${b.id}`);
-      if (b.kind === 'azuracast') st.data = await fetchAzuracast(b.url, b.station!, key);
-      else if (b.kind === 'icecast') st.data = await fetchIcecastMount(b.url, b.station ?? '/stream');
-      else return undefined;
-      st.error = undefined;
-      this.publish('bridge.status', stationId, { id: b.id, ...st.data });
-    } catch (err) {
-      st.error = (err as Error).message;
-    } finally {
-      st.at = Date.now();
-      st.busy = false;
-    }
-    return st.data;
-  }
-
-  startBridges(): void {
-    for (const [id, rt] of this.stations) for (const b of rt.data.bridges ?? []) if (b.pull) void this.startPull(id, b);
-  }
-
-  tickBridges(): void {
-    for (const [id, rt] of this.stations) for (const b of rt.data.bridges ?? []) if (b.mirror && b.kind !== 'stream') void this.pollBridge(id, b);
-  }
-
   // ---------- Bridge-API für Entwickler: externe Schlüssel → AirDeck-Sender (idempotent) ----------
-
-  bridgeMap(): Record<string, string> {
-    return { ...this.docs.get<Record<string, string>>('bridge-keys', {}) };
-  }
-
-  /** Sender über einen externen Schlüssel anlegen oder aktualisieren – derselbe Schlüssel ergibt immer denselben Sender. */
-  bridgeUpsertStation(key: string, input: Record<string, unknown>): { station: Station; created: boolean } {
-    if (!/^[A-Za-z0-9][A-Za-z0-9:._-]{0,119}$/.test(key)) throw new AppError(400, 'invalid_key', 'Schlüssel: Buchstaben, Ziffern und : . _ - (max. 120)');
-    const map = this.bridgeMap();
-    const known = map[key];
-    if (known && this.stations.has(known)) return { station: this.updateStation(known, input as Partial<Station>), created: false };
-    const base = (typeof input.id === 'string' && input.id ? input.id : key).toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 32) || 'sender';
-    let sid = base;
-    for (let i = 2; this.stations.has(sid); i++) sid = `${base}-${i}`;
-    const station = this.createStation({ id: sid, name: String(input.name ?? key).slice(0, 80), slogan: typeof input.slogan === 'string' ? input.slogan : undefined, primaryColor: input.primaryColor as string, accentColor: input.accentColor as string }, input.withDefaultSources !== false);
-    if (typeof input.genre === 'string') this.updateStation(sid, { genre: input.genre });
-    map[key] = sid;
-    this.docs.set('bridge-keys', map);
-    this.audit.write({ kind: 'bridge', event: 'station_created', key, stationId: sid });
-    return { station, created: true };
-  }
-
-  bridgeStation(key: string): string {
-    const sid = this.bridgeMap()[key];
-    if (!sid || !this.stations.has(sid)) throw new AppError(404, 'not_found', 'Kein Sender zu diesem Schlüssel');
-    return sid;
-  }
-
-  bridgeMappings(): Record<string, string> {
-    return this.bridgeMap();
-  }
-
-  /** Now Playing von einem fremden System melden (z. B. eigene Automation, SAM, mAirList, RadioDJ per Skript). */
-  bridgeNowPlaying(key: string, input: Record<string, unknown>): unknown {
-    const sid = this.bridgeStation(key);
-    const artist = String(input.artist ?? '').slice(0, 200);
-    const title = String(input.title ?? '').slice(0, 200);
-    if (!title) throw new AppError(400, 'invalid', 'Titel fehlt');
-    const started = typeof input.startedAt === 'string' && !Number.isNaN(Date.parse(input.startedAt)) ? new Date(input.startedAt).toISOString() : new Date().toISOString();
-    const dur = typeof input.durationMs === 'number' && input.durationMs > 0 ? input.durationMs : null;
-    const prev = this.externalNow.get(sid);
-    const history = prev?.now ? [{ started_at: prev.now.started_at ?? undefined, artist: prev.now.artist, title: prev.now.title }, ...prev.history].slice(0, 10) : prev?.history ?? [];
-    const ext: ExternalNow & { at: number } = {
-      at: Date.now(), name: this.rt(sid).station.name, listeners: typeof input.listeners === 'number' ? input.listeners : prev?.listeners ?? null,
-      listenUrls: Array.isArray(input.listenUrls) ? input.listenUrls.filter((u): u is string => typeof u === 'string' && /^https?:\/\//.test(u)).slice(0, 5) : prev?.listenUrls ?? [],
-      now: { artist, title, album: typeof input.album === 'string' ? input.album : undefined, started_at: started, ends_at: dur ? new Date(Date.parse(started) + dur).toISOString() : null },
-      history, live: null,
-    };
-    this.externalNow.set(sid, ext);
-    for (const k of [...this.statusCache.keys()]) if (k.startsWith(`a:${sid}:`)) this.statusCache.delete(k);
-    // Titelanzeige an die eigenen Ausgänge, Ereignis für Studio/Webhooks
-    const song = artist ? `${artist} - ${title}` : title;
-    for (const o of this.outputs.values()) if (o.cfg.stationId === sid) o.updateMetadata(song);
-    this.publish('now_playing.external', sid, ext);
-    return { stationId: sid, now: ext.now };
-  }
 
   // ---------- Stream-Status (öffentlich, wie Icecast) ----------
 
-  readonly statusCache = new Map<string, { at: number; data: Promise<StreamStatus> }>();
-  readonly startedAt = new Date().toISOString();
-
-  cached(key: string, ttlMs: number, fn: () => Promise<StreamStatus>): Promise<StreamStatus> {
-    const hit = this.statusCache.get(key);
-    if (hit && Date.now() - hit.at < ttlMs) return hit.data;
-    const data = fn();
-    this.statusCache.set(key, { at: Date.now(), data });
-    data.catch(() => this.statusCache.delete(key));
-    if (this.statusCache.size > 200) this.statusCache.delete(this.statusCache.keys().next().value!);
-    return data;
-  }
-
-  /** Öffentliche Senderliste für die Statusseite. */
-  publicStations(): { id: string; name: string; lautfm?: string }[] {
-    return [...this.stations.values()].filter((r) => r.station.publicStatus !== false).map((r) => ({ id: r.station.id, name: r.station.name, ...(r.data.lautfm?.stationName ? { lautfm: r.data.lautfm.stationName } : {}) }));
-  }
-
-  /** Status eines AirDeck-Senders: aktive Quelle, verbundene Ausgänge, laut.fm (falls verbunden), Now Playing, Verlauf. */
-  streamStatus(stationId: string, host: string): Promise<StreamStatus> {
-    const rt = this.stations.get(stationId);
-    if (!rt || rt.station.publicStatus === false) return Promise.reject(new AppError(404, 'not_found', 'Sender nicht gefunden oder nicht öffentlich'));
-    return this.cached(`a:${stationId}:${host}`, 5000, async () => {
-      const lib = new Map(rt.data.library.map((m) => [m.id, m]));
-      const m = rt.nowPlaying.mediaId ? lib.get(rt.nowPlaying.mediaId) : undefined;
-      const active = this.engine.list(stationId).find((s) => s.state === 'active');
-      const fmt = rt.data.playout?.format ?? 'mp3';
-      const type = fmt === 'opus' ? 'application/ogg' : fmt === 'aac' ? 'audio/aac' : 'audio/mpeg';
-      const title = m ? (m.artist ? `${m.artist} - ${m.title}` : m.title) : '';
-      const sources: StreamStatus['icestats']['source'] = [];
-      for (const o of this.outputs.values()) {
-        if (o.cfg.stationId !== stationId || !o.cfg.enabled || o.state.status !== 'connected') continue;
-        if (/(^|\.)laut\.fm$/i.test(o.cfg.host) && rt.data.lautfm?.stationName) continue; // kommt unten mit echten laut.fm-Daten
-        sources.push({
-          kind: o.cfg.type === 'shoutcast' ? 'shoutcast' : 'icecast', listenurl: listenUrlOf(o.cfg), server_name: rt.station.name, server_description: rt.station.slogan,
-          server_type: o.state.contentType ?? type, genre: rt.station.genre, bitrate: o.cfg.bitrateKbps ?? rt.data.playout?.bitrateKbps ?? null,
-          listeners: o.state.listeners ?? null, title, artist: m?.artist, stream_start_iso8601: o.state.connectedAt ? new Date(o.state.connectedAt).toISOString() : null,
-        });
-      }
-      let laut: StreamStatus | null = null;
-      if (rt.data.lautfm?.stationName) laut = await this.lautfmPublicStatus(rt.data.lautfm.stationName).catch(() => null);
-      if (laut) sources.push(...laut.icestats.source);
-      // Gespiegelte Systeme (AzuraCast/Icecast) und per Bridge-API gemeldete Streams
-      let ext: ExternalNow | undefined;
-      for (const b of rt.data.bridges ?? []) {
-        const d = b.mirror ? this.bridgeStatus.get(b.id)?.data : undefined;
-        if (!d) continue;
-        ext ??= d;
-        for (const u of d.listenUrls.slice(0, 3)) {
-          sources.push({ kind: b.kind === 'azuracast' ? 'azuracast' : 'icecast', listenurl: u, server_name: d.name, server_type: d.format ? (d.format.includes('/') ? d.format : `audio/${d.format}`) : 'audio/mpeg',
-            bitrate: d.bitrate ?? null, listeners: d.listeners, title: d.now ? (d.now.artist ? `${d.now.artist} - ${d.now.title}` : d.now.title) : '', artist: d.now?.artist, stream_start_iso8601: d.now?.started_at ?? null, genre: rt.station.genre });
-        }
-      }
-      const pushed = this.externalNow.get(stationId);
-      if (pushed && Date.now() - pushed.at < 6 * 3600_000) {
-        ext = pushed;
-        for (const u of pushed.listenUrls) sources.push({ kind: 'extern', listenurl: u, server_name: rt.station.name, server_type: 'audio/mpeg', listeners: pushed.listeners, title: pushed.now ? (pushed.now.artist ? `${pushed.now.artist} - ${pushed.now.title}` : pushed.now.title) : '', artist: pushed.now?.artist, stream_start_iso8601: pushed.now?.started_at ?? null });
-      }
-      const log = (rt.data.playLog ?? []).filter((e) => e.category === 'music').slice(0, 10);
-      return {
-        kind: 'airdeck', station: stationId, name: rt.station.name, description: rt.station.slogan,
-        icestats: { admin: '', host, location: 'AirDeck', server_id: `AirDeck ${this.updater.current}`, server_start_iso8601: this.startedAt, source: sources },
-        now: m ? { artist: m.artist, title: m.title, album: m.album, started_at: rt.nowPlaying.startedAt ? new Date(rt.nowPlaying.startedAt).toISOString() : null,
-          ends_at: rt.nowPlaying.startedAt && m.durationMs ? new Date(rt.nowPlaying.startedAt + m.durationMs - (m.cueInMs ?? 0)).toISOString() : null } : ext?.now ?? laut?.now ?? null,
-        last_songs: log.length ? log.map((e) => ({ started_at: new Date(e.at).toISOString(), artist: e.artist, title: e.title })) : ext?.history.length ? ext.history : laut?.last_songs ?? [],
-        onair: active ? { source: active.name, type: active.type, priority: active.priority } : null,
-        links: { ...(laut?.links ?? {}), ...(rt.station.logo ? { logo: `/api/v1/stations/${stationId}/logo` } : {}) },
-        updated_at: new Date().toISOString(),
-      };
-    });
-  }
-
-  /** Beliebiger laut.fm-Sender (Name) – Icecast-Status nachgebaut aus der öffentlichen API, 10 s zwischengespeichert. */
-  lautfmPublicStatus(name: string): Promise<StreamStatus> {
-    return this.cached(`l:${name}`, 10_000, () => lautfmStatus(name, PUBLIC_API));
-  }
 
   // ---------- Liquidsoap ----------
 

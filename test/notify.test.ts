@@ -42,8 +42,8 @@ test('Webhook (signiert), Now-Playing-Datei und Stream-Ereignisse', async () => 
   try {
     app.addMedia('main', { id: 'a', title: 'Believer', artist: 'Imagine Dragons', category: 'music', file: 'a.mp3', durationMs: 1000, addedAt: 0 });
     const npFile = join(dir, 'export', 'nowplaying.txt');
-    assert.throws(() => app.setIntegrations(admin, 'main', { webhooks: [{ url: 'nope', events: [] }] }), /URL/);
-    const cfg = app.setIntegrations(admin, 'main', {
+    assert.throws(() => app.svc.notifications.setIntegrations(admin, 'main', { webhooks: [{ url: 'nope', events: [] }] }), /URL/);
+    const cfg = app.svc.notifications.setIntegrations(admin, 'main', {
       webhooks: [{ url, events: ['now_playing', 'off_air', 'on_air_changed', 'bogus'], secret: 'geheim' }],
       nowPlayingFile: npFile,
     }) as { webhooks: { events: string[]; hasSecret: boolean }[] };
@@ -65,7 +65,7 @@ test('Webhook (signiert), Now-Playing-Datei und Stream-Ereignisse', async () => 
     app.engine.disconnect(auto.id);
     await until(() => got.some((g) => g.event === 'off_air') && got.some((g) => g.event === 'on_air_changed'));
 
-    const t = (await app.testIntegrations('main')) as { webhooks: { ok: boolean }[] };
+    const t = (await app.svc.notifications.testIntegrations('main')) as { webhooks: { ok: boolean }[] };
     assert.equal(t.webhooks[0]!.ok, true);
   } finally {
     app.shutdown();

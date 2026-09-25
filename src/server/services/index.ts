@@ -3,8 +3,11 @@
 // mit Audio-Engine und Mode-Manager neu gebaut; alles Übrige liegt hier.
 
 import type { AirDeckApp } from '../app.ts';
+import { BridgeService } from './bridges.ts';
 import { LautfmService } from './lautfm.ts';
 import { NextcloudService } from './nextcloud.ts';
+import { NotificationService } from './notifications.ts';
+import { StatusService } from './status.ts';
 import { SystemService } from './system.ts';
 
 export function createServices(app: AirDeckApp) {
@@ -12,6 +15,9 @@ export function createServices(app: AirDeckApp) {
     nextcloud: new NextcloudService(app),
     lautfm: new LautfmService(app),
     system: new SystemService(app),
+    notifications: new NotificationService(app),
+    bridges: new BridgeService(app),
+    status: new StatusService(app),
   };
 }
 
