@@ -71,9 +71,11 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: '22', cache: npm }
       - run: npm ci
-      - name: AirDeck.exe bauen (Node Single Executable)
+      - uses: actions/setup-dotnet@v4
+        with: { dotnet-version: '8.0.x' }
+      - name: AirDeck bauen (Engine als Node Single Executable + Windows-Programm)
         run: node scripts/build.mjs --sea
-      - name: AirDeck.exe signieren (nur mit hinterlegtem Zertifikat)
+      - name: Programme signieren (nur mit hinterlegtem Zertifikat)
         if: env.HAS_CERT == 'true'
         shell: pwsh
         env:
@@ -83,7 +85,7 @@ jobs:
           $pfx = "$env:RUNNER_TEMP/cert.pfx"
           [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:CERT_B64))
           $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Recurse -Filter signtool.exe | Where-Object { $_.FullName -match 'x64' } | Select-Object -Last 1
-          foreach ($f in @('dist/AirDeck/AirDeck.exe')) {
+          foreach ($f in @('dist/AirDeck/AirDeck.exe', 'dist/AirDeck/airdeck-engine.exe')) {
             & $signtool.FullName sign /f $pfx /p $env:CERT_PASSWORD /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /d AirDeck $f
             if ($LASTEXITCODE -ne 0) { throw "Signieren fehlgeschlagen: $f" }
           }
@@ -115,26 +117,41 @@ jobs:
         run: |
           $env:AIRDECK_DATA = "$env:RUNNER_TEMP/airdeck-data"
           $env:AIRDECK_PORT = '8753'
-          # Windows-Programm ohne Konsole: Ausgabe über Umleitung prüfen
-          Start-Process -FilePath dist/AirDeck/AirDeck.exe -ArgumentList '--new-admin-token' -Wait -NoNewWindow -RedirectStandardOutput "$env:RUNNER_TEMP/out.txt"
+          $engine = 'dist/AirDeck/airdeck-engine.exe'
+          if (-not (Test-Path dist/AirDeck/AirDeck.exe)) { throw 'Windows-Programm AirDeck.exe fehlt' }
+          # Engine ohne Konsole: Ausgabe über Umleitung prüfen
+          Start-Process -FilePath $engine -ArgumentList '--new-admin-token' -Wait -NoNewWindow -RedirectStandardOutput "$env:RUNNER_TEMP/out.txt"
           $out = Get-Content "$env:RUNNER_TEMP/out.txt"
           $out
           if (-not ($out | Select-String 'ffmpeg version')) { throw 'ffmpeg wurde nicht erkannt' }
           if (-not (Test-Path "$env:AIRDECK_DATA/logs/airdeck.log")) { throw 'Logdatei fehlt' }
-          $p = Start-Process -FilePath dist/AirDeck/AirDeck.exe -ArgumentList '--headless', '--no-tray' -PassThru
+          $p = Start-Process -FilePath $engine -ArgumentList '--headless', '--no-tray' -PassThru
           Start-Sleep -Seconds 5
           $r = Invoke-RestMethod http://127.0.0.1:8753/api/v1/health
           # Studio-Oberfläche muss wirklich ausgeliefert werden (nicht nur die API)
           $page = Invoke-WebRequest http://127.0.0.1:8753/ -UseBasicParsing
           $js = Invoke-WebRequest http://127.0.0.1:8753/js/app.js -UseBasicParsing
+          # Adresse für das Programmfenster (Zugang dieses PCs, Engine läuft)
+          Start-Process -FilePath $engine -ArgumentList '--print-url' -Wait -NoNewWindow -RedirectStandardOutput "$env:RUNNER_TEMP/url.txt"
+          $info = Get-Content "$env:RUNNER_TEMP/url.txt" -Raw | ConvertFrom-Json
+          if (-not $info.running -or -not ($info.url -match '^http://127\.0\.0\.1:8753/#token=ad_')) { throw "print-url liefert nichts Brauchbares: $($info.url -replace 'token=.*','token=…')" }
           # sauber beenden wie über das Tray-Symbol
-          Start-Process -FilePath dist/AirDeck/AirDeck.exe -ArgumentList '--stop' -Wait -NoNewWindow
+          Start-Process -FilePath $engine -ArgumentList '--stop' -Wait -NoNewWindow
           $p.WaitForExit(8000) | Out-Null
           if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force; throw 'AirDeck --stop hat die Instanz nicht beendet' }
           if (-not $r.ok) { throw 'Health-Check fehlgeschlagen' }
           if ($page.StatusCode -ne 200 -or -not ($page.Content -match 'AirDeck')) { throw 'Studio-Startseite wird nicht ausgeliefert' }
           if ($js.StatusCode -ne 200) { throw 'Studio-Skripte werden nicht ausgeliefert' }
-          Write-Host 'AirDeck.exe startet und antwortet.'
+          Write-Host 'Engine startet und antwortet.'
+          # Windows-Programm: startet die Engine selbst (nur Infobereich, ohne Fenster)
+          $env:AIRDECK_PORT = '8756'
+          $w = Start-Process -FilePath dist/AirDeck/AirDeck.exe -ArgumentList '--minimized' -PassThru
+          $ok = $false
+          for ($i = 0; $i -lt 60 -and -not $ok; $i++) { Start-Sleep -Seconds 1; try { $ok = (Invoke-RestMethod http://127.0.0.1:8756/api/v1/health).ok } catch {} }
+          Start-Process -FilePath $engine -ArgumentList '--stop' -Wait -NoNewWindow
+          if (-not $w.HasExited) { Stop-Process -Id $w.Id -Force }
+          if (-not $ok) { throw 'AirDeck.exe hat die Engine nicht gestartet' }
+          Write-Host 'AirDeck.exe startet die Engine.'
       - name: Installer bauen (Inno Setup)
         shell: pwsh
         run: |
@@ -169,8 +186,9 @@ jobs:
         run: |
           $setup = Get-ChildItem dist/AirDeck-Setup-*.exe | Select-Object -First 1
           Start-Process $setup.FullName -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/TASKS=""' -Wait
-          $exe = "$env:LOCALAPPDATA/Programs/AirDeck/AirDeck.exe"
-          if (-not (Test-Path $exe)) { throw 'AirDeck.exe nach Installation nicht gefunden' }
+          if (-not (Test-Path "$env:LOCALAPPDATA/Programs/AirDeck/AirDeck.exe")) { throw 'AirDeck.exe nach Installation nicht gefunden' }
+          $exe = "$env:LOCALAPPDATA/Programs/AirDeck/airdeck-engine.exe"
+          if (-not (Test-Path $exe)) { throw 'airdeck-engine.exe nach Installation nicht gefunden' }
           $env:AIRDECK_DATA = "$env:RUNNER_TEMP/airdeck-inst"
           $env:AIRDECK_PORT = '8755'
           $p = Start-Process $exe -ArgumentList '--headless', '--no-tray' -PassThru

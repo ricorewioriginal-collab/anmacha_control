@@ -2,11 +2,11 @@
 // lädt das Windows-Setup, prüft die SHA-256-Prüfsumme und installiert still. Android lädt die neue APK.
 // Private Repositories: Zugriffstoken (nur Lesen) wird verschlüsselt im Secret-Store gehalten.
 
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { createWriteStream, rmSync } from 'node:fs';
+import { createWriteStream, existsSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 
@@ -150,6 +150,9 @@ export class Updater {
   /** Windows: Setup still starten; es beendet AirDeck, ersetzt die Dateien und startet AirDeck neu. */
   runWindowsSetup(file: string, headless: boolean): void {
     const args = ['/SILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/CLOSEAPPLICATIONS', '/UPDATE=1', ...(headless ? ['/HEADLESSRUN=1'] : [])];
+    // Programmfenster (AirDeck.exe) vorher schließen, damit das Setup es ersetzen kann – es startet danach neu
+    const host = join(dirname(process.execPath), 'AirDeck.exe');
+    if (existsSync(host) && host !== process.execPath) spawnSync(host, ['--quit'], { timeout: 8000, windowsHide: true });
     const p = spawn(file, args, { detached: true, stdio: 'ignore', windowsHide: false });
     p.unref();
   }

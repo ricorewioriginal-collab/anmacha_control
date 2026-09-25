@@ -27,4 +27,4 @@ Automatisch passiert das über GitHub Actions (Workflow „Build“, Artefakt `A
 
 1. AirDeck auf dem PC mit Netzwerkfreigabe starten: `AIRDECK_HOST=0.0.0.0`
 2. In der App die Server-Adresse eingeben (z. B. `http://192.168.1.20:8750`) und ein Token.
-   Ein Token erzeugst du mit `AirDeck.exe --new-admin-token`.
+   Ein Token erzeugst du mit `airdeck-engine.exe --new-admin-token`.

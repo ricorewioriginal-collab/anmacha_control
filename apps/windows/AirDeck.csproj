@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    AirDeck.exe – eigenständiges Windows-Programm: eigenes Fenster (WebView2), Symbol im Infobereich,
+    startet und überwacht die AirDeck-Engine (airdeck-engine.exe). .NET Framework 4.8 ist auf jedem
+    Windows 10/11 vorhanden – keine zusätzliche Laufzeit nötig.
+    Bauen: dotnet build apps/windows/AirDeck.csproj -c Release -p:Version=0.4.0
+  -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net48</TargetFramework>
+    <PlatformTarget>x64</PlatformTarget>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <AssemblyName>AirDeck</AssemblyName>
+    <RootNamespace>AirDeck</RootNamespace>
+    <ApplicationIcon>..\..\assets\icons\airdeck-windows.ico</ApplicationIcon>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <Version>0.0.0</Version>
+    <Product>AirDeck</Product>
+    <Description>AirDeck Radio Automation</Description>
+    <Company>AnMaCha Radioproduktion &amp; RicoReWi</Company>
+    <Copyright>AirDeck – Powered by AnMaCha Radioproduktion &amp; RicoReWi</Copyright>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <SatelliteResourceLanguages>de;en</SatelliteResourceLanguages>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="System.Windows.Forms" />
+    <Reference Include="System.Drawing" />
+    <Reference Include="System.Net.Http" />
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.2903.40" />
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
+  </ItemGroup>
+</Project>

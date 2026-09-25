@@ -49,8 +49,8 @@ Ist die Datenbank nicht erreichbar, startet AirDeck trotzdem lokal und zeigt den
 
 ### B) Ohne Installation (portable)
 1. `AirDeck-Windows-Portable.zip` entpacken, z. B. nach `D:\AirDeck`.
-2. `AirDeck.exe` doppelklicken. Das Studio öffnet sich, AirDeck läuft mit Tray-Symbol im Hintergrund.
-3. `AirDeck-Headless.cmd` startet AirDeck ohne Studio-Fenster (24/7).
+2. `AirDeck.exe` doppelklicken. AirDeck öffnet sein eigenes Fenster und startet die Audio-Engine (`airdeck-engine.exe`). Schließt du das Fenster, laufen Automation und Streams im Hintergrund weiter (Symbol im Infobereich). Beenden über das Symbol.
+3. `AirDeck-Headless.cmd` startet nur die Engine, ohne Fenster (24/7 auf einem Sende-PC).
 
 In beiden Fällen liegen Musik, Einstellungen und die verschlüsselten Passwörter unter `%LOCALAPPDATA%\AirDeck\data`.
 Soll alles im Programmordner bleiben (z. B. USB-Stick), vorher `set AIRDECK_DATA=.\data` setzen.

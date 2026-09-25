@@ -100,27 +100,27 @@ Source: "installer\haftung.txt"; DestDir: "{app}"; DestName: "HAFTUNGSAUSSCHLUSS
 
 [Icons]
 Name: "{group}\AirDeck"; Filename: "{app}\AirDeck.exe"; WorkingDir: "{app}"
-Name: "{group}\{cm:IconServer}"; Filename: "{app}\AirDeck.exe"; Parameters: "--headless"; WorkingDir: "{app}"; IconFilename: "{app}\icons\airdeck-server.ico"
-Name: "{group}\{cm:IconStop}"; Filename: "{app}\AirDeck.exe"; Parameters: "--stop"; WorkingDir: "{app}"; IconFilename: "{app}\icons\airdeck-server.ico"
+Name: "{group}\{cm:IconServer}"; Filename: "{app}\airdeck-engine.exe"; Parameters: "--headless"; WorkingDir: "{app}"; IconFilename: "{app}\icons\airdeck-server.ico"
+Name: "{group}\{cm:IconStop}"; Filename: "{app}\airdeck-engine.exe"; Parameters: "--stop"; WorkingDir: "{app}"; IconFilename: "{app}\icons\airdeck-server.ico"
 Name: "{group}\{cm:IconManual}"; Filename: "{app}\studio\handbuch.html"
 Name: "{group}\{cm:UninstallProgram,AirDeck}"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\AirDeck"; Filename: "{app}\AirDeck.exe"; WorkingDir: "{app}"; Tasks: desktopicon
 
 [Registry]
-Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "AirDeck"; ValueData: """{app}\AirDeck.exe"" --headless"; Flags: uninsdeletevalue; Tasks: autostart
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "AirDeck"; ValueData: """{app}\AirDeck.exe"" --minimized"; Flags: uninsdeletevalue; Tasks: autostart
 
 [Run]
 ; Firewall-Freigabe für das lokale Netz (nur bei Installation für alle Benutzer mit Adminrechten)
-Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall add rule name=""AirDeck"" dir=in action=allow program=""{app}\AirDeck.exe"" profile=private,domain enable=yes"; Flags: runhidden; Tasks: lan; Check: IsAdminInstallMode
+Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall add rule name=""AirDeck"" dir=in action=allow program=""{app}\airdeck-engine.exe"" profile=private,domain enable=yes"; Flags: runhidden; Tasks: lan; Check: IsAdminInstallMode
 Filename: "{app}\AirDeck.exe"; Description: "{cm:RunNow}"; Flags: nowait postinstall skipifsilent
 Filename: "{app}\studio\handbuch.html"; Description: "{cm:RunManual}"; Flags: shellexec postinstall skipifsilent unchecked nowait
 
 ; Nach einem automatischen Update (Aufruf mit /UPDATE=1) AirDeck wieder starten
-Filename: "{app}\AirDeck.exe"; Parameters: "{code:RelaunchParams}"; Flags: nowait; Check: IsUpdate
+Filename: "{app}\{code:RelaunchExe}"; Parameters: "{code:RelaunchParams}"; Flags: nowait; Check: IsUpdate
 
 [UninstallRun]
-Filename: "{app}\AirDeck.exe"; Parameters: "--stop"; Flags: runhidden waituntilterminated; RunOnceId: "QuitAirDeck"
-Filename: "{cmd}"; Parameters: "/c taskkill /IM AirDeck.exe /F"; Flags: runhidden; RunOnceId: "StopAirDeck"
+Filename: "{app}\airdeck-engine.exe"; Parameters: "--stop"; Flags: runhidden waituntilterminated; RunOnceId: "QuitAirDeck"
+Filename: "{cmd}"; Parameters: "/c taskkill /IM AirDeck.exe /F & taskkill /IM airdeck-engine.exe /F"; Flags: runhidden; RunOnceId: "StopAirDeck"
 Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall delete rule name=""AirDeck"""; Flags: runhidden; RunOnceId: "FirewallAirDeck"; Check: IsAdminInstallMode
 
 [Messages]
@@ -141,6 +141,12 @@ var
 function IsUpdate: Boolean;
 begin
   Result := ExpandConstant('{param:UPDATE|0}') = '1';
+end;
+
+{ Nach dem Update: lief nur die Engine (24/7 ohne Fenster), wieder nur die Engine starten, sonst das Programm }
+function RelaunchExe(Param: String): String;
+begin
+  if ExpandConstant('{param:HEADLESSRUN|0}') = '1' then Result := 'airdeck-engine.exe' else Result := 'AirDeck.exe';
 end;
 
 function RelaunchParams(Param: String): String;

@@ -1,4 +1,4 @@
 @echo off
-rem AirDeck ohne Fenster starten (24/7-Betrieb, z. B. per Autostart).
+rem Nur die AirDeck-Engine starten, ohne Fenster (24/7-Betrieb, z. B. auf einem Sende-PC).
 cd /d "%~dp0"
-start "" /min "%~dp0AirDeck.exe" --headless
+start "" /min "%~dp0airdeck-engine.exe" --headless

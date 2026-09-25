@@ -1,11 +1,13 @@
 // AirDeck Server – Einstiegspunkt.
 //   node src/server/main.ts               Server (Entwicklung, Node >= 22.18)
-//   AirDeck.exe                           Windows-Programm: Server + Studio-Fenster (Desktop-Modus)
-//   AirDeck.exe --headless                nur Server, z. B. für Autostart/24/7 ohne Fenster
+//   airdeck-engine.exe                    Windows: Engine + Studio-Fenster (öffnet AirDeck.exe, das eigentliche Programm)
+//   airdeck-engine.exe --headless         nur Engine, z. B. für Autostart/24/7 ohne Fenster
+//   airdeck-engine.exe --shell            vom Windows-Programm gestartet: kein eigenes Fenster, kein eigenes Tray-Symbol
+//   airdeck-engine.exe --print-url        Adresse fürs Studio-Fenster ausgeben (für AirDeck.exe), Exit 0 = läuft
 //   … --new-admin-token                   neues Admin-Token ausgeben
 
 import { spawn } from 'node:child_process';
-import { createWriteStream, mkdirSync, renameSync, statSync } from 'node:fs';
+import { createWriteStream, existsSync, mkdirSync, renameSync, statSync } from 'node:fs';
 import { format } from 'node:util';
 import { randomBytes } from 'node:crypto';
 import { createServer } from 'node:net';
@@ -14,7 +16,7 @@ import { API_VERSION, resolveConfig, writeDefaultConf } from './config.ts';
 import { openDatabase, safeUrl } from './db/index.ts';
 import type { DatabaseProvider } from './db/types.ts';
 import { DbDocStore, importJsonFiles } from './repo/docs.ts';
-import { join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { AirDeckApp } from './app.ts';
 import { SecretStore } from './secrets.ts';
@@ -32,6 +34,11 @@ const argv = process.argv.slice(2);
 const packaged = globalThis.__AIRDECK_PACKAGED === true;
 const root = process.env.AIRDECK_ROOT ?? globalThis.__AIRDECK_ROOT ?? resolve(fileURLToPath(import.meta.url), '../../..');
 const desktop = !argv.includes('--headless') && (argv.includes('--desktop') || packaged);
+/** vom Windows-Programm (AirDeck.exe) gestartet: das Programm hat Fenster und Tray-Symbol */
+const shell = argv.includes('--shell');
+/** eigentliches Windows-Programm neben der Engine (Fenster, Tray), sofern installiert */
+const windowsApp = process.platform === 'win32' && packaged && basename(process.execPath).toLowerCase() !== 'airdeck.exe' ? join(dirname(process.execPath), 'AirDeck.exe') : '';
+const hasWindowsApp = !!windowsApp && existsSync(windowsApp);
 // Betriebsart, Port, Adresse und Pfade aus airdeck.conf (docs/architecture/STORAGE.md)
 const config = resolveConfig({ env: process.env, root, packaged, desktop });
 const { port, host } = config;
@@ -41,6 +48,11 @@ const localHost = host === '0.0.0.0' ? '127.0.0.1' : host;
 /** Studio im App-Fenster öffnen (Edge/Chrome im App-Modus, sonst Standardbrowser). */
 function openStudio(url: string): void {
   const detached = { detached: true, stdio: 'ignore' as const, windowsHide: true };
+  // Windows-Programm vorhanden: das öffnet sein eigenes Fenster (und verbindet sich selbst)
+  if (hasWindowsApp) {
+    spawn(windowsApp, [], detached).on('error', () => {}).unref();
+    return;
+  }
   if (process.platform === 'win32') {
     // '' wird von Node als "" übergeben = leerer Fenstertitel für "start"
     // Eigenes Profil: App-Fenster startet unabhängig vom normalen Edge, darf ohne Klick mithören (Autoplay)
@@ -148,8 +160,21 @@ async function main(): Promise<void> {
     process.exit(r?.ok ? 0 : 1);
   }
 
+  // Für AirDeck.exe: Adresse mit dem Zugang dieses PCs (nur an die aufrufende Anwendung, nicht ins Protokoll)
+  if (argv.includes('--print-url')) {
+    const running = await portInUse(port, host);
+    process.stdout.write(`${JSON.stringify({
+      url: `http://${localHost}:${port}/#token=${runningToken()}`,
+      health: `http://${localHost}:${port}/api/v1/health`,
+      log: join(config.paths.logs, 'airdeck.log'),
+      running,
+    })}\n`, () => process.exit(running ? 0 : 3));
+    return;
+  }
+
   // Zweiter Start im Desktop-Modus: nur Fenster öffnen, kein zweiter Server
   if (desktop && (await portInUse(port, host))) {
+    if (shell) process.exit(0);
     openStudio(`http://${localHost}:${port}/#token=${runningToken()}`);
     return;
   }
@@ -220,8 +245,9 @@ async function main(): Promise<void> {
     app.start();
     console.log(`AirDeck läuft auf http://${host}:${port}  (Daten: ${dataDir})`);
     // nach einem Neustart aus dem Programm heraus ist das Studio-Fenster schon offen
-    if (desktop && !process.env.AIRDECK_RESTARTED) openStudio(`http://${localHost}:${port}/#token=${app.svc.auth.desktopToken()}`);
-    if (packaged && process.platform === 'win32' && !argv.includes('--no-tray')) startTray(logFile);
+    if (desktop && !shell && !process.env.AIRDECK_RESTARTED) openStudio(`http://${localHost}:${port}/#token=${app.svc.auth.desktopToken()}`);
+    // Tray-Symbol hat das Windows-Programm; das PowerShell-Symbol nur ohne AirDeck.exe (ältere portable Fassung)
+    if (packaged && process.platform === 'win32' && !shell && !hasWindowsApp && !argv.includes('--no-tray')) startTray(logFile);
   });
 
   let exitCode = 0;

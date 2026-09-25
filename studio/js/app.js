@@ -1416,6 +1416,9 @@ function bindStatic() {
     $('btn-quit').hidden = false;
     $('btn-quit').addEventListener('click', async () => {
       if (!confirm('AirDeck komplett beenden? Die Automation und alle Streams stoppen.')) return;
+      // Im Windows-Programm beendet das Programm Engine und Fenster gemeinsam
+      const host = /** @type {any} */ (window).chrome?.webview;
+      if (host) return host.postMessage('quit');
       if (await run(() => api.post('/system/shutdown'))) {
         document.body.replaceChildren(h('div', { class: 'empty', style: 'padding:40px' }, 'AirDeck wurde beendet. Dieses Fenster kann geschlossen werden.'));
       }

@@ -1,15 +1,20 @@
 AirDeck für Windows
 ===================
 
-Start:            AirDeck.exe  (startet den Server und öffnet das Studio als App-Fenster)
-Nur Server:       AirDeck-Headless.cmd  (ohne Fenster, für 24/7)
-Autostart:        Autostart-einrichten.cmd  (startet AirDeck bei jeder Anmeldung)
-Neues Token:      AirDeck.exe --new-admin-token  (z. B. für die Android-App)
+Start:            AirDeck.exe  (das Programm: eigenes Fenster, Symbol im Infobereich, startet die Engine)
+Fenster zu:       Automation und Streams laufen im Hintergrund weiter (Symbol im Infobereich).
+Beenden:          Rechtsklick auf das Symbol im Infobereich → „AirDeck beenden“.
+Nur Engine:       AirDeck-Headless.cmd  (ohne Fenster, für 24/7)
+Autostart:        Autostart-einrichten.cmd  (startet AirDeck bei jeder Anmeldung im Infobereich)
+Neues Token:      airdeck-engine.exe --new-admin-token  (z. B. für die Android-App)
+
+AirDeck.exe ist das Programm, airdeck-engine.exe die Audio-Engine (Automation, Decks, Encoder) im Hintergrund.
+Das Fenster nutzt Microsoft WebView2 (bei Windows 10/11 vorhanden).
 
 Daten liegen in %LOCALAPPDATA%\AirDeck\data (Medien, Einstellungen, verschlüsselte Passwörter).
-ffmpeg (für Server-Automation 24/7) liegt im Ordner ffmpeg\.
+ffmpeg (Audio-Engine) liegt im Ordner ffmpeg\.
 
 Android-App im selben Netzwerk verbinden:
-  1. AirDeck mit Netzwerkfreigabe starten:  set AIRDECK_HOST=0.0.0.0 && AirDeck.exe
+  1. AirDeck-Netzwerk.cmd starten (oder im Setup-Assistenten „Im Netzwerk erreichbar“ wählen)
      (Windows-Firewall-Abfrage für "private Netzwerke" erlauben)
-  2. In der App die Adresse http://<PC-IP>:8750 und ein Token eingeben.
+  2. In der App den PC auswählen und mit dem 6-stelligen Code koppeln.

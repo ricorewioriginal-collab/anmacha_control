@@ -51,7 +51,8 @@ console.log('✓ dist/airdeck.cjs');
 if (sea) {
   const win = process.platform === 'win32';
   const out = join(dist, 'AirDeck');
-  const exe = join(out, win ? 'AirDeck.exe' : 'AirDeck');
+  // Windows: die Engine heißt airdeck-engine.exe, AirDeck.exe ist das eigentliche Programm (Fenster, Tray)
+  const exe = join(out, win ? 'airdeck-engine.exe' : 'AirDeck');
   mkdirSync(out, { recursive: true });
   writeFileSync(join(dist, 'sea-config.json'), JSON.stringify({
     main: join(dist, 'airdeck.cjs'),
@@ -70,7 +71,7 @@ if (sea) {
     await (typeof rc === 'function' ? rc : rc.rcedit)(exe, {
       icon: join(root, 'assets', 'icons', 'airdeck-windows.ico'),
       'file-version': version, 'product-version': version,
-      'version-string': { ProductName: 'AirDeck', FileDescription: 'AirDeck Radio Automation', CompanyName: 'AnMaCha Radioproduktion & RicoReWi', LegalCopyright: 'AirDeck – Powered by AnMaCha Radioproduktion & RicoReWi – für Broadcast, Automation, Live und laut.fm', OriginalFilename: 'AirDeck.exe' },
+      'version-string': { ProductName: 'AirDeck', FileDescription: 'AirDeck Engine', CompanyName: 'AnMaCha Radioproduktion & RicoReWi', LegalCopyright: 'AirDeck – Powered by AnMaCha Radioproduktion & RicoReWi – für Broadcast, Automation, Live und laut.fm', OriginalFilename: 'airdeck-engine.exe' },
     });
     console.log('✓ Icon & Versionsinfo gesetzt');
   }
@@ -85,6 +86,15 @@ if (sea) {
     const { setSubsystem } = await import('./pe-subsystem.mjs');
     setSubsystem(exe, 2);
     console.log('✓ Ohne Konsolenfenster (GUI-Subsystem)');
+  }
+
+  if (win) {
+    // Das Windows-Programm (eigenes Fenster mit WebView2, Tray-Symbol) – .NET Framework 4.8, auf jedem Windows 10/11 vorhanden
+    const csproj = join(root, 'apps', 'windows', 'AirDeck.csproj');
+    const hostOut = join(dist, 'windows-app');
+    execFileSync('dotnet', ['build', csproj, '-c', 'Release', `-p:Version=${version}`, '-o', hostOut, '-nologo', '-v', 'q'], { stdio: 'inherit' });
+    cpSync(hostOut, out, { recursive: true, filter: (src) => !/\.(pdb|xml)$/i.test(src) && !src.endsWith('Microsoft.Web.WebView2.Wpf.dll') });
+    console.log('✓ AirDeck.exe (Windows-Programm)');
   }
 
   cpSync(join(root, 'studio'), join(out, 'studio'), { recursive: true, filter: (src) => !src.endsWith('tsconfig.json') });
