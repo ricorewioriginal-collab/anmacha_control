@@ -61,6 +61,7 @@
     };
     els.air = h('button', { class: 'big', onclick: toggleAir }, 'Live gehen');
     els.mic = h('button', { class: 'big mic', 'aria-pressed': 'false', onclick: () => run(() => E.setMic({ on: !st?.micOn })) }, '🎙 Mikro');
+    els.badge = h('div', { class: 'badge' }, '📡');
     els.info = h('div', { class: 'muted' }, 'Nicht auf Sendung');
     els.err = h('div', { class: 'msg', hidden: true });
     els.list = h('ul');
@@ -79,6 +80,7 @@
     $('main').replaceChildren(
       h('section', { class: 'card' },
         h('h2', {}, 'Sendung'),
+        h('div', { class: 'badge-wrap' }, els.badge),
         h('div', { class: 'row' }, els.air, els.mic),
         h('div', { style: 'margin-top:10px' }, els.info),
         meter('master', 'Summe'), meter('mic', 'Mikrofon'), meter('music', 'Musik'),
@@ -154,6 +156,8 @@
     pill.textContent = !s.running ? 'AUS' : on ? 'ON AIR' : s.state === 'error' ? 'FEHLER' : 'VERBINDET …';
     els.air.textContent = s.running ? 'Sendung beenden' : 'Live gehen';
     els.air.className = `big${s.running ? ' stop' : ''}`;
+    els.badge.className = `badge${on ? ' live' : ''}`;
+    els.badge.textContent = on ? '🔴' : s.running ? '📡' : '📻';
     els.mic.setAttribute('aria-pressed', String(!!s.micOn));
     /** @type {HTMLButtonElement} */ (els.mic).disabled = !s.running || !s.micAvailable;
     els.mic.textContent = s.micOn ? '🎙 Mikro AN' : '🎙 Mikro';
