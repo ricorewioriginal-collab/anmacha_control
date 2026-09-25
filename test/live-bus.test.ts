@@ -68,15 +68,21 @@ async function setup(dir: string, port: number) {
   app.saveOutput(admin, 'main', null, { name: 'ice', host: '127.0.0.1', port, mount: '/radio', password: 'pw-123456' });
   const live = app.engine.list('main').find((s) => s.type === 'live_studio')!;
   const events: string[] = [];
-  app.subscribe((e) => e.type === 'MODE_CHANGED' && events.push((e.payload as { mode: string }).mode));
+  // Pegel wie im Studio über die Ereignisse lesen (readLevel() setzt zurück und wird vom Pegel-Takt mitgelesen)
+  const levels: { at: number; rmsDb: number }[] = [];
+  app.subscribe((e) => {
+    if (e.type === 'MODE_CHANGED') events.push((e.payload as { mode: string }).mode);
+    if (e.type === 'playout.level') levels.push({ at: Date.now(), rmsDb: (e.payload as { rmsDb: number }).rmsDb });
+  });
+  const loudSince = (t: number) => Math.max(-90, ...levels.filter((l) => l.at >= t).map((l) => l.rmsDb));
   app.start();
-  return { app, live, events };
+  return { app, live, events, loudSince };
 }
 
 test('Sendebus: Live-Quelle wird gemischt – Format und Verbindung bleiben, Automation pausiert, MANUAL', { skip, timeout: 90_000 }, async () => {
   const dir = mkdtempSync(join(tmpdir(), 'airdeck-bus-'));
   const ice = await iceMock();
-  const { app, live, events } = await setup(dir, ice.port);
+  const { app, live, events, loudSince } = await setup(dir, ice.port);
   let enc: ChildProcess | null = null;
   try {
     app.startPlayout(admin, 'main', { format: 'mp3', bitrateKbps: 64, crossfadeMs: 0 });
@@ -90,12 +96,13 @@ test('Sendebus: Live-Quelle wird gemischt – Format und Verbindung bleiben, Aut
     await until(() => (app.playoutView('main') as { status: { live: { primed: boolean }[] } }).status.live[0]?.primed === true, 10_000, 'Live-Kanal gepuffert');
     const played = app.history('main').length;
     const queued = (app.queueView('main') as { items: unknown[] }).items.length;
+    const liveFrom = Date.now() + 500; // nach der Überblendung
     await wait(5000); // länger als ein Titel
     assert.equal(app.history('main').length, played, 'während LIVE werden keine Titel verbraucht');
     assert.equal((app.queueView('main') as { items: unknown[] }).items.length, queued);
     assert.equal(app.modeView('main').program, live.id);
-    const level = (app.playouts.get('main')!.playout.readLevel());
-    assert.ok(level.rmsDb > -30, `Live-Ton ist im Programm (${level.rmsDb} dB)`);
+    const level = loudSince(liveFrom);
+    assert.ok(level > -30, `Live-Ton ist im Programm (${level} dB)`);
     // die Kernaussage: kein Formatwechsel, keine neue Verbindung der Ausgänge
     assert.equal(ice.conns.length, 1, `Ausgang wird nicht neu verbunden (${ice.conns.join(', ')})`);
 
@@ -129,15 +136,16 @@ test('Sendebus: Live-Quelle wird gemischt – Format und Verbindung bleiben, Aut
 test('Live ohne laufenden Bus (WebM wie Studio-Mikrofon/App): Bus startet automatisch in MP3 und endet mit der Sendung', { skip, timeout: 60_000 }, async () => {
   const dir = mkdtempSync(join(tmpdir(), 'airdeck-bus-'));
   const ice = await iceMock();
-  const { app, live } = await setup(dir, ice.port);
+  const { app, live, loudSince } = await setup(dir, ice.port);
   let enc: ChildProcess | null = null;
   try {
+    const t0 = Date.now();
     enc = liveEncoder(app, live, 'sine=f=800:sample_rate=48000', 'webm');
     await until(() => app.playouts.has('main'), 10_000, 'Bus gestartet');
     await until(() => ice.conns.length >= 1 && ice.bytes() > 2000, 10_000, 'Ausgang verbunden');
     assert.ok(ice.conns.every((c) => c.endsWith('audio/mpeg')), `Ausgänge nur MP3 (${ice.conns.join(', ')})`);
     assert.equal(app.modeView('main').mode, 'LIVE');
-    await until(() => app.playouts.get('main')!.playout.readLevel().rmsDb > -30, 10_000, 'WebM-Live-Ton im Programm');
+    await until(() => loudSince(t0) > -30, 10_000, 'WebM-Live-Ton im Programm');
     // die Automation-Quelle konkurriert nicht mit der Live-Sendung
     const auto = app.engine.list('main').find((s) => s.type === 'automation')!;
     assert.equal(app.engine.get(auto.id)!.state, 'disconnected');
