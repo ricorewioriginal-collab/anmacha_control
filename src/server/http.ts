@@ -300,40 +300,40 @@ export function createHttpServer(app: AirDeckApp, studioDir: string): Server {
   add('GET', '/api/v1/stations/:sid/history', 'now_playing:read', (c) => app.history(sid(c), Number(c.url.searchParams.get('limit') ?? 200)));
 
   // --- Playlists ---
-  add('GET', '/api/v1/stations/:sid/playlists', 'queue:read', (c) => app.playlists(sid(c)));
+  add('GET', '/api/v1/stations/:sid/playlists', 'queue:read', (c) => app.svc.planning.playlists(sid(c)));
   add('POST', '/api/v1/stations/:sid/playlists', 'queue:write', async (c) => {
     const b = await c.body();
-    return b.fromQueue === true ? app.saveQueueAsPlaylist(sid(c), String(b.name ?? 'Playlist')) : app.savePlaylist(sid(c), null, b);
+    return b.fromQueue === true ? app.svc.planning.saveQueueAsPlaylist(sid(c), String(b.name ?? 'Playlist')) : app.svc.planning.savePlaylist(sid(c), null, b);
   });
-  add('PATCH', '/api/v1/stations/:sid/playlists/:id', 'queue:write', async (c) => app.savePlaylist(sid(c), c.params.id!, await c.body()));
-  add('DELETE', '/api/v1/stations/:sid/playlists/:id', 'queue:write', (c) => app.deletePlaylist(sid(c), c.params.id!));
-  add('POST', '/api/v1/stations/:sid/playlists/:id/play', 'automation:write', (c) => app.playPlaylist(sid(c), c.params.id!));
+  add('PATCH', '/api/v1/stations/:sid/playlists/:id', 'queue:write', async (c) => app.svc.planning.savePlaylist(sid(c), c.params.id!, await c.body()));
+  add('DELETE', '/api/v1/stations/:sid/playlists/:id', 'queue:write', (c) => app.svc.planning.deletePlaylist(sid(c), c.params.id!));
+  add('POST', '/api/v1/stations/:sid/playlists/:id/play', 'automation:write', (c) => app.svc.planning.playPlaylist(sid(c), c.params.id!));
 
   // --- Planung: Zeitplan, Stunden-Uhr, Sendeplan ---
-  add('GET', '/api/v1/stations/:sid/planning', 'schedule:read', (c) => app.planning(sid(c)));
-  add('POST', '/api/v1/stations/:sid/jobs', 'automation:write', async (c) => app.saveJob(sid(c), await c.body()));
-  add('DELETE', '/api/v1/stations/:sid/jobs/:id', 'automation:write', (c) => app.deleteJob(sid(c), c.params.id!));
-  add('POST', '/api/v1/stations/:sid/clock-events', 'automation:write', async (c) => app.saveClockEvent(sid(c), null, await c.body()));
-  add('PATCH', '/api/v1/stations/:sid/clock-events/:id', 'automation:write', async (c) => app.saveClockEvent(sid(c), c.params.id!, await c.body()));
-  add('DELETE', '/api/v1/stations/:sid/clock-events/:id', 'automation:write', (c) => app.deleteClockEvent(sid(c), c.params.id!));
-  add('POST', '/api/v1/stations/:sid/clock-events/:id/fire', 'automation:write', (c) => app.fireClockEvent(sid(c), c.params.id!));
-  add('POST', '/api/v1/stations/:sid/plans', 'automation:write', async (c) => app.savePlan(sid(c), null, await c.body()));
-  add('PATCH', '/api/v1/stations/:sid/plans/:id', 'automation:write', async (c) => app.savePlan(sid(c), c.params.id!, await c.body()));
-  add('DELETE', '/api/v1/stations/:sid/plans/:id', 'automation:write', (c) => app.deletePlan(sid(c), c.params.id!));
+  add('GET', '/api/v1/stations/:sid/planning', 'schedule:read', (c) => app.svc.planning.planning(sid(c)));
+  add('POST', '/api/v1/stations/:sid/jobs', 'automation:write', async (c) => app.svc.planning.saveJob(sid(c), await c.body()));
+  add('DELETE', '/api/v1/stations/:sid/jobs/:id', 'automation:write', (c) => app.svc.planning.deleteJob(sid(c), c.params.id!));
+  add('POST', '/api/v1/stations/:sid/clock-events', 'automation:write', async (c) => app.svc.planning.saveClockEvent(sid(c), null, await c.body()));
+  add('PATCH', '/api/v1/stations/:sid/clock-events/:id', 'automation:write', async (c) => app.svc.planning.saveClockEvent(sid(c), c.params.id!, await c.body()));
+  add('DELETE', '/api/v1/stations/:sid/clock-events/:id', 'automation:write', (c) => app.svc.planning.deleteClockEvent(sid(c), c.params.id!));
+  add('POST', '/api/v1/stations/:sid/clock-events/:id/fire', 'automation:write', (c) => app.svc.planning.fireClockEvent(sid(c), c.params.id!));
+  add('POST', '/api/v1/stations/:sid/plans', 'automation:write', async (c) => app.svc.planning.savePlan(sid(c), null, await c.body()));
+  add('PATCH', '/api/v1/stations/:sid/plans/:id', 'automation:write', async (c) => app.svc.planning.savePlan(sid(c), c.params.id!, await c.body()));
+  add('DELETE', '/api/v1/stations/:sid/plans/:id', 'automation:write', (c) => app.svc.planning.deletePlan(sid(c), c.params.id!));
 
   // --- Recorder / Replays ---
-  add('GET', '/api/v1/stations/:sid/recordings', 'automation:read', (c) => app.recordings(sid(c)));
-  add('POST', '/api/v1/stations/:sid/recorder/start', 'automation:write', async (c) => app.startRecording(sid(c), str((await c.body()).label)));
-  add('POST', '/api/v1/stations/:sid/recorder/stop', 'automation:write', (c) => app.stopRecording(sid(c)));
+  add('GET', '/api/v1/stations/:sid/recordings', 'automation:read', (c) => app.svc.recorder.recordings(sid(c)));
+  add('POST', '/api/v1/stations/:sid/recorder/start', 'automation:write', async (c) => app.svc.recorder.startRecording(sid(c), str((await c.body()).label)));
+  add('POST', '/api/v1/stations/:sid/recorder/stop', 'automation:write', (c) => app.svc.recorder.stopRecording(sid(c)));
   add('GET', '/api/v1/stations/:sid/recordings/:id/file', 'automation:read', (c) => {
-    const { path, rec } = app.recordingFile(sid(c), c.params.id!);
+    const { path, rec } = app.svc.recorder.recordingFile(sid(c), c.params.id!);
     c.res.setHeader('Content-Disposition', `attachment; filename="${rec.label.replace(/[^\w .()-]/g, '_')}.${rec.file.split('.').pop()}"`);
     sendFile(c.req, c.res, path, rec.contentType || 'application/octet-stream');
     return STREAMED;
   });
-  add('DELETE', '/api/v1/stations/:sid/recordings/:id', 'automation:write', (c) => app.deleteRecording(sid(c), c.params.id!));
-  add('POST', '/api/v1/stations/:sid/rec-plans', 'automation:write', async (c) => app.saveRecPlan(sid(c), null, await c.body()));
-  add('DELETE', '/api/v1/stations/:sid/rec-plans/:id', 'automation:write', (c) => app.deleteRecPlan(sid(c), c.params.id!));
+  add('DELETE', '/api/v1/stations/:sid/recordings/:id', 'automation:write', (c) => app.svc.recorder.deleteRecording(sid(c), c.params.id!));
+  add('POST', '/api/v1/stations/:sid/rec-plans', 'automation:write', async (c) => app.svc.recorder.saveRecPlan(sid(c), null, await c.body()));
+  add('DELETE', '/api/v1/stations/:sid/rec-plans/:id', 'automation:write', (c) => app.svc.recorder.deleteRecPlan(sid(c), c.params.id!));
 
   // --- Datenspeicher / Sync (MySQL, Firebase) – nur globale Admins ---
   const globalAdmin = (c: Ctx) => {

@@ -96,9 +96,6 @@ export class AirDeckApp {
   readonly paths: AirDeckConfig['paths'];
   ffmpegRetry: NodeJS.Timeout | null = null;
   tickCount = 0;
-  lastSchedAt = Date.now();
-  readonly activePlanId = new Map<string, string | null>();
-  readonly recorders = new Map<string, ActiveRecording>();
   readonly notifier: Notifier;
   readonly subscribers = new Set<(e: HubEvent) => void>();
   /** Datenhaltung: Datenbank (Standard SQLite im Datenordner) */
@@ -289,7 +286,7 @@ export class AirDeckApp {
     if (this.levelTimer) clearInterval(this.levelTimer);
     for (const { playout } of this.playouts.values()) playout.stop();
     this.playouts.clear();
-    for (const id of [...this.recorders.keys()]) this.stopRecording(id);
+    for (const id of [...this.svc.recorder.recorders.keys()]) this.svc.recorder.stopRecording(id);
     for (const o of this.outputs.values()) o.stop();
     this.persistNow();
     void this.ownDb?.close();
@@ -333,7 +330,7 @@ export class AirDeckApp {
   tick(): void {
     this.engine.tick();
     try {
-      this.processSchedules();
+      this.svc.planning.processSchedules();
     } catch (err) {
       this.audit.write({ kind: 'schedule', event: 'error', message: (err as Error).message });
     }
@@ -496,7 +493,7 @@ export class AirDeckApp {
       pl.playout.stop();
       this.playouts.delete(id);
     }
-    if (this.recorders.has(id)) this.stopRecording(id);
+    if (this.svc.recorder.recorders.has(id)) this.svc.recorder.stopRecording(id);
     for (const s of this.engine.list(id)) this.removeSource(p, id, s.id);
     for (const o of [...this.outputs.values()]) if (o.cfg.stationId === id) this.removeOutput(p, id, o.cfg.id);
     for (const key of [...this.relays.keys()]) if (key.startsWith(`${id}/`)) this.relays.delete(key);
@@ -1095,7 +1092,7 @@ export class AirDeckApp {
     const m = rt.data.library.find((x) => x.id === picked.id)!;
     const fx = ['jingle', 'sweeper', 'station_id', 'drop', 'tts', 'bed'].includes(category);
     const md = mode === 'fx' || mode === 'now' || mode === 'track' ? mode : fx ? 'fx' : 'now';
-    this.executeTarget(stationId, { kind: 'media', mediaId: m.id, mode: md, label: m.title }, 'quick');
+    this.svc.planning.executeTarget(stationId, { kind: 'media', mediaId: m.id, mode: md, label: m.title }, 'quick');
     return m;
   }
 
@@ -1227,7 +1224,7 @@ export class AirDeckApp {
       else missing.push(e.title ?? base);
     }
     if (target.playlistName) {
-      const pl = this.savePlaylist(stationId, null, { name: target.playlistName, items: ids });
+      const pl = this.svc.planning.savePlaylist(stationId, null, { name: target.playlistName, items: ids });
       return { matched: ids.length, missing, playlistId: pl.id };
     }
     for (const id of ids) rt.queue.add(id, 'manual');
@@ -1249,170 +1246,7 @@ export class AirDeckApp {
 
   // ---------- Playlists ----------
 
-  playlists(stationId: string): Playlist[] {
-    return this.rt(stationId).data.playlists ?? [];
-  }
-
-  savePlaylist(stationId: string, id: string | null, input: { name?: string; color?: string; items?: unknown }): Playlist {
-    const rt = this.rt(stationId);
-    const list = (rt.data.playlists ??= []);
-    let pl = id ? list.find((p) => p.id === id) : undefined;
-    if (id && !pl) throw new AppError(404, 'not_found', 'Playlist nicht gefunden');
-    if (!pl) {
-      pl = { id: newId('pl'), name: 'Neue Playlist', color: '#19c3e6', items: [] };
-      list.push(pl);
-    }
-    if (typeof input.name === 'string' && input.name.trim()) pl.name = input.name.trim().slice(0, 80);
-    if (input.color !== undefined) pl.color = safeColor(input.color, pl.color);
-    if (Array.isArray(input.items)) {
-      const valid = new Set(rt.data.library.map((m) => m.id));
-      pl.items = input.items.map(String).filter((x) => valid.has(x)).slice(0, 5000);
-    }
-    this.publish('playlists.changed', stationId, list);
-    this.changed();
-    return pl;
-  }
-
-  deletePlaylist(stationId: string, id: string): void {
-    const rt = this.rt(stationId);
-    if (rt.data.plans?.some((p) => p.playlistId === id)) throw new AppError(409, 'in_use', 'Playlist wird im Sendeplan verwendet');
-    rt.data.playlists = (rt.data.playlists ?? []).filter((p) => p.id !== id);
-    this.publish('playlists.changed', stationId, rt.data.playlists);
-    this.changed();
-  }
-
-  saveQueueAsPlaylist(stationId: string, name: string): Playlist {
-    return this.savePlaylist(stationId, null, { name, items: this.rt(stationId).queue.list().map((q) => q.mediaId) });
-  }
-
-  /** Playlist abspielen: ersetzt die Queue und schaltet per Crossfade weiter. */
-  playPlaylist(stationId: string, id: string): void {
-    const rt = this.rt(stationId);
-    const pl = rt.data.playlists?.find((p) => p.id === id);
-    if (!pl || !pl.items.length) throw new AppError(404, 'empty', 'Playlist ist leer oder existiert nicht');
-    rt.queue.clear();
-    for (const mid of pl.items) rt.queue.add(mid, 'manual');
-    this.publishQueue(stationId);
-    this.advance(stationId);
-  }
-
   // ---------- Zeitplan, Stunden-Uhr, Sendeplan ----------
-
-  planning(stationId: string): unknown {
-    const d = this.rt(stationId).data;
-    const now = new Date();
-    return {
-      jobs: [...(d.jobs ?? [])].sort((a, b) => a.at - b.at), clockEvents: d.clockEvents ?? [], plans: d.plans ?? [],
-      recPlans: d.recPlans ?? [], activePlanId: activeWindow(d.plans ?? [], now)?.id ?? null,
-    };
-  }
-
-  saveJob(stationId: string, input: Record<string, unknown>): ScheduledJob {
-    const rt = this.rt(stationId);
-    const at = typeof input.at === 'string' || typeof input.at === 'number' ? new Date(input.at).getTime() : NaN;
-    if (!Number.isFinite(at)) throw new AppError(400, 'invalid_time', 'Ungültiger Zeitpunkt');
-    const repeat = (['none', 'hourly', 'daily', 'weekdays', 'weekly'] as Repeat[]).includes(input.repeat as Repeat) ? (input.repeat as Repeat) : 'none';
-    const job: ScheduledJob = { id: newId('job'), at, repeat, ...this.jobTarget(stationId, input) };
-    (rt.data.jobs ??= []).push(job);
-    this.planningChanged(stationId);
-    return job;
-  }
-
-  deleteJob(stationId: string, id: string): void {
-    const rt = this.rt(stationId);
-    rt.data.jobs = (rt.data.jobs ?? []).filter((j) => j.id !== id);
-    this.planningChanged(stationId);
-  }
-
-  saveClockEvent(stationId: string, id: string | null, input: Record<string, unknown>): ClockEvent {
-    const rt = this.rt(stationId);
-    const list = (rt.data.clockEvents ??= []);
-    const ints = (v: unknown) => (Array.isArray(v) ? [...new Set(v.map(Number))].sort((a, b) => a - b) : []);
-    const ev: ClockEvent = {
-      id: id ?? newId('clk'), enabled: input.enabled !== false, minutes: ints(input.minutes), hours: ints(input.hours), days: ints(input.days),
-      ...this.jobTarget(stationId, input),
-    };
-    try {
-      validateClock(ev);
-    } catch (err) {
-      throw new AppError(400, 'invalid_clock', (err as Error).message);
-    }
-    const i = list.findIndex((e) => e.id === ev.id);
-    if (id && i === -1) throw new AppError(404, 'not_found', 'Uhr-Event nicht gefunden');
-    if (i === -1) list.push(ev);
-    else list[i] = ev;
-    this.planningChanged(stationId);
-    return ev;
-  }
-
-  deleteClockEvent(stationId: string, id: string): void {
-    const rt = this.rt(stationId);
-    rt.data.clockEvents = (rt.data.clockEvents ?? []).filter((e) => e.id !== id);
-    this.planningChanged(stationId);
-  }
-
-  /** Uhr-Event sofort auslösen (Test). */
-  fireClockEvent(stationId: string, id: string): void {
-    const ev = this.rt(stationId).data.clockEvents?.find((e) => e.id === id);
-    if (!ev) throw new AppError(404, 'not_found', 'Uhr-Event nicht gefunden');
-    this.executeTarget(stationId, ev, 'manual');
-  }
-
-  savePlan(stationId: string, id: string | null, input: Record<string, unknown>): ProgramPlan {
-    const rt = this.rt(stationId);
-    const list = (rt.data.plans ??= []);
-    const plan: ProgramPlan = {
-      id: id ?? newId('plan'), label: String(input.label ?? 'Sendung').slice(0, 80), days: Array.isArray(input.days) ? input.days.map(Number) : [],
-      from: String(input.from ?? ''), to: String(input.to ?? ''), playlistId: String(input.playlistId ?? ''), shuffle: input.shuffle === true,
-    };
-    try {
-      validateWindow(plan);
-    } catch (err) {
-      throw new AppError(400, 'invalid_window', (err as Error).message);
-    }
-    if (!rt.data.playlists?.some((p) => p.id === plan.playlistId)) throw new AppError(400, 'invalid_playlist', 'Playlist wählen');
-    const i = list.findIndex((p) => p.id === plan.id);
-    if (id && i === -1) throw new AppError(404, 'not_found', 'Sendeplan-Eintrag nicht gefunden');
-    if (i === -1) list.push(plan);
-    else list[i] = plan;
-    this.planningChanged(stationId);
-    return plan;
-  }
-
-  deletePlan(stationId: string, id: string): void {
-    const rt = this.rt(stationId);
-    rt.data.plans = (rt.data.plans ?? []).filter((p) => p.id !== id);
-    this.planningChanged(stationId);
-  }
-
-  jobTarget(stationId: string, input: Record<string, unknown>): JobTarget {
-    const kind = input.kind as JobTarget['kind'];
-    const mode = (['now', 'track', 'fx'] as const).includes(input.mode as never) ? (input.mode as JobTarget['mode']) : 'track';
-    const label = typeof input.label === 'string' ? input.label.slice(0, 80) : undefined;
-    const rt = this.rt(stationId);
-    switch (kind) {
-      case 'media':
-        this.media(stationId, String(input.mediaId ?? ''));
-        return { kind, mediaId: String(input.mediaId), mode, label };
-      case 'folder':
-        if (!rt.data.library.some((m) => (m.folder ?? '') === String(input.folder ?? ''))) throw new AppError(400, 'empty_folder', 'Ordner ist leer');
-        return { kind, folder: String(input.folder ?? ''), mode, label };
-      case 'url': {
-        const m = this.addUrlMedia(stationId, { url: String(input.url ?? ''), title: label, durationMs: Number(input.durationMs) || undefined });
-        return { kind: 'media', mediaId: m.id, mode, label: label ?? m.title };
-      }
-      case 'playlist':
-        if (!rt.data.playlists?.some((p) => p.id === input.playlistId)) throw new AppError(400, 'invalid_playlist', 'Playlist wählen');
-        return { kind, playlistId: String(input.playlistId), mode: 'now', label };
-      default:
-        throw new AppError(400, 'invalid_kind', 'Art: media, folder, url oder playlist');
-    }
-  }
-
-  planningChanged(stationId: string): void {
-    this.publish('planning.changed', stationId, this.planning(stationId));
-    this.changed();
-  }
 
   /** Nächsten Titel starten – im Server-Playout direkt, sonst übernimmt das Studio (Event). */
   advance(stationId: string): void {
@@ -1421,188 +1255,7 @@ export class AirDeckApp {
     else this.publish('automation.command', stationId, { action: 'next' });
   }
 
-  executeTarget(stationId: string, t: JobTarget, origin: string): void {
-    const rt = this.rt(stationId);
-    if (t.kind === 'playlist') {
-      this.playPlaylist(stationId, t.playlistId!);
-    } else {
-      let m: MediaItem | undefined;
-      if (t.kind === 'media') m = rt.data.library.find((x) => x.id === t.mediaId);
-      else {
-        const pool = rt.data.library.filter((x) => (x.folder ?? '') === t.folder);
-        const picked = pickFromPool(pool.map((x) => ({ ...x, category: 'music' as const })), 'music', rt.data.history, rt.data.rotation);
-        m = picked ? rt.data.library.find((x) => x.id === picked.id) : undefined;
-      }
-      if (!m) {
-        this.audit.write({ kind: 'schedule', event: 'target_missing', stationId, label: t.label });
-        return;
-      }
-      if (t.mode === 'fx') {
-        const po = this.playouts.get(stationId);
-        if (po) po.playout.playCart(m, true);
-        else this.publish('automation.command', stationId, { action: 'fx', mediaId: m.id });
-      } else {
-        rt.queue.add(m.id, 'schedule', 0);
-        this.publishQueue(stationId);
-        if (t.mode === 'now') this.advance(stationId);
-      }
-    }
-    this.audit.write({ kind: 'schedule', event: 'fired', stationId, origin, label: t.label, mode: t.mode });
-    this.publish('schedule.fired', stationId, { label: t.label, kind: t.kind, mode: t.mode, origin });
-  }
-
-  processSchedules(): void {
-    const now = Date.now();
-    const from = this.lastSchedAt;
-    this.lastSchedAt = now;
-    const minuteChanged = Math.floor(from / 60000) !== Math.floor(now / 60000);
-    for (const [stationId, rt] of this.stations) {
-      // Zeitplan-Jobs
-      const jobs = rt.data.jobs ?? [];
-      const due = dueJobs(jobs, from, now);
-      for (const j of due) {
-        this.executeTarget(stationId, j, 'job');
-        const next = nextOccurrence(j, now);
-        if (next === null) rt.data.jobs = (rt.data.jobs ?? []).filter((x) => x.id !== j.id);
-        else j.at = next;
-      }
-      // Verpasste einmalige Jobs (PC war aus) nicht nachholen, sondern aufräumen/weiterschieben
-      for (const j of rt.data.jobs ?? []) {
-        if (j.at < now - 60_000) {
-          const next = nextOccurrence(j, now);
-          if (next === null) rt.data.jobs = (rt.data.jobs ?? []).filter((x) => x.id !== j.id);
-          else j.at = next;
-        }
-      }
-      if (due.length) this.planningChanged(stationId);
-      if (!minuteChanged) continue;
-      const d = new Date(now);
-      for (const ev of clockDue(rt.data.clockEvents ?? [], d)) this.executeTarget(stationId, ev, 'clock');
-      // Sendeplan-Wechsel: automatisch gefüllte Einträge verwerfen, damit das neue Programm sofort greift
-      const planId = activeWindow(rt.data.plans ?? [], d)?.id ?? null;
-      if (this.activePlanId.has(stationId) && this.activePlanId.get(stationId) !== planId) {
-        rt.queue.pruneOrigins(['clock', 'plan']);
-        this.autoFill(rt);
-        this.publishQueue(stationId);
-        this.publish('planning.changed', stationId, this.planning(stationId));
-      }
-      this.activePlanId.set(stationId, planId);
-      // Aufnahme-Zeitfenster
-      const recPlan = activeWindow(rt.data.recPlans ?? [], d);
-      const active = this.recorders.get(stationId);
-      if (recPlan && !active) this.startRecording(stationId, recPlan.label, recPlan.id);
-      if (!recPlan && active?.rec.planId) this.stopRecording(stationId);
-    }
-  }
-
   // ---------- Recorder / Replays ----------
-
-  recordings(stationId: string): unknown {
-    const rt = this.rt(stationId);
-    const active = this.recorders.get(stationId);
-    return { recordings: [...(rt.data.recordings ?? [])].reverse(), recording: active ? active.rec : null, recPlans: rt.data.recPlans ?? [] };
-  }
-
-  startRecording(stationId: string, label?: string, planId?: string, target = '/live'): Recording {
-    const rt = this.rt(stationId);
-    if (this.recorders.has(stationId)) throw new AppError(409, 'busy', 'Es läuft bereits eine Aufnahme');
-    const dir = join(this.dataDir, 'recordings', stationId);
-    mkdirSync(dir, { recursive: true });
-    const baseLabel = (label?.trim() || `Mitschnitt ${new Date().toLocaleString('de-DE')}`).slice(0, 80);
-    let part = 0;
-    const active: ActiveRecording = {
-      rec: { id: '', label: baseLabel, startedAt: Date.now(), bytes: 0, contentType: '', file: '', planId },
-      stream: null,
-      target,
-      tap: {
-        onStart: (type, init) => {
-          part++;
-          const ext = type.includes('mpeg') ? 'mp3' : type.includes('ogg') ? 'ogg' : type.includes('webm') ? 'webm' : type.includes('aac') ? 'aac' : 'bin';
-          const rec: Recording = { id: newId('rec'), label: part > 1 ? `${baseLabel} (Teil ${part})` : baseLabel, startedAt: Date.now(), bytes: 0, contentType: type, file: '', planId };
-          rec.file = `${rec.id}.${ext}`;
-          active.rec = rec;
-          active.stream = createWriteStream(join(dir, rec.file));
-          (rt.data.recordings ??= []).push(rec);
-          if (init) this.recWrite(active, init);
-          this.publish('recorder.changed', stationId, this.recordings(stationId));
-          this.changed();
-        },
-        onData: (chunk) => this.recWrite(active, chunk),
-        onStop: () => {
-          active.stream?.end();
-          active.stream = null;
-          active.rec.endedAt = Date.now();
-          this.changed();
-        },
-      },
-    };
-    this.recorders.set(stationId, active);
-    this.relayFor(stationId, target).addTap(active.tap);
-    this.audit.write({ kind: 'recorder', event: 'start', stationId, planId });
-    this.publish('recorder.changed', stationId, this.recordings(stationId));
-    return active.rec;
-  }
-
-  stopRecording(stationId: string): void {
-    const active = this.recorders.get(stationId);
-    if (!active) return;
-    this.recorders.delete(stationId);
-    this.relayFor(stationId, active.target).removeTap(active.tap);
-    this.audit.write({ kind: 'recorder', event: 'stop', stationId });
-    this.publish('recorder.changed', stationId, this.recordings(stationId));
-    this.changed();
-  }
-
-  recWrite(active: ActiveRecording, chunk: Buffer): void {
-    if (!active.stream) return;
-    // Platte zu langsam: lieber Lücke als Speicher volllaufen lassen
-    if (active.stream.writableLength > 8 * 1024 * 1024) return;
-    active.stream.write(chunk);
-    active.rec.bytes += chunk.length;
-  }
-
-  recordingFile(stationId: string, id: string): { path: string; rec: Recording } {
-    const rec = this.rt(stationId).data.recordings?.find((r) => r.id === id);
-    if (!rec) throw new AppError(404, 'not_found', 'Aufnahme nicht gefunden');
-    return { path: join(this.dataDir, 'recordings', stationId, rec.file), rec };
-  }
-
-  deleteRecording(stationId: string, id: string): void {
-    const rt = this.rt(stationId);
-    const { path, rec } = this.recordingFile(stationId, id);
-    if (this.recorders.get(stationId)?.rec.id === rec.id) throw new AppError(409, 'busy', 'Aufnahme läuft noch');
-    rmSync(path, { force: true });
-    rt.data.recordings = (rt.data.recordings ?? []).filter((r) => r.id !== id);
-    this.publish('recorder.changed', stationId, this.recordings(stationId));
-    this.changed();
-  }
-
-  saveRecPlan(stationId: string, id: string | null, input: Record<string, unknown>): RecordingPlan {
-    const rt = this.rt(stationId);
-    const list = (rt.data.recPlans ??= []);
-    const plan: RecordingPlan = {
-      id: id ?? newId('rp'), label: String(input.label ?? 'Aufnahme').slice(0, 80), days: Array.isArray(input.days) ? input.days.map(Number) : [],
-      from: String(input.from ?? ''), to: String(input.to ?? ''),
-    };
-    try {
-      validateWindow(plan);
-    } catch (err) {
-      throw new AppError(400, 'invalid_window', (err as Error).message);
-    }
-    const i = list.findIndex((p) => p.id === plan.id);
-    if (i === -1) list.push(plan);
-    else list[i] = plan;
-    this.publish('recorder.changed', stationId, this.recordings(stationId));
-    this.changed();
-    return plan;
-  }
-
-  deleteRecPlan(stationId: string, id: string): void {
-    const rt = this.rt(stationId);
-    rt.data.recPlans = (rt.data.recPlans ?? []).filter((p) => p.id !== id);
-    this.publish('recorder.changed', stationId, this.recordings(stationId));
-    this.changed();
-  }
 
   // ---------- Benachrichtigungen, Webhooks, Now-Playing-Export ----------
 

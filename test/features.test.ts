@@ -26,13 +26,13 @@ test('Ordner, Queue aus Ordner füllen, Playlists, Playlist abspielen', () => {
     assert.equal(app.queueFillFrom('main', { folder: 'Rock', count: 2 }), 2);
     const q = (app.queueView('main') as { items: { mediaId: string }[] }).items.map((x) => x.mediaId);
     assert.deepEqual(new Set(q), new Set(['a', 'b']));
-    const pl = app.saveQueueAsPlaylist('main', 'Rockblock');
+    const pl = app.svc.planning.saveQueueAsPlaylist('main', 'Rockblock');
     assert.equal(pl.items.length, 2);
     app.queueClear('main');
-    app.playPlaylist('main', pl.id);
+    app.svc.planning.playPlaylist('main', pl.id);
     assert.equal((app.queueView('main') as { items: unknown[] }).items.length, 2);
     app.removeMedia('main', 'a');
-    assert.deepEqual(app.playlists('main')[0]!.items, ['b']);
+    assert.deepEqual(app.svc.planning.playlists('main')[0]!.items, ['b']);
   } finally {
     done();
   }
@@ -42,12 +42,12 @@ test('Zeitplan-Job feuert, Wiederholung wird weitergeschoben', async () => {
   const { app, done } = setup();
   try {
     app.start();
-    const job = app.saveJob('main', { at: Date.now() + 300, repeat: 'daily', kind: 'media', mediaId: 'j', mode: 'track' });
+    const job = app.svc.planning.saveJob('main', { at: Date.now() + 300, repeat: 'daily', kind: 'media', mediaId: 'j', mode: 'track' });
     await wait(1100);
     const q = (app.queueView('main') as { items: { mediaId: string; origin: string }[] }).items;
     assert.equal(q[0]?.mediaId, 'j');
     assert.equal(q[0]?.origin, 'schedule');
-    const again = (app.planning('main') as { jobs: { id: string; at: number }[] }).jobs.find((x) => x.id === job.id)!;
+    const again = (app.svc.planning.planning('main') as { jobs: { id: string; at: number }[] }).jobs.find((x) => x.id === job.id)!;
     assert.ok(again.at > Date.now() + 23 * 3600e3, 'täglich → morgen wieder');
   } finally {
     done();
@@ -57,11 +57,11 @@ test('Zeitplan-Job feuert, Wiederholung wird weitergeschoben', async () => {
 test('Stunden-Uhr: Validierung und manuelles Auslösen über der Musik', () => {
   const { app, done } = setup();
   try {
-    assert.throws(() => app.saveClockEvent('main', null, { kind: 'folder', folder: 'Jingles', minutes: [], mode: 'fx' }), /Minute/);
+    assert.throws(() => app.svc.planning.saveClockEvent('main', null, { kind: 'folder', folder: 'Jingles', minutes: [], mode: 'fx' }), /Minute/);
     const events: unknown[] = [];
     app.subscribe((e) => e.type === 'automation.command' && events.push(e.payload));
-    const ev = app.saveClockEvent('main', null, { kind: 'folder', folder: 'Jingles', minutes: [0], hours: [], days: [], mode: 'fx', label: 'Stundenjingle' });
-    app.fireClockEvent('main', ev.id);
+    const ev = app.svc.planning.saveClockEvent('main', null, { kind: 'folder', folder: 'Jingles', minutes: [0], hours: [], days: [], mode: 'fx', label: 'Stundenjingle' });
+    app.svc.planning.fireClockEvent('main', ev.id);
     assert.deepEqual(events, [{ action: 'fx', mediaId: 'j' }]);
   } finally {
     done();
@@ -71,13 +71,13 @@ test('Stunden-Uhr: Validierung und manuelles Auslösen über der Musik', () => {
 test('Sendeplan: im Zeitfenster kommt die Musik aus der Playlist', () => {
   const { app, done } = setup();
   try {
-    const pl = app.savePlaylist('main', null, { name: 'Pop', items: ['c'] });
-    assert.throws(() => app.savePlan('main', null, { label: 'x', days: [], from: '25:00', to: '10:00', playlistId: pl.id }), /Uhrzeit/);
-    app.savePlan('main', null, { label: 'Ganztags Pop', days: [], from: '00:00', to: '00:00', playlistId: pl.id });
+    const pl = app.svc.planning.savePlaylist('main', null, { name: 'Pop', items: ['c'] });
+    assert.throws(() => app.svc.planning.savePlan('main', null, { label: 'x', days: [], from: '25:00', to: '10:00', playlistId: pl.id }), /Uhrzeit/);
+    app.svc.planning.savePlan('main', null, { label: 'Ganztags Pop', days: [], from: '00:00', to: '00:00', playlistId: pl.id });
     app.queueFill('main');
     const items = (app.queueView('main') as { items: { mediaId: string; origin: string }[] }).items;
     assert.ok(items.length > 0 && items.every((x) => x.mediaId === 'c' && x.origin === 'plan'));
-    assert.throws(() => app.deletePlaylist('main', pl.id), /Sendeplan/);
+    assert.throws(() => app.svc.planning.deletePlaylist('main', pl.id), /Sendeplan/);
   } finally {
     done();
   }
@@ -92,7 +92,7 @@ test('M3U Export und Import (Abgleich über Dateiname/Titel, URLs)', () => {
     const r = app.importM3U('main', '#EXTM3U\nC:\\\\Musik\\\\Artist b - Titel b.mp3\n#EXTINF:10,Artist c - Titel c\nirgendwo.mp3\nhttps://stream.example/live\nfehlt.mp3\n', { playlistName: 'Import' });
     assert.equal(r.matched, 3);
     assert.deepEqual(r.missing, ['fehlt.mp3']);
-    assert.equal(app.playlists('main').find((p) => p.id === r.playlistId)!.items.length, 3);
+    assert.equal(app.svc.planning.playlists('main').find((p) => p.id === r.playlistId)!.items.length, 3);
     assert.ok(app.library('main').some((m) => m.url === 'https://stream.example/live' && m.category === 'stream'));
     assert.throws(() => app.addUrlMedia('main', { url: 'file:///etc/passwd' }), /http/);
   } finally {
@@ -105,19 +105,19 @@ test('Recorder schneidet das Sendesignal mit und trennt bei Formatwechsel', asyn
   try {
     const auto = app.engine.list('main').find((s) => s.type === 'automation')!;
     app.studioChunk(admin, 'main', auto.id, 'audio/mpeg', Buffer.from('AAAA'), true);
-    const rec = app.startRecording('main', 'Test');
+    const rec = app.svc.recorder.startRecording('main', 'Test');
     app.studioChunk(admin, 'main', auto.id, 'audio/mpeg', Buffer.from('BBBB'), false);
-    app.stopRecording('main');
+    app.svc.recorder.stopRecording('main');
     await wait(50);
-    const list = (app.recordings('main') as { recordings: { id: string; bytes: number; file: string }[] }).recordings;
+    const list = (app.svc.recorder.recordings('main') as { recordings: { id: string; bytes: number; file: string }[] }).recordings;
     assert.equal(list.length, 1);
     assert.equal(list[0]!.bytes, 4);
-    const { path } = app.recordingFile('main', list[0]!.id);
+    const { path } = app.svc.recorder.recordingFile('main', list[0]!.id);
     assert.ok(existsSync(path) && statSync(path).size === 4);
     assert.ok(rec);
-    app.deleteRecording('main', list[0]!.id);
+    app.svc.recorder.deleteRecording('main', list[0]!.id);
     assert.ok(!existsSync(path));
-    assert.throws(() => app.saveRecPlan('main', null, { label: 'x', days: [9], from: '10:00', to: '11:00' }), /Wochentage/);
+    assert.throws(() => app.svc.recorder.saveRecPlan('main', null, { label: 'x', days: [9], from: '10:00', to: '11:00' }), /Wochentage/);
     void dir;
   } finally {
     done();

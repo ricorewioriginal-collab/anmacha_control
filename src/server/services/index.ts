@@ -9,6 +9,8 @@ import { BridgeService } from './bridges.ts';
 import { LautfmService } from './lautfm.ts';
 import { NextcloudService } from './nextcloud.ts';
 import { NotificationService } from './notifications.ts';
+import { PlanningService } from './planning.ts';
+import { RecorderService } from './recorder.ts';
 import { StatusService } from './status.ts';
 import { SystemService } from './system.ts';
 
@@ -22,6 +24,8 @@ export function createServices(app: AirDeckApp) {
     bridges: new BridgeService(app),
     status: new StatusService(app),
     ai: new AiToolsService(app),
+    recorder: new RecorderService(app),
+    planning: new PlanningService(app),
   };
 }
 

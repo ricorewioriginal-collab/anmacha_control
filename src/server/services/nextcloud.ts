@@ -116,7 +116,7 @@ export class NextcloudService {
   /** Mitschnitt in die Nextcloud hochladen. */
   async nextcloudUploadRecording(stationId: string, recId: string, targetDir: string): Promise<unknown> {
     const { client, root } = this.nc();
-    const { path, rec } = this.app.recordingFile(stationId, recId);
+    const { path, rec } = this.app.svc.recorder.recordingFile(stationId, recId);
     const ext = rec.contentType.includes('ogg') ? 'ogg' : rec.contentType.includes('aac') ? 'aac' : rec.contentType.includes('webm') ? 'webm' : 'mp3';
     const name = `${new Date(rec.startedAt).toISOString().slice(0, 16).replace(/[:T]/g, '-')} ${rec.label}`.replace(/[\\/:*?"<>|]+/g, '_').slice(0, 120);
     const target = cleanPath(`${root}/${targetDir || 'AirDeck-Mitschnitte'}/${name}.${ext}`);
