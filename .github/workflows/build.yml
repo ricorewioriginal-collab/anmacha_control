@@ -279,12 +279,14 @@ jobs:
           for i in $(seq 1 30); do curl -fs http://127.0.0.1:8750/api/v1/health > /dev/null && break; sleep 1; done
           curl -fs http://127.0.0.1:8750/api/v1/health | tee health.json
           grep -q '"ok":true' health.json || (echo "Health-Check fehlgeschlagen" && exit 1)
-          TOKEN=$(sudo journalctl -u airdeck-server --no-pager | grep -A1 "Admin-Token" | tail -1 | tr -d '[:space:]')
+          # journalctl stellt jeder Zeile Zeitstempel/Host/Diensteinheit voran – nur das Token-Muster herausziehen
+          TOKEN=$(sudo journalctl -u airdeck-server --no-pager | grep -o 'ad_[A-Za-z0-9_-]*' | head -1)
           test -n "$TOKEN" || (echo "Admin-Token nicht im Protokoll gefunden" && sudo journalctl -u airdeck-server --no-pager && exit 1)
           # Neustart über die API (wie Setup-Assistent/Update): AirDeck erkennt systemd (INVOCATION_ID) und
           # beendet sich mit Exit-Code 75 – RestartForceExitStatus muss den Dienst neu starten (nicht nur beenden).
           PID1=$(sudo systemctl show -p MainPID --value airdeck-server.service)
-          curl -fs -X POST -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8750/api/v1/system/restart > /dev/null
+          curl -fs -X POST -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8750/api/v1/system/restart > /dev/null \
+            || (echo "Neustart-Aufruf abgelehnt (Token: '${TOKEN:0:6}…')" && exit 1)
           PID2=""
           for i in $(seq 1 30); do
             sleep 1
