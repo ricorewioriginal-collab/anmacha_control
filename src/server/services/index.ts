@@ -8,6 +8,7 @@ import { AuthService } from './auth.ts';
 import { BridgeService } from './bridges.ts';
 import { DeviceService } from './devices.ts';
 import { LautfmService } from './lautfm.ts';
+import { ListenerService } from './listeners.ts';
 import { MediaService } from './media.ts';
 import { NextcloudService } from './nextcloud.ts';
 import { NotificationService } from './notifications.ts';
@@ -34,6 +35,7 @@ export function createServices(app: AirDeckApp) {
     recorder: new RecorderService(app),
     planning: new PlanningService(app),
     setup: new SetupService(app),
+    listeners: new ListenerService(app),
   };
 }
 

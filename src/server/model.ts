@@ -73,6 +73,10 @@ export interface StationData {
   integrations?: IntegrationsConfig;
   ai?: AiStationConfig;
   bridges?: BridgeConfig[];
+  /** Hörer-Interaktion: Einstellungen, Posteingang (Wünsche, Grüße, Sprachnachrichten), Stimmen je Titel */
+  listener?: import('./services/listeners.ts').ListenerConfig;
+  inbox?: import('./services/listeners.ts').InboxItem[];
+  votes?: Record<string, { up: number; down: number }>;
   /** Eingebundene Musikordner (werden indiziert und überwacht, nicht kopiert) */
   linkedFolders?: LinkedFolder[];
   /** Grundbetriebsart des Mode-Managers (AUTO/MANUAL); LIVE/EMERGENCY ergeben sich aus dem Sendezustand */

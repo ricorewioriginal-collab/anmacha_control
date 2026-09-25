@@ -13,6 +13,7 @@ import { MEDIA_CATEGORIES, parseFileName, type MediaCategory } from '../core/aut
 import { OUTPUT_CAPABILITIES } from './icecast.ts';
 import { DSP_PRESETS } from './playout.ts';
 import { toIcecastXml, toM3u, toXspf, type StreamStatus } from './status.ts';
+import { MAX_VOICE_BYTES } from './services/listeners.ts';
 import { PUBLIC_API, RADIOADMIN, allowedPublicPath, allowedRadioadminPath, forward } from './lautfm.ts';
 
 type Params = Record<string, string>;
@@ -478,6 +479,16 @@ export function createHttpServer(app: AirDeckApp, studioDir: string): Server {
     return { ...app.svc.devices.createPairing(c.p, { role: b.role as string, stationIds: b.stationIds }), ...(app.svc.system.appConnect() as object) };
   });
   add('GET', '/api/v1/devices', 'tokens:write', () => app.svc.devices.list());
+  // Hörer-Posteingang und Einstellungen
+  add('GET', '/api/v1/stations/:sid/inbox', 'queue:read', (c) => app.svc.listeners.inbox(sid(c)));
+  add('POST', '/api/v1/stations/:sid/inbox/:id/:action', 'queue:write', (c) => app.svc.listeners.action(c.p, sid(c), c.params.id!, c.params.action!));
+  add('GET', '/api/v1/stations/:sid/inbox/:id/audio', 'queue:read', (c) => {
+    const f = app.svc.listeners.voiceFile(sid(c), c.params.id!);
+    sendFile(c.req, c.res, f.path, f.type);
+    return STREAMED;
+  });
+  add('GET', '/api/v1/stations/:sid/listener', 'queue:read', (c) => app.svc.listeners.config(sid(c)));
+  add('PUT', '/api/v1/stations/:sid/listener', 'stations:write', async (c) => app.svc.listeners.setConfig(c.p, sid(c), await c.body()));
   // Setup-Assistent (nur Administration)
   add('GET', '/api/v1/setup', null, (c) => (globalAdmin(c), app.svc.setup.status()));
   add('PUT', '/api/v1/setup/:step', null, async (c) => (globalAdmin(c), app.svc.setup.apply(c.p, c.params.step!, await c.body())));
@@ -598,7 +609,8 @@ export function createHttpServer(app: AirDeckApp, studioDir: string): Server {
     const path = url.pathname;
     setSecurityHeaders(res);
     const cors = applyCors(req, res);
-    if (req.method === 'OPTIONS') {
+    // Hörerbereich beantwortet seine Vorabanfrage (CORS) selbst – er ist absichtlich von überall erreichbar
+    if (req.method === 'OPTIONS' && !path.startsWith('/api/v1/public/')) {
       res.writeHead(cors ? 204 : 403);
       return void res.end();
     }
@@ -636,6 +648,43 @@ export function createHttpServer(app: AirDeckApp, studioDir: string): Server {
           return json(res, err.status, { error: 'auth', message: err.message });
         }
         return json(res, 400, { error: 'invalid', message: 'Ungültige Anfrage' });
+      }
+    }
+    // Hörerbereich (öffentlich, je Sender einzeln freizuschalten): Info, Suche, Wunsch, Gruß, Stimme, Charts, Sprachnachricht
+    const lp = /^\/api\/v1\/public\/stations\/([a-z0-9-]{1,40})\/listener(?:\/(search|request|message|vote|charts|voice))?$/.exec(path);
+    if (lp) {
+      // von der Senderseite einbettbar: jede Herkunft, aber ohne Anmeldedaten
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+      res.setHeader('Cache-Control', 'no-store');
+      if (req.method === 'OPTIONS') return void res.writeHead(204).end();
+      const [, lsid, action] = lp;
+      const ip = String(req.socket.remoteAddress ?? '');
+      const L = app.svc.listeners;
+      try {
+        if (req.method === 'GET' && !action) return json(res, 200, L.publicInfo(lsid!));
+        if (req.method === 'GET' && action === 'search') return json(res, 200, L.search(lsid!, url.searchParams.get('q') ?? '', ip));
+        if (req.method === 'GET' && action === 'charts') return json(res, 200, L.publicCharts(lsid!));
+        if (req.method === 'POST' && action === 'voice') {
+          // zu große Uploads sofort ablehnen, bevor Daten gelesen werden (sauberes 413 statt Verbindungsabbruch)
+          if (Number(req.headers['content-length'] ?? 0) > MAX_VOICE_BYTES) {
+            res.setHeader('Connection', 'close');
+            return json(res, 413, { error: 'too_large', message: 'Sprachnachricht zu groß' });
+          }
+          const data = await readRaw(req, MAX_VOICE_BYTES + 1);
+          return json(res, 200, L.voice(lsid!, ip, String(req.headers['content-type'] ?? ''), data, { name: url.searchParams.get('name'), text: url.searchParams.get('text') }));
+        }
+        if (req.method === 'POST' && (action === 'request' || action === 'message' || action === 'vote')) {
+          const b = JSON.parse((await readRaw(req, 8 * 1024)).toString('utf8') || '{}') as Record<string, unknown>;
+          return json(res, 200, action === 'request' ? L.request(lsid!, ip, b) : action === 'message' ? L.message(lsid!, ip, b) : L.vote(lsid!, ip, b));
+        }
+        return json(res, 405, { error: 'method_not_allowed' });
+      } catch (err) {
+        if (err instanceof AppError) return json(res, err.status, { error: err.code, message: err.message });
+        if (err instanceof SyntaxError) return json(res, 400, { error: 'invalid_json', message: 'Ungültige Anfrage' });
+        const e = err as { status?: number; message?: string };
+        return json(res, e.status === 413 ? 413 : 400, { error: 'invalid', message: e.status === 413 ? 'Zu groß' : 'Ungültige Anfrage' });
       }
     }
     // Öffentlicher Stream-Status (wie Icecast): /status.json, /status/<sender>.<fmt>, /status/lautfm/<name>.<fmt>
@@ -895,12 +944,14 @@ function serveStatic(req: IncomingMessage, res: ServerResponse, root: string, pa
   if (!isInside(base, file)) return json(res, 403, { error: 'forbidden' });
   if (!existsSync(file) || !statSync(file).isFile()) return json(res, 404, { error: 'not_found' });
   // Öffentliche Seiten: Statusseite und Player-Widget dürfen fremde Streams abspielen, das Widget auch eingebettet werden
-  const publicPage = rel === 'status.html' || rel === 'widget.html';
-  if (rel === 'widget.html') res.removeHeader('X-Frame-Options');
+  const publicPage = rel === 'status.html' || rel === 'widget.html' || rel === 'hoerer.html';
+  // Widget und Hörerseite dürfen auf der Senderseite eingebettet werden
+  const embeddable = rel === 'widget.html' || rel === 'hoerer.html';
+  if (embeddable) res.removeHeader('X-Frame-Options');
   res.setHeader(
     'Content-Security-Policy',
     publicPage
-      ? `default-src 'self'; media-src 'self' http: https: blob:; img-src 'self' data: http: https:; style-src 'self' 'unsafe-inline'; connect-src 'self'; frame-ancestors ${rel === 'widget.html' ? '*' : "'self'"}`
+      ? `default-src 'self'; media-src 'self' http: https: blob:; img-src 'self' data: http: https:; style-src 'self' 'unsafe-inline'; connect-src 'self'; frame-ancestors ${embeddable ? '*' : "'self'"}`
       : "default-src 'self'; media-src 'self' blob:; img-src 'self' data: blob: https:; style-src 'self' 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'",
   );
   res.writeHead(200, { 'Content-Type': STATIC_TYPES[extname(file)] ?? 'application/octet-stream', 'Cache-Control': 'no-cache' });

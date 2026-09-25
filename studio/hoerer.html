@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#07101f">
+<title>Hörerbereich · AirDeck</title>
+<link rel="icon" href="icons/icon-32.png" type="image/png">
+<style>
+:root { --bg: #07101f; --panel: #0d1a30; --line: #1f2d4a; --text: #e6edf8; --muted: #8fa3c4; --accent: #2f8cff; --ok: #22c55e; --bad: #ef4444; color-scheme: dark; }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.5 'Segoe UI', system-ui, Roboto, sans-serif; }
+.wrap { max-width: 640px; margin: 0 auto; padding: 16px; }
+header { display: flex; align-items: center; gap: 12px; margin-bottom: 6px; }
+header img { width: 44px; height: 44px; border-radius: 10px; object-fit: cover; }
+h1 { font-size: 21px; margin: 0; }
+.sub, .muted { color: var(--muted); }
+nav { display: flex; flex-wrap: wrap; gap: 6px; margin: 14px 0; }
+nav button { flex: 1 1 auto; min-height: 42px; border-radius: 10px; border: 1px solid var(--line); background: var(--panel); color: var(--text); font: inherit; cursor: pointer; }
+nav button[aria-pressed="true"] { border-color: var(--accent); background: rgba(47,140,255,.18); }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; margin-bottom: 12px; }
+label { display: block; font-size: 13px; color: var(--muted); margin: 10px 0 4px; }
+input, textarea { width: 100%; background: #0a1426; color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 10px; font: inherit; }
+textarea { min-height: 90px; resize: vertical; }
+.btn { min-height: 44px; padding: 0 16px; border-radius: 10px; border: 1px solid var(--accent); background: var(--accent); color: #fff; font: inherit; font-weight: 600; cursor: pointer; margin-top: 12px; }
+.btn.ghost { background: none; color: var(--text); border-color: var(--line); }
+.btn:disabled { opacity: .5; cursor: default; }
+ul.list { list-style: none; margin: 8px 0 0; padding: 0; }
+ul.list li { display: flex; align-items: center; gap: 8px; padding: 8px 4px; border-bottom: 1px solid var(--line); }
+ul.list li span { flex: 1; overflow-wrap: anywhere; }
+ul.list li.sel { background: rgba(47,140,255,.14); border-radius: 8px; }
+.pill { font-size: 12px; border-radius: 999px; border: 1px solid var(--line); padding: 2px 8px; color: var(--muted); }
+.msg { margin-top: 10px; padding: 8px 10px; border-radius: 8px; }
+.msg.ok { background: rgba(34,197,94,.12); border: 1px solid rgba(34,197,94,.4); }
+.msg.bad { background: rgba(239,68,68,.12); border: 1px solid rgba(239,68,68,.45); }
+.rec { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.dot { width: 12px; height: 12px; border-radius: 50%; background: var(--bad); animation: p 1s infinite; }
+@keyframes p { 50% { opacity: .3; } }
+footer { text-align: center; color: var(--muted); font-size: 12px; padding: 18px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header><img id="logo" src="icons/icon-192.png" alt=""><div><h1 id="name">Hörerbereich</h1><div class="sub" id="welcome"></div></div></header>
+  <nav id="tabs"></nav>
+  <main id="main"><div class="card muted" id="loading">Wird geladen …</div></main>
+  <footer>Powered by AirDeck · AnMaCha Radioproduktion &amp; RicoReWi</footer>
+</div>
+<script src="js/hoerer.js"></script>
+</body>
+</html>

@@ -440,3 +440,6 @@ tr.active-row td { background: rgba(34,197,94,.08); }
 .wizard-bar i { display: block; height: 100%; background: var(--accent, #19c3e6); transition: width .2s; }
 .wizard-error { color: #fecaca; background: rgba(239, 68, 68, .15); border: 1px solid rgba(239, 68, 68, .5); border-radius: 8px; padding: 8px 10px; }
 .track-warn { color: #fbbf24; cursor: help; }
+/* Hörer-Posteingang */
+.inbox-item { border-top: 1px solid var(--line); padding: 10px 2px; display: grid; gap: 6px; }
+.inbox-item.new { border-left: 3px solid var(--accent, #19c3e6); padding-left: 8px; }

@@ -54,6 +54,22 @@ Im Windows-Paket und im Docker-Image ist ffmpeg samt LAME und Opus enthalten.
 - **AGC:** Die Summe wird mit `loudnorm` in Echtzeit auf die Ziel-Lautheit geregelt (EBU R128, TP −1,5 dB). Das bringt ein paar Sekunden Verzögerung im Stream, die Pegel bleiben aber gleichmäßig.
 - **Multiband:** 5 Bänder (`mcompand`) für einen dichten Radio-Sound.
 
+## Hörer-Interaktion
+
+Pro Sender unter „Hörer“ einschaltbar, standardmäßig aus. Die öffentliche Seite `hoerer.html?s=<sender>` darf in fremde Webseiten eingebettet werden. Die API unter `/api/v1/public/stations/<sender>/listener` erlaubt CORS ohne Anmeldedaten.
+
+| Endpunkt | Zweck | Grenze je Absender |
+|---|---|---|
+| `GET …/listener` | freigeschaltete Funktionen, Begrüßung | – |
+| `GET …/listener/search?q=` | Suche in der Musikbibliothek (max. 30 Treffer) | 60/min |
+| `POST …/listener/request` | Musikwunsch `{ mediaId, name?, text? }` | 3 in 10 min |
+| `POST …/listener/message` | Gruß `{ name?, text }` | 3 in 10 min |
+| `POST …/listener/vote` | Stimme `{ mediaId, up }` | 1 je Titel in 12 h |
+| `GET …/listener/charts` | Hörer-Charts | – |
+| `POST …/listener/voice?name=&text=` | Sprachnachricht (`audio/*`, max. 3 MB) | 2/h |
+
+Absender werden über einen gesalzenen Hash der IP unterschieden, die IP selbst wird nicht gespeichert. Im Studio: `GET /stations/:sid/inbox`, `POST /stations/:sid/inbox/:id/(queue|done|delete)`, `GET /stations/:sid/inbox/:id/audio`, `GET|PUT /stations/:sid/listener`. Neue Einträge melden sich per SSE als `inbox.new`.
+
 ## Liquidsoap (optional)
 
 Wer Liquidsoap nutzen will, etwa auf einem Server mit guter Anbindung oder für viele Ziele, lässt AirDeck an Liquidsoap senden. Liquidsoap verteilt dann weiter:

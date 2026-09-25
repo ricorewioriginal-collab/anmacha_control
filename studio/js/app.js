@@ -5,6 +5,7 @@
 import { Api, ApiError, isNativeApp, readToken, saveServer, saveToken, serverBase } from './api.js';
 import { deviceName, loadProfiles, removeProfile, saveProfile, testConnection } from './connect.js';
 import { runSetup } from './setup.js';
+import { mountListeners } from './listeners.js';
 import { AudioEngine, DECKS, SilenceDetector, openMic, recordStream } from './audio.js';
 import { $, CATEGORY_STYLE, clockTime, download, fmt, formDialog, h, hydrateIcons, icon, mediaTitle, run, status } from './ui.js';
 import { mountPlanning, mountRecorder } from './planning.js';
@@ -244,6 +245,7 @@ async function loadStation() {
     ai: mountAi($('view-ai'), ctx),
     nextcloud: mountNextcloud($('view-nextcloud'), ctx),
     bridges: mountBridges($('view-bridges'), ctx),
+    listeners: mountListeners($('view-listeners'), { ...ctx, stationId: () => S.station.id, onUnread: (n) => { const b = $('listener-badge'); b.hidden = !n; b.textContent = String(n); } }),
     users: mountUsers($('view-users'), { api, stations: () => S.stations, me: () => S.me }),
   };
   if (currentView !== 'studio') views[currentView]?.show();
@@ -1523,7 +1525,7 @@ function showView(name) {
   currentView = name;
   for (const b of document.querySelectorAll('#view-tabs button, #bottom-nav button')) b.setAttribute('aria-pressed', String(/** @type {HTMLElement} */ (b).dataset.view === name));
   $('sidebar').classList.remove('open');
-  for (const id of ['studio', 'planning', 'recorder', 'lautfm', 'ai', 'nextcloud', 'bridges', 'users']) $(`view-${id}`).hidden = id !== name;
+  for (const id of ['studio', 'planning', 'recorder', 'lautfm', 'ai', 'nextcloud', 'bridges', 'listeners', 'users']) $(`view-${id}`).hidden = id !== name;
   if (name !== 'studio') views[name]?.show();
 }
 
