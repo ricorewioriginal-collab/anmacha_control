@@ -1,0 +1,32 @@
+# AirDeck-Demo-Image: wie das normale Server-Image (siehe ../../Dockerfile), aber bewusst OHNE ffmpeg.
+# Ohne ffmpeg läuft kein 24/7-Server-Playout und kein echtes Streaming zu Icecast/laut.fm - das Studio
+# lässt sich trotzdem voll ansehen und bedienen (Decks, Cardwall, Queue, Planung, Einstellungen), nur
+# eben ohne echte Dauersendung. Genau das soll die Demo sein: zum Ausprobieren, nicht zum Senden.
+FROM node:22-slim
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ca-certificates tini \
+ && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev --no-audit --no-fund && npm cache clean --force
+COPY src ./src
+COPY studio ./studio
+COPY README.md HAFTUNGSAUSSCHLUSS.md ./
+
+ENV NODE_ENV=production \
+    AIRDECK_DATA=/data \
+    AIRDECK_HOST=0.0.0.0 \
+    AIRDECK_PORT=8750
+
+RUN mkdir -p /data && chown node:node /data
+USER node
+VOLUME ["/data"]
+EXPOSE 8750
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+  CMD node -e "fetch('http://127.0.0.1:'+(process.env.AIRDECK_PORT||8750)+'/api/v1/health').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"
+
+ENTRYPOINT ["/usr/bin/tini", "--"]
+CMD ["node", "src/server/main.ts", "--headless"]

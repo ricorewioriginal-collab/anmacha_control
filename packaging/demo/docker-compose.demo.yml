@@ -1,0 +1,26 @@
+# Öffentliche AirDeck-Demo (nur zum Ausprobieren, keine echte 24/7-Sendung, siehe README.md in diesem Ordner).
+# Nur intern erreichbar (127.0.0.1:8751) - der bestehende Webserver auf dem Server macht HTTPS und leitet
+# von airdeck-demo.<eure-domain> hierher weiter (siehe nginx.demo.conf bzw. Caddyfile.demo).
+#
+# Start:   docker compose -f packaging/demo/docker-compose.demo.yml up -d
+# Reset:   packaging/demo/reset-demo.sh (idealerweise per Cron alle 10 Minuten, siehe README.md)
+services:
+  airdeck-demo:
+    build:
+      context: ../..
+      dockerfile: packaging/demo/Dockerfile.demo
+    image: airdeck-demo:latest
+    container_name: airdeck-demo
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8751:8750"
+    volumes:
+      - airdeck-demo-data:/data
+    environment:
+      TZ: Europe/Berlin
+      # SQLite statt PostgreSQL: die Demo setzt sich ohnehin alle 10 Minuten zurück, ein zweiter
+      # Datenbank-Container wäre hier nur unnötiger Ressourcenverbrauch.
+      AIRDECK_DB: sqlite
+
+volumes:
+  airdeck-demo-data:

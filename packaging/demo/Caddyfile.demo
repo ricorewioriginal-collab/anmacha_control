@@ -1,0 +1,9 @@
+# Falls der bestehende Webserver Caddy ist: diesen Block in den vorhandenen Caddyfile einfügen
+# (z. B. per "import" oder direkt reinkopieren). Caddy holt sich das Zertifikat für die Subdomain
+# automatisch selbst, dafür muss airdeck-demo.ricorewi-radio.de per DNS auf den Server zeigen.
+
+airdeck-demo.ricorewi-radio.de {
+	reverse_proxy 127.0.0.1:8751 {
+		flush_interval -1
+	}
+}
