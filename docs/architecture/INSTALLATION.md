@@ -54,6 +54,14 @@ Ohne Paket: `airdeck-server-<version>-linux-x64.tar.gz` entpacken, dann `sudo ./
 
 Jeder Schritt lässt sich überspringen und später unter **Administration** ändern. Konfigurationsdateien muss niemand bearbeiten.
 
+**Stand der Umsetzung** (`src/server/services/setup.ts`, `studio/js/setup.js`):
+- Der Assistent öffnet sich beim ersten Start automatisch für die Administration. Bestehende Installationen mit Titeln, Ausgängen oder Konten bleiben unberührt. Erneut starten geht über „Einrichtung (Assistent)“ im Menü.
+- Betriebsart, Datenbank, Netzwerk und Medienordner werden in `airdeck.conf` geschrieben, Kommentare bleiben erhalten. Sie gelten nach einem Neustart, den der Assistent selbst auslöst. Unter Docker/systemd beendet sich AirDeck dafür mit Code 75 und der Dienst-Manager startet neu.
+- Datenbank-Wechsel: Die Verbindung wird getestet, der bisherige Stand in die neue Datenbank übernommen und das Passwort verschlüsselt im Secret-Store abgelegt (nicht in der Datei).
+- Speicher: **Vorhandene Musikordner einbinden**. Die Titel bleiben, wo sie sind. AirDeck indiziert sie, gleicht jede Minute ab und löscht nie eine Originaldatei. Ein nicht erreichbares Laufwerk entfernt nichts aus der Bibliothek.
+- KI lokal: Ollama wird unter `http://127.0.0.1:11434` gesucht und als Text-Anbieter eingetragen.
+- Noch nicht im Assistenten: PostgreSQL automatisch installieren (kommt mit dem Windows-Installer, Schritt 7), Logo, Zeitzone, Sendeuhr-Vorlage und die Stream-Verbindungsprüfung (ein Ausgang zeigt seinen Zustand direkt im Studio).
+
 ## Systemanforderungen
 
 Mindestwerte für Hardware werden erst veröffentlicht, wenn sie gemessen sind. Die Messung ist Teil der Installationstests. Bekannte Messwerte bisher:

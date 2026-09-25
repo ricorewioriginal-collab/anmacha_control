@@ -51,6 +51,8 @@ export interface MediaItem {
   truePeakDb?: number;
   /** Herkunft, z. B. "nextcloud:/Radio/Hits/x.mp3" (verhindert doppelte Übernahme) */
   source?: string;
+  /** Eingebundener Ordner: absoluter Pfad der Originaldatei (wird nie kopiert und nie gelöscht) */
+  linkedPath?: string;
 }
 
 export interface QueueEntry {

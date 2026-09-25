@@ -4,6 +4,7 @@
 
 import { Api, ApiError, isNativeApp, readToken, saveServer, saveToken, serverBase } from './api.js';
 import { deviceName, loadProfiles, removeProfile, saveProfile, testConnection } from './connect.js';
+import { runSetup } from './setup.js';
 import { AudioEngine, DECKS, SilenceDetector, openMic, recordStream } from './audio.js';
 import { $, CATEGORY_STYLE, clockTime, download, fmt, formDialog, h, hydrateIcons, icon, mediaTitle, run, status } from './ui.js';
 import { mountPlanning, mountRecorder } from './planning.js';
@@ -107,6 +108,11 @@ async function boot() {
   bindStatic();
   await loadStation();
   if (pref(AUDIO_PREF.auto) === '1') toggleListen(true);
+  // Erster Start: Setup-Assistent (nur Administration, bestehende Installationen werden nicht gestört)
+  if (isGlobalAdmin()) {
+    const st = await api.get('/setup').catch(() => null);
+    if (st?.required) await openSetup();
+  }
   setInterval(tick, 200);
   setInterval(clock, 1000);
   clock();
@@ -150,6 +156,17 @@ async function askToken(msg, prev) {
   saveToken(r.token ?? null);
   if (r.base) saveProfile({ base: r.base, name: r.serverName ?? 'AirDeck', token: r.token ?? '', lastConnected: new Date().toISOString() });
   location.reload();
+}
+
+const isGlobalAdmin = () => !!S.me && S.me.scopes?.includes('*') && S.me.stationIds?.includes('*');
+
+/** Setup-Assistent öffnen (erster Start oder über das Menü). */
+async function openSetup() {
+  await runSetup({
+    api,
+    onAudio: () => editAudio(),
+    onDone: () => void run(async () => { S.stations = await api.get('/stations'); renderStationSelect(); await loadStation(); }),
+  });
 }
 
 /** Gespeicherten Server wählen oder neuen hinzufügen (App / entfernter Server). */
@@ -1329,6 +1346,8 @@ function bindStatic() {
   $('nav-users').hidden = !isAdmin;
   $('btn-logout').hidden = !S.me?.user;
   $('btn-server').hidden = !(isNativeApp() || serverBase());
+  $('btn-setup').hidden = !isGlobalAdmin();
+  $('btn-setup').addEventListener('click', () => void openSetup());
   $('btn-server').addEventListener('click', () => void switchServer());
   $('btn-password').hidden = !S.me?.user;
   $('btn-logout').addEventListener('click', () => confirm('Abmelden?') && logout());

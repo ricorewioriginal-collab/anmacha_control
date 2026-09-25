@@ -23,7 +23,7 @@ Media/
 ```
 
 - **Audiodateien liegen nie in der Datenbank.** Dort stehen nur Metadaten und der Pfad relativ zum Medienverzeichnis. So lassen sich Medien verschieben, ohne die Datenbank anzufassen.
-- Neu: **Ordner einbinden statt kopieren.** Vorhandene Musikordner werden indiziert und nicht dupliziert. Hochgeladene Dateien landen in `music/` bzw. im gewählten Ordner.
+- **Ordner einbinden statt kopieren** (umgesetzt): Vorhandene Musikordner werden indiziert, jede Minute abgeglichen (neue Dateien kommen dazu, gelöschte verschwinden) und nie kopiert oder gelöscht. Unterordner werden zu Bibliotheksordnern, Interpret und Titel kommen aus dem Dateinamen bzw. den Tags. API: `GET/POST/DELETE /api/v1/stations/<sender>/folders/linked`. Hochgeladene Dateien landen weiter im Medienordner.
 - Mögliche Medienquellen: lokal, Netzlaufwerk (SMB/NFS über das Betriebssystem), Nextcloud (WebDAV-Import, vorhanden). S3 folgt später als Sicherungsziel, nicht als Abspielquelle.
 
 ## Sicherung

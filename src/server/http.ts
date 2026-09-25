@@ -478,6 +478,27 @@ export function createHttpServer(app: AirDeckApp, studioDir: string): Server {
     return { ...app.svc.devices.createPairing(c.p, { role: b.role as string, stationIds: b.stationIds }), ...(app.svc.system.appConnect() as object) };
   });
   add('GET', '/api/v1/devices', 'tokens:write', () => app.svc.devices.list());
+  // Setup-Assistent (nur Administration)
+  add('GET', '/api/v1/setup', null, (c) => (globalAdmin(c), app.svc.setup.status()));
+  add('PUT', '/api/v1/setup/:step', null, async (c) => (globalAdmin(c), app.svc.setup.apply(c.p, c.params.step!, await c.body())));
+  add('POST', '/api/v1/system/restart', null, (c) => {
+    globalAdmin(c);
+    if (!app.requestRestart) throw new AppError(501, 'unsupported', 'Neustart ist hier nicht möglich – bitte AirDeck von Hand neu starten');
+    app.audit.write({ kind: 'system', event: 'restart', actor: c.p.id });
+    setTimeout(() => app.requestRestart?.(), 300).unref();
+    return { restarting: true };
+  });
+  // Eingebundene Musikordner (Serverpfade – nur Administration)
+  add('GET', '/api/v1/stations/:sid/folders/linked', 'media:read', (c) => app.svc.media.linkedFolders(sid(c)));
+  add('POST', '/api/v1/stations/:sid/folders/linked', null, async (c) => (globalAdmin(c), app.svc.media.linkFolder(sid(c), await c.body())));
+  add('POST', '/api/v1/stations/:sid/folders/linked/scan', null, async (c) => {
+    globalAdmin(c);
+    const path = String((await c.body()).path ?? '');
+    const f = app.svc.media.linkedFolders(sid(c)).find((x) => x.path === path);
+    if (!f) throw new AppError(404, 'not_found', 'Ordner ist nicht eingebunden');
+    return app.svc.media.scanFolder(sid(c), f);
+  });
+  add('DELETE', '/api/v1/stations/:sid/folders/linked', null, async (c) => (globalAdmin(c), app.svc.media.unlinkFolder(sid(c), String((await c.body()).path ?? ''))));
   add('DELETE', '/api/v1/devices/:id', 'tokens:write', (c) => app.svc.devices.revoke(c.p, c.params.id!));
   // andere AirDeck-Server im Netz finden (für „Server hinzufügen“ auf dem Desktop)
   add('GET', '/api/v1/discover', null, async () => {

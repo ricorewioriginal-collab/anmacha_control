@@ -34,6 +34,8 @@ export interface DocStore {
   flushSync(): void;
   onWrite: ((name: string) => void) | null;
   status(): DocStoreStatus;
+  /** Namen aller vorhandenen Dokumente (für Datenübernahme in eine andere Datenbank) */
+  names(): string[];
 }
 
 /** Namen der bisherigen JSON-Dateien im Datenordner, die in die Datenbank übernommen werden. */
@@ -100,6 +102,10 @@ export class FileDocStore implements DocStore {
 
   status(): DocStoreStatus {
     return { kind: 'file', state: 'ok', lastError: null, lastWriteAt: this.lastWriteAt, pending: this.timers.size };
+  }
+
+  names(): string[] {
+    return [...new Set([...KNOWN_DOCS.filter((n) => existsSync(this.file(n))), ...this.values.keys(), ...this.getters.keys()])];
   }
 }
 
@@ -319,6 +325,15 @@ export class DbDocStore implements DocStore {
     } catch (err) {
       this.failed(names, err);
     }
+  }
+
+  names(): string[] {
+    return [...new Set([...this.values.keys(), ...this.getters.keys()])];
+  }
+
+  /** Aktuellen Wert eines Dokuments lesen (lebende Dokumente über ihren Getter). */
+  snapshot(name: string): unknown {
+    return this.current(name);
   }
 
   status(): DocStoreStatus {

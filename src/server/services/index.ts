@@ -13,6 +13,7 @@ import { NextcloudService } from './nextcloud.ts';
 import { NotificationService } from './notifications.ts';
 import { PlanningService } from './planning.ts';
 import { RecorderService } from './recorder.ts';
+import { SetupService } from './setup.ts';
 import { StationService } from './stations.ts';
 import { StatusService } from './status.ts';
 import { SystemService } from './system.ts';
@@ -32,6 +33,7 @@ export function createServices(app: AirDeckApp) {
     ai: new AiToolsService(app),
     recorder: new RecorderService(app),
     planning: new PlanningService(app),
+    setup: new SetupService(app),
   };
 }
 

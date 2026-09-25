@@ -144,7 +144,7 @@ Die bisherigen Namen (`playout.state` usw.) bleiben eine Version lang als Alias 
 3. Aufteilung von `app.ts` in Dienstmodule auf Repositories – **umgesetzt** (`src/server/services/`, `app.ts` von 2 776 auf rund 1 000 Zeilen; der Sendekern folgt mit Schritt 4)
 4. Audio-Engine für alle Quellen und Mode-Manager (AUTO/MANUAL/LIVE/EMERGENCY) – **umgesetzt** (`src/server/playout.ts` Sendebus mit Live-Kanälen, `src/core/mode.ts`; Tests `test/live-bus.test.ts` mit echtem ffmpeg)
 5. Serververbindung: Erkennung, Verbindungstest, Profile, Versionsprüfung, Kopplung, Admin-Konto auch lokal – **umgesetzt** (`services/devices.ts`, `discovery.ts`, `studio/js/connect.js`). Statt eines Pflicht-Admin-Kontos auf dem Desktop: Kopplung per Code. Das Admin-Konto legt der Setup-Assistent (Schritt 6) an
-6. Setup-Assistent (erster Start)
+6. Setup-Assistent (erster Start) – **umgesetzt**, dazu eingebundene Musikordner
 7. Windows-Dienst und Installer, Linux-Paket mit systemd, Docker mit PostgreSQL
 8. laut.fm gegen echtes System prüfen (PUT/SOURCE), Android nativ (Foreground-Service, Kopplung, Live)
 9. Lokale KI, Sync (Hybrid), Backup/Restore, Update mit Rollback, Installationstests

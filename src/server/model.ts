@@ -73,8 +73,20 @@ export interface StationData {
   integrations?: IntegrationsConfig;
   ai?: AiStationConfig;
   bridges?: BridgeConfig[];
+  /** Eingebundene Musikordner (werden indiziert und überwacht, nicht kopiert) */
+  linkedFolders?: LinkedFolder[];
   /** Grundbetriebsart des Mode-Managers (AUTO/MANUAL); LIVE/EMERGENCY ergeben sich aus dem Sendezustand */
   mode?: BaseMode;
+}
+
+export interface LinkedFolder {
+  /** absoluter Pfad auf dem Server/PC */
+  path: string;
+  category: import('../core/automation.ts').MediaCategory;
+  /** Zeitpunkt der letzten vollständigen Durchsicht */
+  scannedAt?: number;
+  files?: number;
+  error?: string;
 }
 
 export interface Playlist {

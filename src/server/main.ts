@@ -156,6 +156,8 @@ async function main(): Promise<void> {
 
   // Datenbank öffnen (Migrationen laufen dabei), bisherige JSON-Dateien einmalig übernehmen
   mkdirSync(dataDir, { recursive: true });
+  // Passwort der Server-Datenbank: Umgebung, sonst verschlüsselt im Secret-Store (vom Setup-Assistenten gesetzt)
+  if (config.database.provider !== 'sqlite' && !config.database.password) config.database.password = secrets.get('db:password');
   const db = await connectDatabase();
   const docs = await DbDocStore.open(db);
   const imported = await importJsonFiles(dataDir, docs);
@@ -217,20 +219,37 @@ async function main(): Promise<void> {
   server.listen(port, host, () => {
     app.start();
     console.log(`AirDeck läuft auf http://${host}:${port}  (Daten: ${dataDir})`);
-    if (desktop) openStudio(`http://${localHost}:${port}/#token=${app.svc.auth.desktopToken()}`);
+    // nach einem Neustart aus dem Programm heraus ist das Studio-Fenster schon offen
+    if (desktop && !process.env.AIRDECK_RESTARTED) openStudio(`http://${localHost}:${port}/#token=${app.svc.auth.desktopToken()}`);
     if (packaged && process.platform === 'win32' && !argv.includes('--no-tray')) startTray(logFile);
   });
 
+  let exitCode = 0;
   const stop = () => {
     console.log('AirDeck wird beendet …');
     discovery?.close();
     app.shutdown();
     server.close();
-    setTimeout(() => process.exit(0), 3000).unref();
+    setTimeout(() => process.exit(exitCode), 3000).unref();
     // letzten Stand in die Datenbank schreiben, dann (falls eingerichtet) abgleichen
     const final = docs.flush().catch((err) => console.error('Letztes Speichern fehlgeschlagen:', (err as Error).message))
       .then(() => (sync.config.backend !== 'local' ? sync.pushNow(app.stateJson()).catch(() => {}) : undefined));
-    void final.then(() => sync.close()).then(() => db.close()).finally(() => process.exit(0));
+    void final.then(() => sync.close()).then(() => db.close()).finally(() => process.exit(exitCode));
+  };
+  /**
+   * Neustart (z. B. nach dem Setup-Assistenten): Unter Docker/systemd beendet sich AirDeck mit Code 75 und der
+   * Dienst-Manager startet neu. Sonst startet AirDeck sich selbst neu – erst beim Beenden, wenn der Port frei ist.
+   */
+  app.requestRestart = () => {
+    const supervised = process.pid === 1 || !!process.env.INVOCATION_ID || process.env.AIRDECK_SUPERVISED === '1';
+    if (supervised) exitCode = 75;
+    else {
+      const args = packaged ? process.argv.slice(2) : process.argv.slice(1);
+      process.once('exit', () => {
+        spawn(process.execPath, args, { detached: true, stdio: 'ignore', windowsHide: true, env: { ...process.env, AIRDECK_RESTARTED: '1' } }).unref();
+      });
+    }
+    stop();
   };
   app.requestShutdown = stop;
   process.on('SIGINT', stop);

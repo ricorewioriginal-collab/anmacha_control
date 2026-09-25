@@ -1,13 +1,18 @@
-// Medien: Bibliothek, Tags und Laufzeit, Lautheitsanalyse (EBU R128), URL-Streams, M3U, Cover.
+// Medien: Bibliothek, Tags und Laufzeit, Lautheitsanalyse (EBU R128), URL-Streams, M3U, Cover,
+// eingebundene Ordner (vorhandene Musiksammlung wird indiziert und überwacht statt kopiert).
 
 import type { AirDeckApp } from '../app.ts';
 import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync, rmSync } from 'node:fs';
-import { join } from 'node:path';
-import { MEDIA_CATEGORIES, type MediaItem } from '../../core/automation.ts';
+import { existsSync, mkdirSync, rmSync, statSync } from 'node:fs';
+import { readdir } from 'node:fs/promises';
+import { isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { MEDIA_CATEGORIES, parseFileName, type MediaCategory, type MediaItem } from '../../core/automation.ts';
 import { parseM3U, toM3U } from '../../core/scheduler.ts';
 import { analyzeLoudness, probeMedia } from '../ffmpeg.ts';
-import { AppError, newId } from '../model.ts';
+import { AUDIO_FILE_RE, AppError, newId, type LinkedFolder } from '../model.ts';
+
+const MAX_LINKED_FILES = 20_000;
+const MAX_DEPTH = 8;
 import { writeFileAtomic } from '../store.ts';
 
 export class MediaService {
@@ -29,6 +34,7 @@ export class MediaService {
 
   mediaPath(stationId: string, m: MediaItem): string {
     if (m.url) return m.url;
+    if (m.linkedPath) return m.linkedPath;
     return join(this.app.mediaDir, stationId, m.file);
   }
 
@@ -127,7 +133,8 @@ export class MediaService {
     rt.queue.prune((mid) => mid !== id);
     for (const c of rt.data.cardwall) if (c.mediaId === id) c.mediaId = null;
     for (const pl of rt.data.playlists ?? []) pl.items = pl.items.filter((x) => x !== id);
-    if (!m.url) rmSync(this.mediaPath(stationId, m), { force: true });
+    // eingebundene Dateien gehören dem Benutzer: nur aus der Bibliothek entfernen, nie löschen
+    if (!m.url && !m.linkedPath) rmSync(this.mediaPath(stationId, m), { force: true });
     this.app.publish('library.changed', stationId, { removed: id });
     this.app.publishQueue(stationId);
     this.app.changed();
@@ -208,4 +215,120 @@ export class MediaService {
     this.app.publishQueue(stationId);
     return { matched: ids.length, missing };
   }
+
+  // ---------- Eingebundene Ordner ----------
+
+  linkedFolders(stationId: string): LinkedFolder[] {
+    return this.app.rt(stationId).data.linkedFolders ?? [];
+  }
+
+  /** Vorhandenen Musikordner einbinden: Dateien bleiben, wo sie sind; AirDeck indiziert und überwacht sie. */
+  async linkFolder(stationId: string, input: { path?: unknown; category?: unknown }): Promise<LinkedFolder> {
+    const rt = this.app.rt(stationId);
+    const raw = String(input.path ?? '').trim();
+    if (!raw || !isAbsolute(raw)) throw new AppError(400, 'invalid_path', 'Vollständigen Ordnerpfad angeben (z. B. D:\\Musik oder /srv/musik)');
+    const path = resolve(raw);
+    let st;
+    try {
+      st = statSync(path);
+    } catch {
+      throw new AppError(400, 'not_found', 'Ordner nicht gefunden oder nicht lesbar');
+    }
+    if (!st.isDirectory()) throw new AppError(400, 'not_directory', 'Das ist kein Ordner');
+    // der eigene Datenordner wird nicht eingebunden (Medien liegen dort bereits)
+    const inside = (a: string, b: string) => a === b || a.startsWith(b + sep);
+    if (inside(path, resolve(this.app.dataDir)) || inside(resolve(this.app.dataDir), path)) throw new AppError(400, 'invalid_path', 'Der AirDeck-Datenordner kann nicht eingebunden werden');
+    const list = (rt.data.linkedFolders ??= []);
+    if (list.some((f) => inside(path, f.path) || inside(f.path, path))) throw new AppError(409, 'exists', 'Dieser Ordner (oder ein über-/untergeordneter) ist bereits eingebunden');
+    const category = (MEDIA_CATEGORIES as readonly string[]).includes(String(input.category)) ? (input.category as MediaCategory) : 'music';
+    const f: LinkedFolder = { path, category };
+    list.push(f);
+    this.app.changed();
+    this.app.audit.write({ kind: 'media', event: 'folder_linked', stationId, path });
+    await this.scanFolder(stationId, f);
+    return f;
+  }
+
+  /** Einbindung lösen: Einträge verschwinden aus der Bibliothek, die Dateien bleiben unangetastet. */
+  unlinkFolder(stationId: string, path: string): { removed: number } {
+    const rt = this.app.rt(stationId);
+    const f = (rt.data.linkedFolders ?? []).find((x) => x.path === path);
+    if (!f) throw new AppError(404, 'not_found', 'Ordner ist nicht eingebunden');
+    rt.data.linkedFolders = rt.data.linkedFolders!.filter((x) => x !== f);
+    const gone = rt.data.library.filter((m) => m.source === `folder:${f.path}`).map((m) => m.id);
+    for (const id of gone) this.removeMedia(stationId, id);
+    this.app.changed();
+    this.app.audit.write({ kind: 'media', event: 'folder_unlinked', stationId, path, removed: gone.length });
+    return { removed: gone.length };
+  }
+
+  private scanning = false;
+
+  /** Alle eingebundenen Ordner abgleichen (vom Takt des Kerns aufgerufen, nie parallel). */
+  async scanLinked(): Promise<void> {
+    if (this.scanning) return;
+    this.scanning = true;
+    try {
+      for (const [sid, rt] of this.app.stations) for (const f of [...(rt.data.linkedFolders ?? [])]) await this.scanFolder(sid, f);
+    } finally {
+      this.scanning = false;
+    }
+  }
+
+  /** Neue Dateien aufnehmen, verschwundene aus der Bibliothek nehmen. Asynchron, damit der Sendebetrieb nicht stockt. */
+  async scanFolder(stationId: string, f: LinkedFolder): Promise<{ added: number; removed: number }> {
+    const rt = this.app.stations.get(stationId);
+    if (!rt) return { added: 0, removed: 0 };
+    const found = new Map<string, string>();
+    const walk = async (dir: string, depth: number): Promise<void> => {
+      if (depth > MAX_DEPTH || found.size >= MAX_LINKED_FILES) return;
+      let entries;
+      try {
+        entries = await readdir(dir, { withFileTypes: true });
+      } catch {
+        return;
+      }
+      for (const e of entries) {
+        if (found.size >= MAX_LINKED_FILES) return;
+        if (e.name.startsWith('.')) continue;
+        const p = join(dir, e.name);
+        if (e.isDirectory()) await walk(p, depth + 1);
+        else if (e.isFile() && AUDIO_FILE_RE.test(e.name)) found.set(p, relative(f.path, dir).split(sep).join(' / '));
+      }
+    };
+    try {
+      statSync(f.path);
+    } catch {
+      // Laufwerk/Netzlaufwerk gerade nicht da: nichts entfernen, nur melden
+      f.error = 'Ordner nicht erreichbar';
+      return { added: 0, removed: 0 };
+    }
+    await walk(f.path, 0);
+    const source = `folder:${f.path}`;
+    const known = new Map(rt.data.library.filter((m) => m.source === source).map((m) => [m.linkedPath!, m]));
+    let added = 0;
+    for (const [p, sub] of found) {
+      if (known.has(p)) continue;
+      const name = p.slice(p.lastIndexOf(sep) + 1);
+      const meta = parseFileName(name);
+      this.addMedia(stationId, {
+        id: newId('m'), title: meta.title || name, artist: meta.artist, category: f.category, file: '', linkedPath: p,
+        durationMs: null, addedAt: Date.now(), folder: (sub || undefined)?.slice(0, 80), originalName: name, source,
+      });
+      added++;
+    }
+    let removed = 0;
+    for (const [p, m] of known) {
+      if (found.has(p)) continue;
+      this.removeMedia(stationId, m.id);
+      removed++;
+    }
+    f.scannedAt = Date.now();
+    f.files = found.size;
+    f.error = found.size >= MAX_LINKED_FILES ? `Nur die ersten ${MAX_LINKED_FILES} Dateien übernommen` : undefined;
+    if (added || removed) this.app.audit.write({ kind: 'media', event: 'folder_scan', stationId, path: f.path, added, removed });
+    this.app.changed();
+    return { added, removed };
+  }
+
 }

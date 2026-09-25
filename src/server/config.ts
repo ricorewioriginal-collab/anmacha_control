@@ -193,3 +193,66 @@ declare global {
   // wird im gebündelten Build per Banner gesetzt (scripts/build.mjs)
   var __AIRDECK_VERSION: string | undefined;
 }
+
+/**
+ * Werte in airdeck.conf setzen, ohne Kommentare und übrige Einträge zu verlieren
+ * (Setup-Assistent, Administration). Schlüssel wie beim Lesen: „mode“, „network.port“, „database.url“ …
+ * null entfernt einen Eintrag.
+ */
+export function updateConf(file: string, patch: Record<string, string | number | null>): void {
+  const lines = existsSync(file) ? readFileSync(file, 'utf8').replace(/^\uFEFF/, '').split(/\r?\n/) : [];
+  const todo = new Map(Object.entries(patch));
+  const sectionOf = (k: string) => (k.includes('.') ? k.slice(0, k.indexOf('.')) : '');
+  const keyOf = (k: string) => (k.includes('.') ? k.slice(k.indexOf('.') + 1) : k);
+  let section = '';
+  const out: string[] = [];
+  const flush = (sec: string) => {
+    // noch nicht gesetzte Schlüssel dieses Abschnitts am Abschnittsende einfügen
+    for (const [k, v] of [...todo]) {
+      if (sectionOf(k) !== sec || v === null) continue;
+      out.push(`${keyOf(k)} = ${v}`);
+      todo.delete(k);
+    }
+  };
+  for (const line of lines) {
+    const sec = /^\s*\[([\w.-]+)\]\s*$/.exec(line);
+    if (sec) {
+      // Leerzeilen am Abschnittsende behalten die Einfügung vor dem nächsten Abschnitt
+      const trail: string[] = [];
+      while (out.length && out[out.length - 1]!.trim() === '') trail.unshift(out.pop()!);
+      flush(section);
+      out.push(...trail);
+      section = sec[1]!.toLowerCase();
+      out.push(line);
+      continue;
+    }
+    const kv = /^\s*([\w.-]+)\s*=/.exec(line);
+    const full = kv ? (section ? `${section}.${kv[1]!.toLowerCase()}` : kv[1]!.toLowerCase()) : null;
+    if (full && todo.has(full)) {
+      const v = todo.get(full)!;
+      todo.delete(full);
+      if (v !== null) out.push(`${kv![1]} = ${v}`);
+      continue;
+    }
+    out.push(line);
+  }
+  const trail: string[] = [];
+  while (out.length && out[out.length - 1]!.trim() === '') trail.unshift(out.pop()!);
+  flush(section);
+  out.push(...trail);
+  // Schlüssel für Abschnitte, die es noch nicht gibt
+  const rest = new Map<string, string[]>();
+  for (const [k, v] of todo) {
+    if (v === null) continue;
+    const sec = sectionOf(k);
+    if (!rest.has(sec)) rest.set(sec, []);
+    rest.get(sec)!.push(`${keyOf(k)} = ${v}`);
+  }
+  for (const [sec, kvs] of rest) {
+    if (sec === '') out.unshift(...kvs);
+    else out.push(...(out.length && out[out.length - 1]!.trim() !== '' ? [''] : []), `[${sec}]`, ...kvs);
+  }
+  mkdirSync(dirname(file), { recursive: true });
+  writeFileSync(file, out.join('\n').replace(/\n*$/, '\n'), 'utf8');
+}
+

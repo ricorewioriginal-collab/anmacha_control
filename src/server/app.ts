@@ -62,6 +62,8 @@ export class AirDeckApp {
   readonly mode: Mode;
   readonly version: string;
   readonly paths: AirDeckConfig['paths'];
+  /** Vollständige Konfiguration (airdeck.conf), null in Tests/Hilfsinstanzen ohne Datei */
+  readonly config: AirDeckConfig | null;
   ffmpegRetry: NodeJS.Timeout | null = null;
   tickCount = 0;
   readonly notifier: Notifier;
@@ -85,6 +87,8 @@ export class AirDeckApp {
   listenHost = '127.0.0.1';
   /** Vom Einstiegspunkt gesetzt: sauber beenden (Studio-Knopf „AirDeck beenden“, Tray, --stop) */
   requestShutdown: (() => void) | null = null;
+  /** Vom Einstiegspunkt gesetzt: neu starten (nach Änderungen an Betriebsart, Datenbank, Netzwerk, Pfaden) */
+  requestRestart: (() => void) | null = null;
   listenPort = 8750;
 
   constructor(dataDir: string, opts: { stableMs?: number; cooldownMs?: number; appRoot?: string; ffmpeg?: FfmpegInfo | null; secrets?: SecretStore; sync?: SyncManager; build?: string; packaged?: boolean; headless?: boolean; config?: AirDeckConfig; ffmpegRetryS?: number[]; docs?: DocStore } = {}) {
@@ -108,6 +112,7 @@ export class AirDeckApp {
     mkdirSync(this.mediaDir, { recursive: true });
     this.paths = opts.config?.paths ?? { config: join(dataDir, 'config'), data: dataDir, media: this.mediaDir, logs: join(dataDir, 'logs'), backups: join(dataDir, 'backups') };
     this.mode = opts.config?.mode ?? (opts.headless ? 'server' : 'local');
+    this.config = opts.config ?? null;
     this.version = appVersion(opts.appRoot ?? process.cwd());
     this.secrets = opts.secrets ?? new SecretStore(dataDir);
     this.updater = new Updater(opts.build ?? 'dev');
@@ -315,6 +320,8 @@ export class AirDeckApp {
     }
     // KI-Musikplanung alle 10 s prüfen (nur wenn aktiviert, sonst kostenlos)
     if (this.tickCount % 20 === 0) for (const id of this.stations.keys()) this.director.tick(id);
+    // Eingebundene Musikordner jede Minute abgleichen (asynchron, nie parallel)
+    if (this.tickCount % 120 === 60) void this.svc.media.scanLinked();
     // Status-Spiegel der Brücken (je Anbindung höchstens alle 15 s)
     if (this.tickCount % 30 === 0) this.svc.bridges.tickBridges();
     if (++this.tickCount % 2 === 0) {
