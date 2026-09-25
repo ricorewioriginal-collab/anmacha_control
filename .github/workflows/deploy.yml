@@ -64,16 +64,22 @@ jobs:
             git checkout $quoted_ref
             git reset --hard origin/$quoted_ref
             # docker compose (Plugin, mit Leerzeichen) statt des alten docker-compose (Bindestrich) -
-            # falls auf dem Server noch nicht installiert, hier einmalig nachruesten.
+            # falls auf dem Server noch nicht installiert, hier einmalig nachruesten. Zuerst per apt
+            # versuchen (Systempaket, bekommt Updates); klappt das nicht (z. B. Docker-APT-Quelle fehlt),
+            # die Binärdatei direkt von GitHub laden - das braucht keine korrekt eingerichtete APT-Quelle.
             if ! docker compose version > /dev/null 2>&1; then
-              if command -v apt-get > /dev/null 2>&1; then
-                (command -v sudo > /dev/null 2>&1 && sudo apt-get update -qq && sudo apt-get install -y -qq docker-compose-plugin) \
-                  || (apt-get update -qq && apt-get install -y -qq docker-compose-plugin)
-              else
-                echo "docker compose fehlt und apt-get ist nicht verfuegbar - bitte manuell installieren." >&2
-                exit 1
-              fi
+              (command -v apt-get > /dev/null 2>&1 && \
+                (command -v sudo > /dev/null 2>&1 && sudo apt-get update -qq && sudo apt-get install -y -qq docker-compose-plugin \
+                  || (apt-get update -qq && apt-get install -y -qq docker-compose-plugin))) \
+                || true
             fi
+            if ! docker compose version > /dev/null 2>&1; then
+              mkdir -p ~/.docker/cli-plugins
+              curl -fsSL "https://github.com/docker/compose/releases/latest/download/docker-compose-linux-$(uname -m)" \
+                -o ~/.docker/cli-plugins/docker-compose
+              chmod +x ~/.docker/cli-plugins/docker-compose
+            fi
+            docker compose version
             docker compose up -d --build
             docker compose ps
           REMOTE
