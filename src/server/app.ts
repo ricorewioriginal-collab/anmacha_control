@@ -1161,6 +1161,8 @@ export class AirDeckApp {
     const slot = this.rt(stationId).data.cardwall.find((c) => c.id === slotId);
     if (!slot) throw new AppError(404, 'not_found', 'Cart nicht gefunden');
     if (!slot.mediaId) throw new AppError(409, 'empty_cart', 'Cart ist leer');
+    // Engine vorhanden, aber gestoppt (z. B. Manuell): für den Einspieler starten – er soll auf Sendung gehen
+    if (!this.playouts.has(stationId) && this.ffmpeg) this.startPlayout(SYSTEM_PRINCIPAL, stationId, {});
     const po = this.playouts.get(stationId);
     if (po) {
       const m = this.svc.media.media(stationId, slot.mediaId);

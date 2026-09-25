@@ -50,7 +50,14 @@ test('Decks: Handbetrieb (MANUAL) und AutoDJ (AUTO) in der Engine', { skip: !ff 
     const deck = (id: string) => st().status!.decks.find((d) => d.id === id)!;
 
     app.savePlayoutConfig('main', { silenceMs: 2000 });
-    // Laden startet die Engine, spielt aber nichts
+    // Einspieler aus der Cartwall startet die Engine, damit er auf Sendung geht
+    const slot = app.cardwall('main')[0]!;
+    app.updateCart('main', slot.id, { mediaId: 'j' });
+    assert.equal(app.playouts.has('main'), false);
+    app.triggerCart('main', slot.id);
+    assert.equal(app.playouts.has('main'), true, 'Cart startet die Engine');
+    await wait(2300); // Jingle (2 s) ausspielen lassen, damit die Pegelprüfungen unten sauber sind
+    // Laden startet die Engine (falls nötig), spielt aber nichts
     app.deckAction(admin, 'main', 'A', 'load', { mediaId: 'a' });
     assert.equal(deck('A').state, 'cued');
     await wait(700);

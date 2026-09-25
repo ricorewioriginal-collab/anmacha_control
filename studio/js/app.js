@@ -954,9 +954,9 @@ function renderCarts() {
   }));
 }
 
-/** Im Server-Modus spielt das Server-Playout den Cart (geht auf Sendung), sonst der Browser. @param {any} c */
+/** Mit Engine spielt sie den Cart (geht auf Sendung, startet sie bei Bedarf), ohne ffmpeg der Browser. @param {any} c */
 function fireCart(c) {
-  if (serverMode()) run(() => api.post(url(`/cardwall/${encodeURIComponent(c.id)}/trigger`)));
+  if (eng() || serverMode()) run(() => api.post(url(`/cardwall/${encodeURIComponent(c.id)}/trigger`)));
   else playCart(c);
 }
 
