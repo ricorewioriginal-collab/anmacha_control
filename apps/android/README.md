@@ -1,15 +1,19 @@
 # AirDeck für Android
 
-Die App ist das AirDeck-Studio als native Android-App (Capacitor). Sie verbindet sich mit einem
-AirDeck-Server, also dem Windows-Programm oder einem Self-Hosted-Server:
+Die App hat zwei Betriebsarten, die Wahl kommt beim ersten Start:
 
-- Studio, 4 Decks, Cardwall, Queue und Quellen fernsteuern
-- **MIC LIVE**: Das Handy-Mikrofon sendet als Quelle „Android Live“ (Priority 3) und übernimmt nach Priorität
-- 🎧 Sendesignal mithören
-- Server-Automation (24/7) starten, stoppen und weiterschalten
+**Handy-Sender (ohne Server):** Das Handy sendet selbst, mit eigener Engine in Java. Die läuft als Vordergrund-Dienst weiter, auch bei ausgeschaltetem Bildschirm.
+- Mikrofon und Musik vom Handy (MP3, AAC, FLAC, OGG, WAV), Musik unter dem Mikrofon wird leiser (Ducking)
+- MP3-Encoder: LAME als reines Java (jump3r, LGPL 2.1+), keine nativen Bibliotheken
+- Sendet an laut.fm, Icecast oder AzuraCast (Icecast-Quellprotokoll PUT, bei älteren Servern SOURCE). Bei Abbruch verbindet sich die App selbst neu, die Titelanzeige geht an den Server.
+- Titelliste mit automatischem Weiterspielen, Mithören über Kopfhörer, Pegelanzeigen
 
-Die 24/7-Automation läuft absichtlich auf dem Server bzw. Windows-PC. Android pausiert
-Hintergrund-WebViews, deshalb ist das Handy keine zuverlässige Dauer-Sendequelle.
+**Mit AirDeck verbinden:** Studio eines AirDeck-PCs oder -Servers fernsteuern (Decks, Cardwall, Queue, Quellen). Dazu MIC LIVE als Live-Quelle (Priorität 3) und Mithören.
+
+Aufbau:
+- `engine/src`: Engine ohne Android-Bezug (Mischpult, Encoder, Icecast-Quelle, Takt). Wird mit `engine/test.sh` gegen einen echten Icecast getestet.
+- `native/`: Android-Schicht (Mikrofon, Decoder, Vordergrund-Dienst, Capacitor-Plugin „AirDeckEngine“)
+- Oberfläche: `studio/handy.html`
 
 ## Bauen
 

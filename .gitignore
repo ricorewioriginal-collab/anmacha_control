@@ -8,3 +8,4 @@ apps/android/android/
 apps/android/node_modules/
 apps/windows/bin/
 apps/windows/obj/
+apps/android/engine/.cache/

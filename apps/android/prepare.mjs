@@ -17,14 +17,42 @@ writeFileSync(join(www, 'build.json'), JSON.stringify({ build, version, platform
 
 if (!existsSync(join(here, 'android'))) run('npx cap add android');
 
-// Mikrofon (MIC LIVE) und Klartext-HTTP zum AirDeck-Server im lokalen Netz
+// Mikrofon (MIC LIVE), Handy-Sender (Vordergrund-Dienst) und Klartext-HTTP zum AirDeck-Server im lokalen Netz
 const manifest = join(here, 'android/app/src/main/AndroidManifest.xml');
 let xml = readFileSync(manifest, 'utf8');
-for (const perm of ['android.permission.RECORD_AUDIO', 'android.permission.MODIFY_AUDIO_SETTINGS', 'android.permission.WAKE_LOCK']) {
-  if (!xml.includes(perm)) xml = xml.replace('</manifest>', `    <uses-permission android:name="${perm}" />\n</manifest>`);
+for (const perm of [
+  'android.permission.RECORD_AUDIO', 'android.permission.MODIFY_AUDIO_SETTINGS', 'android.permission.WAKE_LOCK',
+  'android.permission.FOREGROUND_SERVICE', 'android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK',
+  'android.permission.FOREGROUND_SERVICE_MICROPHONE', 'android.permission.POST_NOTIFICATIONS',
+]) {
+  if (!xml.includes(`"${perm}"`)) xml = xml.replace('</manifest>', `    <uses-permission android:name="${perm}" />\n</manifest>`);
 }
 if (!xml.includes('usesCleartextTraffic')) xml = xml.replace('<application', '<application android:usesCleartextTraffic="true"');
+if (!xml.includes('EngineService')) {
+  xml = xml.replace('</application>', '        <service android:name="app.airdeck.engine.android.EngineService" android:exported="false" android:foregroundServiceType="mediaPlayback|microphone" />\n    </application>');
+}
 writeFileSync(manifest, xml);
+
+// Handy-Engine (reines Java + Android-Schicht) ins App-Projekt übernehmen
+const javaDir = join(here, 'android/app/src/main/java');
+cpSync(join(here, 'engine/src'), javaDir, { recursive: true });
+cpSync(join(here, 'native'), javaDir, { recursive: true });
+// Plugin registrieren: eigene MainActivity (Capacitor legt sie unter der App-ID an)
+const appId = JSON.parse(readFileSync(join(here, 'capacitor.config.json'), 'utf8')).appId;
+writeFileSync(join(javaDir, ...appId.split('.'), 'MainActivity.java'), `package ${appId};
+
+import android.os.Bundle;
+import com.getcapacitor.BridgeActivity;
+import app.airdeck.engine.android.AirDeckEnginePlugin;
+
+public class MainActivity extends BridgeActivity {
+    @Override
+    public void onCreate(Bundle savedInstanceState) {
+        registerPlugin(AirDeckEnginePlugin.class);
+        super.onCreate(savedInstanceState);
+    }
+}
+`);
 
 // Versionsnummer: steigt mit jedem CI-Lauf, damit Updates über die installierte App gehen
 const gradleFile = join(here, 'android/app/build.gradle');
@@ -44,6 +72,8 @@ if (ks && !gradle.includes('signingConfigs {')) {
         }
     }`).replace(/buildTypes \{\s*release \{/, (m) => `${m}\n            signingConfig signingConfigs.release`);
 }
+// MP3-Encoder für den Handy-Sender (LAME als reines Java, LGPL 2.1+)
+if (!gradle.includes('de.sciss:jump3r')) gradle = gradle.replace(/dependencies \{/, "dependencies {\n    implementation 'de.sciss:jump3r:1.0.5'");
 writeFileSync(gradleFile, gradle);
 
 // AirDeck-App-Icons (Launcher, rund, Adaptive-Icon-Vordergrund) übernehmen

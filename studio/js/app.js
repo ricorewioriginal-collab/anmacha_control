@@ -91,7 +91,9 @@ const url = (/** @type {string} */ p) => `/stations/${sid()}${p}`;
 async function boot() {
   hydrateIcons();
   const token = readToken();
-  if (!token || (isNativeApp() && !serverBase())) return askToken();
+  // Android-App ohne Server: Handy-Sender oder mit AirDeck verbinden
+  if (isNativeApp() && !serverBase()) return chooseAppMode();
+  if (!token) return askToken();
   api = new Api(token);
   try {
     S.me = await api.get('/me');
@@ -162,6 +164,22 @@ async function askToken(msg, prev) {
   saveToken(r.token ?? null);
   if (r.base) saveProfile({ base: r.base, name: r.serverName ?? 'AirDeck', token: r.token ?? '', lastConnected: new Date().toISOString() });
   location.reload();
+}
+
+/** Android-App: ohne Server direkt vom Handy senden oder mit einem AirDeck-PC/-Server verbinden. */
+async function chooseAppMode() {
+  let mode = null;
+  try { mode = localStorage.getItem('airdeck.mobileMode'); } catch {}
+  if (mode === 'handy') return location.replace('handy.html');
+  if (mode === 'server') return askToken();
+  const v = await formDialog('AirDeck starten', [
+    { name: 'info', label: 'Wie möchtest du senden?', type: 'info', value: 'Handy-Sender: Mikrofon und Musik vom Handy gehen direkt an laut.fm oder Icecast – ohne PC. Mit AirDeck verbinden: das Studio eines AirDeck-PCs oder -Servers fernsteuern.' },
+    { name: 'mode', label: 'Betrieb', value: 'handy', options: [['handy', 'Handy-Sender (ohne Server)'], ['server', 'Mit AirDeck-PC/-Server verbinden']] },
+  ], 'Weiter');
+  if (!v) return;
+  try { localStorage.setItem('airdeck.mobileMode', v.mode); } catch {}
+  if (v.mode === 'handy') return location.replace('handy.html');
+  return askToken();
 }
 
 const isGlobalAdmin = () => !!S.me && S.me.scopes?.includes('*') && S.me.stationIds?.includes('*');
@@ -1405,6 +1423,12 @@ function bindStatic() {
   $('nav-users').hidden = !isAdmin;
   $('btn-logout').hidden = !S.me?.user;
   $('btn-server').hidden = !(isNativeApp() || serverBase());
+  // Android-App: jederzeit zum Handy-Sender (sendet ohne Server direkt vom Handy)
+  $('btn-handy').hidden = !isNativeApp();
+  $('btn-handy').addEventListener('click', () => {
+    try { localStorage.setItem('airdeck.mobileMode', 'handy'); } catch {}
+    location.href = 'handy.html';
+  });
   $('btn-setup').hidden = !isGlobalAdmin();
   $('btn-setup').addEventListener('click', () => void openSetup());
   $('btn-server').addEventListener('click', () => void switchServer());

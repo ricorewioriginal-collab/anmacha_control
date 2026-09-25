@@ -342,7 +342,16 @@ footer { text-align: center; color: var(--muted); font-size: 13px; padding: 24px
   <div class="warn">Die offizielle, signierte APK entsteht, sobald im GitHub-Repository der Signaturschlüssel hinterlegt ist (Secrets <code>ANDROID_KEYSTORE_B64</code>, <code>ANDROID_KEYSTORE_PASSWORD</code>, <code>ANDROID_KEY_ALIAS</code>, <code>ANDROID_KEY_PASSWORD</code>). Ohne Schlüssel entsteht eine Test-APK. Wechselst du von der Test- zur offiziellen APK, musst du die App einmal neu installieren.</div>
   <p>Die App bietet das komplette Studio mit Touch-Bedienung und MIC LIVE als Live-Quelle (Priorität 3).</p>
   <p><b>Geräte verwalten:</b> Unter „Android-App → Gekoppelte Geräte verwalten“ siehst du jedes Gerät mit Rechten und „zuletzt gesehen“ und kannst es einzeln widerrufen. <b>Mehrere Server:</b> Die App merkt sich jeden verbundenen Server. Wechseln geht über „Server wechseln“ im Menü.</p>
-  <div class="todo">In Arbeit: direktes Senden aus der App an Icecast/laut.fm ohne AirDeck-Server (Standalone-Live).</div>
+  <h3>Handy-Sender (ohne Server)</h3>
+  <p>Beim ersten Start fragt die App, wie du senden willst. Der <b>Handy-Sender</b> schickt Mikrofon und Musik vom Handy direkt an laut.fm oder Icecast, ganz ohne PC. Die Sendung läuft als eigener Dienst weiter, auch bei ausgeschaltetem Bildschirm. Die Benachrichtigung „AirDeck sendet live“ hat einen Knopf zum Beenden.</p>
+  <ol>
+    <li>Unter „Sender-Zugang“ Server, Port, Mountpoint, Benutzer und Passwort eintragen. Bei laut.fm stehen die Daten im Radioadmin unter „Live“. Das Passwort bleibt nur in der App.</li>
+    <li>„Live gehen“ antippen. Beim ersten Mal fragt Android nach dem Mikrofon.</li>
+    <li>„🎙 Mikro“ schaltet das Mikrofon auf Sendung, die Musik wird dabei leiser (einstellbar unter „Pegel“).</li>
+    <li>„＋ Titel“ fügt Musik vom Handy hinzu (MP3, AAC, FLAC, OGG, WAV). ▶ startet einen Titel, danach läuft auf Wunsch der nächste.</li>
+    <li>„Mithören“ nur mit Kopfhörer einschalten, sonst gibt es mit offenem Mikrofon eine Rückkopplung.</li>
+  </ol>
+  <p>Bricht die Verbindung ab (Funkloch), verbindet sich die App von selbst neu. Ist das Netz zu langsam, verwirft sie lieber ein paar Daten, als immer weiter zu verzögern. Die App zeigt das an. Über „Mit AirDeck-Server verbinden“ bzw. „Handy-Sender“ im Menü wechselst du zwischen beiden Betriebsarten.</p>
 </section>
 
 <section id="rezepte">

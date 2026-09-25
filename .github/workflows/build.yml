@@ -265,6 +265,11 @@ jobs:
         with: { node-version: '22' }
       - uses: actions/setup-java@v4
         with: { distribution: temurin, java-version: '21' }
+      - name: Handy-Engine testen (Encoder, Mischpult, Sendung an echten Icecast)
+        run: |
+          sudo apt-get update -q
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -q icecast2 ffmpeg > /dev/null
+          apps/android/engine/test.sh
       - name: APK bauen (offiziell signiert, falls Keystore hinterlegt – sonst Debug)
         working-directory: apps/android
         env:
@@ -323,7 +328,7 @@ jobs:
             Automatisch gebaut und getestet aus ${{ github.sha }}.
             • AirDeck-Setup.exe – Windows-Installer (ohne Adminrechte, Deutsch/English, mit Audio-Engine und Android-APK)
             • AirDeck-Windows-Portable.zip – ohne Installation: entpacken, AirDeck.exe starten
-            • AirDeck-Android.apk – Android-App (Touch-Studio, MIC LIVE; verbindet sich mit AirDeck auf PC/Server)
+            • AirDeck-Android.apk – Android-App: Handy-Sender (Mikrofon + Musik direkt zu laut.fm/Icecast, ohne Server) oder Studio-Fernbedienung für AirDeck auf PC/Server
             • Server: docker compose up -d (siehe docs/DOCKER.md)
 
             Powered by AnMaCha Radioproduktion & RicoReWi – für Broadcast, Automation, Live und laut.fm. Hobbyprojekt, ohne Gewähr.

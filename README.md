@@ -52,7 +52,8 @@ Windows kann bei nicht signierten Dateien warnen: „Weitere Informationen“ �
 **Betrieb & Sicherheit**
 - **Benutzerverwaltung** mit Login und Logout sowie Rollen: Administrator, Sendeleitung, Redaktion, Moderation, Ansicht. Die Rollen lassen sich pro Sender zuweisen.
 - Mehrere Sender mit eigenem Logo. Datenspeicher lokal oder mit Sync zu MySQL/MariaDB bzw. Firebase. Zugangsdaten liegen verschlüsselt (AES-256-GCM).
-- **Updates** per Klick (Windows) bzw. neue APK (Android). Windows-Programm ohne Konsolenfenster mit Tray-Symbol. Handbuch im Programm.
+- **Windows-Programm** `AirDeck.exe` mit eigenem Fenster, Tray-Symbol und Audio-Engine im Hintergrund (Fenster zu, Sendung läuft weiter). **Updates** per Klick. Handbuch im Programm.
+- **Android-App** mit eigenem **Handy-Sender**: Mikrofon und Musik vom Handy direkt zu laut.fm oder Icecast, ohne Server und auch bei ausgeschaltetem Bildschirm. Alternativ Fernbedienung für das Studio am PC.
 
 ## Schnellstart
 
