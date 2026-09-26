@@ -19,6 +19,7 @@ import { mountBridges } from './bridges.js';
 import { mountUsers } from './users.js';
 import { mountUpdates } from './updates.js';
 import { qrDataUrl } from './qr.js';
+import { parsePairingPayload, scanQrCode } from './qrscan.js';
 import { JUMP_TO_WIN, mountLayout } from './layout.js';
 import { mountOverview } from './overview.js';
 
@@ -103,17 +104,17 @@ const url = (/** @type {string} */ p) => `/stations/${sid()}${p}`;
  * @returns {Promise<boolean>} true = Hash wurde behandelt (weiter mit neu geladener Seite oder Fehlerdialog)
  */
 async function tryAutoPair() {
-  const m = /[#&]pair=(\d{6})/.exec(location.hash);
-  if (!m) return false;
+  const parsed = parsePairingPayload(location.hash);
+  if (!parsed) return false;
   history.replaceState(null, '', location.pathname + location.search);
   const native = isNativeApp();
   const v = await formDialog('Gerät koppeln', [
-    { name: 'info', label: 'Kopplungscode erkannt', type: 'info', value: `Code ${m[1].slice(0, 3)} ${m[1].slice(3)} wird eingelöst.` },
+    { name: 'info', label: 'Kopplungscode erkannt', type: 'info', value: `Code ${parsed.code.slice(0, 3)} ${parsed.code.slice(3)} wird eingelöst.` },
     { name: 'name', label: 'Gerätename', value: deviceName(native) },
   ], 'Koppeln');
   if (!v) return true;
   status('Verbindung wird geprüft …');
-  const r = await testConnection('', { code: m[1] }, { native, deviceName: v.name || deviceName(native) });
+  const r = await testConnection('', { code: parsed.code }, { native, deviceName: v.name || deviceName(native) });
   if (!r.ok) {
     const failed = r.steps.find((/** @type {any} */ x) => !x.ok);
     await formDialog('Kopplung fehlgeschlagen', r.steps.map((/** @type {any} */ x) => ({
@@ -125,6 +126,26 @@ async function tryAutoPair() {
   if (r.base) saveProfile({ base: r.base, name: r.serverName ?? 'AirDeck', token: r.token ?? '', lastConnected: new Date().toISOString() });
   location.reload();
   return true;
+}
+
+/**
+ * Für das Kopplungscode-Feld in askToken(): Kamera-Scan starten, Code extrahieren und - falls das
+ * Formular ein Server-Adressfeld hat - die im QR-Code enthaltene Adresse gleich mit übernehmen.
+ * @returns {Promise<string|null>}
+ */
+async function scanCodeFromCamera() {
+  const raw = await scanQrCode();
+  if (!raw) return null;
+  const parsed = parsePairingPayload(raw);
+  if (!parsed) {
+    status('QR-Code enthält keinen AirDeck-Kopplungscode', true);
+    return null;
+  }
+  if (parsed.server) {
+    const serverInput = /** @type {HTMLInputElement|null} */ (document.getElementById('f-server'));
+    if (serverInput) serverInput.value = parsed.server;
+  }
+  return parsed.code;
 }
 
 async function boot() {
@@ -184,7 +205,10 @@ async function askToken(msg, prev, forceServer) {
   const v = await formDialog('Mit AirDeck verbinden', [
     ...(msg ? [{ name: 'msg', label: 'Hinweis', type: 'info', value: msg }] : []),
     ...(needServer ? [{ name: 'server', label: 'Server-Adresse', value: prev?.server ?? (serverBase() || profiles[0]?.base || ''), suggest: profiles.map((p) => p.base), hint: 'z. B. 192.168.1.20 (Port 8750 wird ergänzt) oder https://radio.example.org' }] : []),
-    { name: 'code', label: 'Kopplungscode (6 Ziffern)', value: '', hint: 'Am PC/Server unter „Android-App → Gerät koppeln“ erzeugen – geht auch ohne Benutzerkonto' },
+    {
+      name: 'code', label: 'Kopplungscode (6 Ziffern)', value: '', hint: 'Am PC/Server unter „Android-App → Gerät koppeln“ erzeugen – geht auch ohne Benutzerkonto',
+      ...(navigator.mediaDevices?.getUserMedia ? { action: { label: 'QR-Code scannen', run: scanCodeFromCamera } } : {}),
+    },
     { name: 'username', label: 'oder Benutzername', value: prev?.username ?? '' },
     { name: 'password', label: 'Passwort', type: 'password', value: '' },
     { name: 'token', label: 'oder Verbindungslink / API-Token', type: 'password', value: '', hint: 'Für Integrationen; ein Link „http://…:8750/#token=…“ setzt auch die Adresse' },

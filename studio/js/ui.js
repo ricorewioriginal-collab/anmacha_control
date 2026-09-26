@@ -62,7 +62,7 @@ export async function run(fn) {
 
 /**
  * @param {string} title
- * @param {Array<{name:string,label:string,type?:string,value?:any,options?:Array<[string,string]>,hint?:string,required?:boolean,suggest?:string[]}>} fields
+ * @param {Array<{name:string,label:string,type?:string,value?:any,options?:Array<[string,string]>,hint?:string,required?:boolean,suggest?:string[],action?:{label:string,run:()=>Promise<string|null>}}>} fields
  * @param {string} [submitLabel]
  * @returns {Promise<Record<string, any>|null>}
  */
@@ -94,6 +94,16 @@ export function formDialog(title, fields, submitLabel = 'Speichern') {
     } else {
       input = h('input', { id, name: f.name, type: f.type ?? 'text', value: f.value ?? '', required: !!f.required, autocomplete: 'off', ...(f.suggest?.length ? { list: `${id}-list` } : {}) });
       if (f.suggest?.length) input = h('div', { class: 'with-list' }, input, h('datalist', { id: `${id}-list` }, ...f.suggest.map((x) => h('option', { value: x }))));
+      // Optionale Aktion neben dem Feld, z. B. „QR-Code scannen“: füllt den Wert, statt das Formular abzuschicken.
+      if (f.action) {
+        input = h('div', { class: 'with-action' }, input, h('button', {
+          type: 'button', class: 'btn small',
+          onclick: async () => {
+            const v = await f.action?.run();
+            if (v != null) /** @type {HTMLInputElement} */ (form.elements.namedItem(f.name)).value = v;
+          },
+        }, f.action.label));
+      }
     }
     form.append(h('div', { class: 'field' }, h('label', { for: id }, f.label), input, f.hint ? h('small', {}, f.hint) : null));
   }

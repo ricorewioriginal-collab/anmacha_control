@@ -17,17 +17,20 @@ writeFileSync(join(www, 'build.json'), JSON.stringify({ build, version, platform
 
 if (!existsSync(join(here, 'android'))) run('npx cap add android');
 
-// Mikrofon (MIC LIVE), Handy-Sender (Vordergrund-Dienst) und Klartext-HTTP zum AirDeck-Server im lokalen Netz
+// Mikrofon (MIC LIVE), Handy-Sender (Vordergrund-Dienst), Kamera (QR-Code beim Koppeln scannen)
+// und Klartext-HTTP zum AirDeck-Server im lokalen Netz
 const manifest = join(here, 'android/app/src/main/AndroidManifest.xml');
 let xml = readFileSync(manifest, 'utf8');
 for (const perm of [
   'android.permission.RECORD_AUDIO', 'android.permission.MODIFY_AUDIO_SETTINGS', 'android.permission.WAKE_LOCK',
   'android.permission.FOREGROUND_SERVICE', 'android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK',
-  'android.permission.FOREGROUND_SERVICE_MICROPHONE', 'android.permission.POST_NOTIFICATIONS',
+  'android.permission.FOREGROUND_SERVICE_MICROPHONE', 'android.permission.POST_NOTIFICATIONS', 'android.permission.CAMERA',
 ]) {
   if (!xml.includes(`"${perm}"`)) xml = xml.replace('</manifest>', `    <uses-permission android:name="${perm}" />\n</manifest>`);
 }
 if (!xml.includes('usesCleartextTraffic')) xml = xml.replace('<application', '<application android:usesCleartextTraffic="true"');
+// Kamera ist optional (Kopplung geht auch per Code-Eingabe) - App bleibt auf Geräten ohne Kamera installierbar
+if (!xml.includes('android.hardware.camera')) xml = xml.replace('</manifest>', '    <uses-feature android:name="android.hardware.camera" android:required="false" />\n</manifest>');
 if (!xml.includes('EngineService')) {
   xml = xml.replace('</application>', '        <service android:name="app.airdeck.engine.android.EngineService" android:exported="false" android:foregroundServiceType="mediaPlayback|microphone" />\n    </application>');
 }

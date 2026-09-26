@@ -30,7 +30,7 @@ Diese Tabelle wird laufend nach echten Tests aktualisiert (kein Feature gilt als
 | **Backup/Restore** | ✅ läuft | Echter Ende-zu-Ende-Test: Sichern → Daten löschen → Wiederherstellen → Zustand vergleichen |
 | **Intelligente Rotation, Clock-Templates, Preflight, Hard/Soft-Timing** | ✅ läuft | Interpreten-/Genre-Trennung in der Rotation, Sendeuhr-Vorlagen, Preflight-Prüfung (fehlende Dateien/leere Pools/Rotationskonflikte) vor dem Senden, feste Zeitmarken im Sendeplan |
 | **AirDeckCast** (eigene Streaming-/Verteilschicht, HLS, alternative Profile, Teststream, Failover) | ✅ läuft | Ein Programmbus speist mehrere Encoder-Ausgänge gleichzeitig (Zusatzprofile, HLS direkt vom Server, Teststream mit echtem Datenzuwachs-Nachweis, Ersatzziel springt automatisch bei Ausgangs-Ausfall ein und tritt bei Erholung zurück) |
-| **Geräte-Pairing, LAN-Discovery, Connect-Schicht** | ✅ läuft | Kopplungscode (mit/ohne Benutzerkonto), echter scanbarer QR-Code fürs Koppeln, Geräteliste mit Widerruf, LAN-Discovery serverseitig und aus dem Studio erreichbar |
+| **Geräte-Pairing, LAN-Discovery, Connect-Schicht** | ✅ läuft | Kopplungscode (mit/ohne Benutzerkonto), echter scanbarer QR-Code fürs Koppeln, Kamera-Scan direkt in der App/im Browser (kein natives Plugin nötig), Geräteliste mit Widerruf, LAN-Discovery serverseitig und aus dem Studio erreichbar |
 | **Erweiterungen/Marktplatz, Team-Chat, Bug-Report-Backend, Statistik, Audit** | ⬜ offen | Noch nicht begonnen |
 | **Long-Run-/Release-Härtung** (Watchdog, Crash Recovery, 24h/48h-Test, RC1) | ⬜ offen | Noch nicht begonnen |
 
