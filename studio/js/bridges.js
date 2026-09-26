@@ -16,7 +16,8 @@ export function mountBridges(root, ctx) {
   async function show() {
     const list = /** @type {any[]} */ (await ctx.api.get(ctx.url('/bridges')));
     root.replaceChildren(
-      h('div', { class: 'lf-head' }, h('div', { class: 'lf-title' }, h('strong', {}, 'Anbindungen'), h('span', { class: 'muted' }, ' · bestehende Systeme verbinden')),
+      h('div', { class: 'bridge-hero' },
+        h('div', {}, h('span', { class: 'ov-kicker' }, 'VERBINDUNGEN'), h('h1', {}, 'Streams & Anbindungen'), h('p', {}, 'Icecast, AzuraCast, Relays und externe Systeme mit AirDeck verbinden.')),
         h('button', { class: 'btn small primary', onclick: () => edit(null) }, '＋ Anbindung')),
       card('So funktioniert die Brücke',
         h('p', {}, 'Deine bestehende Technik läuft weiter, zum Beispiel AzuraCast mit Icecast, SAM Broadcaster, mAirList, RadioDJ oder ein reines Web-Relay. AirDeck verbindet sich damit, statt alles neu aufzubauen:'),
