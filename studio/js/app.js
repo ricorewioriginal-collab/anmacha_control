@@ -16,6 +16,7 @@ import { mountBridges } from './bridges.js';
 import { mountUsers } from './users.js';
 import { mountUpdates } from './updates.js';
 import { JUMP_TO_WIN, mountLayout } from './layout.js';
+import { mountOverview } from './overview.js';
 
 const CATEGORY_LABEL = /** @type {Record<string,string>} */ ({
   music: 'Musik', jingle: 'Jingle', sweeper: 'Sweeper', station_id: 'Station ID', drop: 'Drop', news: 'News',
@@ -79,7 +80,9 @@ const freshLevel = () => (S.srvLevel && serverMode() && Date.now() - (S.srvLevel
 const AUDIO_FILE = /\.(mp3|ogg|opus|wav|flac|m4a|aac|webm)$/i;
 /** @type {Record<string, { show: () => any, onEvent?: (t: string, d: any) => void }>} */
 let views = {};
-let currentView = 'studio';
+// Desktop landet auf dem neuen Dashboard (Senderübersicht); auf dem Handy bleibt der Studio-
+// Arbeitsbereich die Startansicht - dort will man sofort ans Pult, nicht zwischen Sendern vergleichen.
+let currentView = matchMedia('(min-width: 900px)').matches ? 'overview' : 'studio';
 /** @type {ReturnType<typeof mountLayout>} */
 let layout;
 const silence = new SilenceDetector(-50, 10_000);
@@ -116,6 +119,9 @@ async function boot() {
   buildDecks();
   bindStatic();
   await loadStation();
+  // Sichtbarkeit/aria-pressed der Ansichten synchronisieren (die statische HTML rät nur den Startzustand,
+  // damit vor dem ersten JS-Durchlauf nichts leer aufblitzt).
+  showView(currentView);
   if (pref(AUDIO_PREF.auto) === '1') toggleListen(true);
   // Erster Start: Setup-Assistent (nur Administration, bestehende Installationen werden nicht gestört)
   if (isGlobalAdmin()) {
@@ -276,7 +282,7 @@ function updateLautfmNav() {
   const connected = !!S.station?.lautfmConnected;
   const show = connected || !S.stations.some((/** @type {any} */ s) => s.lautfmConnected);
   $('nav-lautfm').hidden = !show;
-  if (!show && currentView === 'lautfm') showView('studio');
+  if (!show && currentView === 'lautfm') showView('overview');
   const mobile = $('nav-lautfm-mobile');
   mobile.dataset.view = show ? 'lautfm' : 'ai';
   mobile.querySelector('span').textContent = show ? 'Mehr' : 'KI';
@@ -326,6 +332,11 @@ async function loadStation() {
     bridges: mountBridges($('view-bridges'), ctx),
     listeners: mountListeners($('view-listeners'), { ...ctx, stationId: () => S.station.id, onUnread: (n) => { const b = $('listener-badge'); b.hidden = !n; b.textContent = String(n); } }),
     users: mountUsers($('view-users'), { api, stations: () => S.stations, me: () => S.me }),
+    overview: mountOverview($('view-overview'), {
+      api, stations: () => S.stations,
+      manage: async (/** @type {string} */ id) => { await switchStation(id); await editStation(); },
+      openStudio: async (/** @type {string} */ id) => { await switchStation(id); showView('studio'); },
+    }),
   };
   if (currentView !== 'studio') views[currentView]?.show();
 }
@@ -1587,7 +1598,7 @@ function bindStatic() {
   // Tastatur: Alt+1…4 wechselt die Bereiche
   addEventListener('keydown', (e) => {
     if (!e.altKey || e.ctrlKey || e.metaKey) return;
-    const v = ({ 1: 'studio', 2: 'planning', 3: 'recorder', 4: 'lautfm', 5: 'ai', 6: 'nextcloud' })[/** @type {1|2|3|4|5|6} */ (Number(e.key))];
+    const v = ({ 1: 'overview', 2: 'planning', 3: 'recorder', 4: 'lautfm', 5: 'ai', 6: 'nextcloud' })[/** @type {1|2|3|4|5|6} */ (Number(e.key))];
     if (v) {
       e.preventDefault();
       showView(v);
@@ -1806,7 +1817,7 @@ function showView(name) {
   currentView = name;
   for (const b of document.querySelectorAll('#view-tabs button, #bottom-nav button')) b.setAttribute('aria-pressed', String(/** @type {HTMLElement} */ (b).dataset.view === name));
   $('sidebar').classList.remove('open');
-  for (const id of ['studio', 'planning', 'recorder', 'lautfm', 'ai', 'nextcloud', 'bridges', 'listeners', 'users']) $(`view-${id}`).hidden = id !== name;
+  for (const id of ['overview', 'studio', 'planning', 'recorder', 'lautfm', 'ai', 'nextcloud', 'bridges', 'listeners', 'users']) $(`view-${id}`).hidden = id !== name;
   if (name !== 'studio') views[name]?.show();
 }
 

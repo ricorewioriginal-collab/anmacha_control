@@ -20,7 +20,8 @@
     </div>
     <nav class="nav" id="view-tabs" aria-label="Bereiche">
       <div class="nav-group">Studio</div>
-      <button data-view="studio" aria-pressed="true"><i data-icon="dashboard"></i><span>Dashboard</span><kbd>1</kbd></button>
+      <button data-view="overview" aria-pressed="true"><i data-icon="dashboard"></i><span>Dashboard</span><kbd>1</kbd></button>
+      <button data-view="studio" aria-pressed="false"><i data-icon="sliders"></i><span>Studio-Arbeitsbereich</span></button>
       <button data-jump="live-panel"><i data-icon="mic"></i><span>Live Studio</span></button>
       <button data-view="ai" aria-pressed="false"><i data-icon="bolt"></i><span>KI-Automation</span><kbd>5</kbd></button>
       <button data-view="lautfm" aria-pressed="false" id="nav-lautfm" hidden><i data-icon="lautfm"></i><span>laut.fm Automation</span><kbd>4</kbd></button>
@@ -90,6 +91,7 @@
       <span class="conn" id="conn" title="Serververbindung"></span>
     </header>
 
+    <main class="view-page" id="view-overview"></main>
     <main class="view-page" id="view-planning" hidden></main>
     <main class="view-page" id="view-recorder" hidden></main>
     <main class="view-page" id="view-lautfm" hidden></main>
@@ -99,8 +101,8 @@
     <main class="view-page" id="view-listeners" hidden></main>
     <main class="view-page" id="view-users" hidden></main>
 
-    <!-- Dashboard -->
-    <main class="dash" id="view-studio">
+    <!-- Studio-Arbeitsbereich (Decks, Cardwall, Queue, Live) - nicht das Dashboard -->
+    <main class="dash" id="view-studio" hidden>
       <div class="dash-main">
         <section class="m-home" aria-label="Mobil-Übersicht">
           <div class="m-np">
