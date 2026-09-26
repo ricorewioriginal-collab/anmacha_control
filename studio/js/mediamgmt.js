@@ -6,11 +6,9 @@
 // Mehrfach-Upload/Ordner-Import, Metadaten-Bearbeitung, Integritätsprüfung (fehlende Dateien, Duplikate,
 // Relink) sowie Aktionen zum Senden an Deck/Queue/Playlist/Cardwall.
 //
-// Abschnitt 10 (Nextcloud): Nextcloud soll NICHT als isoliertes Halb-Feature danebenstehen, sondern
-// als weitere Quelle direkt hier auswählbar sein ("AirDeck-Bibliothek" und "Nextcloud" nebeneinander,
-// über Reiter). Die eigenständige Nextcloud-Ansicht (Verbindung einrichten, eigener Nav-Punkt) bleibt
-// zusätzlich bestehen; hier wird ihre bereits vorhandene Browse-/Import-Logik nur eingebettet
-// (mountNextcloud direkt wiederverwendet, keine zweite Nextcloud-Anbindung).
+// Abschnitt 10 (Nextcloud): Nextcloud steht ausschließlich als Quellen-Reiter direkt hier neben
+// der AirDeck-Bibliothek. Es gibt keinen separaten Sidebar-Menüpunkt mehr; dieselbe Browse-/Import-
+// Logik wird wiederverwendet (keine zweite Nextcloud-Anbindung).
 
 import { $, CATEGORY_STYLE, clockTime, fmt, formDialog, h, mediaTitle, run, status } from './ui.js';
 import { mountNextcloud } from './nextcloud.js';
@@ -244,8 +242,15 @@ export function mountMediaManagement(root, ctx) {
     folderSel.replaceChildren(h('option', { value: '' }, 'Alle Ordner'), ...folders.map((f) => h('option', { value: f, selected: f === cur }, f)));
     renderTabs();
     root.replaceChildren(
-      h('section', { class: 'panel' },
-        h('div', { class: 'panel-head' }, h('h2', {}, 'Medienverwaltung'), h('span', { class: 'muted', id: 'mm-count' }, '')),
+      h('div', { class: 'media-hero' },
+        h('div', {},
+          h('span', { class: 'ov-kicker' }, 'MEDIEN'),
+          h('h1', {}, 'Musikarchiv'),
+          h('p', {}, 'Titel, Jingles, Station-IDs und Cloud-Quellen zentral verwalten.')),
+        h('div', { class: 'media-hero-actions' },
+          h('span', { class: 'media-count', id: 'mm-count' }, ''))),
+      h('section', { class: 'panel media-workspace' },
+        h('div', { class: 'panel-head' }, h('h2', {}, 'Bibliothek & Quellen')),
         tabBar,
         libraryPane,
         nextcloudPane));
