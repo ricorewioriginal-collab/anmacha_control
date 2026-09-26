@@ -503,6 +503,10 @@ export function createHttpServer(app: AirDeckApp, studioDir: string): Server {
     setTimeout(() => app.requestRestart?.(), 300).unref();
     return { restarting: true };
   });
+  // Sicherung/Wiederherstellung (nur Administration - betrifft die gesamte Installation, nicht nur einen Sender)
+  add('GET', '/api/v1/backup', null, (c) => (globalAdmin(c), app.svc.backup.list()));
+  add('POST', '/api/v1/backup', null, (c) => (globalAdmin(c), app.svc.backup.create()));
+  add('POST', '/api/v1/backup/:file/restore', null, (c) => (globalAdmin(c), app.svc.backup.restore(c.params.file!)));
   // Eingebundene Musikordner (Serverpfade – nur Administration)
   add('GET', '/api/v1/stations/:sid/folders/linked', 'media:read', (c) => app.svc.media.linkedFolders(sid(c)));
   add('POST', '/api/v1/stations/:sid/folders/linked', null, async (c) => (globalAdmin(c), app.svc.media.linkFolder(sid(c), await c.body())));
