@@ -71,9 +71,20 @@ export function mountPlaylistManagement(root, ctx) {
     const cards = playlists.length
       ? playlists.map((p) => playlistCard(p, byId))
       : [h('div', { class: 'empty' }, 'Noch keine Playlists. Über „＋ Playlist“ anlegen oder in der Medienverwaltung Titel zu einer Playlist hinzufügen.')];
-    root.replaceChildren(panel('Playlistverwaltung', [
-      h('button', { class: 'btn small', onclick: newPlaylist }, '＋ Playlist'),
-    ], h('div', {}, ...cards)));
+    const workspace = panel('Playlists', [
+      h('button', { class: 'btn small primary', onclick: newPlaylist }, '＋ Playlist'),
+    ], h('div', { class: 'playlist-cards' }, ...cards));
+    workspace.classList.add('playlist-workspace');
+    root.replaceChildren(
+      h('div', { class: 'playlist-hero' },
+        h('div', {},
+          h('span', { class: 'ov-kicker' }, 'PLAYLIST & ROTATION'),
+          h('h1', {}, 'Playlistverwaltung'),
+          h('p', {}, 'Playlists anlegen, sortieren, mischen und direkt in Queue oder Sendeplan verwenden.')),
+        h('div', { class: 'playlist-hero-stats' },
+          h('span', {}, `${playlists.length} Playlist${playlists.length === 1 ? '' : 's'}`))),
+      workspace
+    );
   }
 
   async function newPlaylist() {
