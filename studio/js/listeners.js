@@ -20,8 +20,11 @@ export function mountListeners(root, ctx) {
     const link = `${location.origin}${location.pathname.replace(/[^/]*$/, '')}hoerer.html?s=${encodeURIComponent(ctx.stationId())}`;
     const act = (/** @type {any} */ it, /** @type {string} */ a) => run(async () => { await ctx.api.post(ctx.url(`/inbox/${encodeURIComponent(it.id)}/${a}`)); show(); });
     root.replaceChildren(...[
-      h('div', { class: 'lf-head' }, h('div', { class: 'lf-title' }, h('strong', {}, 'Hörer'), h('span', { class: 'muted' }, ` · ${d.unread} neu`)),
-        h('button', { class: 'btn small', onclick: () => settings(c) }, 'Einstellungen')),
+      h('div', { class: 'listener-hero' },
+        h('div', {}, h('span', { class: 'ov-kicker' }, 'COMMUNITY'), h('h1', {}, 'Hörer & Interaktion'), h('p', {}, 'Wünsche, Grüße, Voting und Sprachnachrichten aus einer Oberfläche moderieren.')),
+        h('div', { class: 'listener-hero-actions' },
+          h('span', { class: 'listener-count' }, `${d.unread} neu`),
+          h('button', { class: 'btn small', onclick: () => settings(c) }, 'Einstellungen'))),
       !any ? card('Hörerbereich ist aus', h('p', {}, 'Hörer können Musik wünschen, grüßen, abstimmen und Sprachnachrichten schicken – sobald du es unter „Einstellungen“ einschaltest. Alles läuft über AirDeck, mit Schutz vor Missbrauch.')) : null,
       any ? card('Hörerseite', h('p', { class: 'muted' }, 'Link für Hörer (auch auf deiner Webseite einbettbar):'),
         h('div', { class: 'row' }, h('code', {}, link), h('button', { class: 'btn small', onclick: () => navigator.clipboard?.writeText(link).then(() => status('Link kopiert')) }, 'Kopieren'),
