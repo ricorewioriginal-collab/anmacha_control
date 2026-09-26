@@ -8,11 +8,11 @@
 </p>
 
 [![Build](https://github.com/ricorewioriginal-collab/anmacha_control/actions/workflows/build.yml/badge.svg)](https://github.com/ricorewioriginal-collab/anmacha_control/actions/workflows/build.yml)
-![Tests](https://img.shields.io/badge/tests-146%20%C2%B7%20140%20gr%C3%BCn%20%C2%B7%206%20%C3%BCbersprungen-brightgreen)
+![Tests](https://img.shields.io/badge/tests-149%20%C2%B7%20143%20gr%C3%BCn%20%C2%B7%206%20%C3%BCbersprungen-brightgreen)
 ![Version](https://img.shields.io/badge/version-0.4.0-blue)
 ![Plattformen](https://img.shields.io/badge/Windows%20%7C%20Android%20%7C%20Linux%20%7C%20Docker-eigenst%C3%A4ndig-2f8cff)
 
-**Powered by AnMaCha Radioproduktion & RicoReWi – für Broadcast, Automation, Live und laut.fm.**
+**Ein Projekt von RicoReWi / RicoReWi Music & Media – für Broadcast, Automation, Live und laut.fm.**
 
 AirDeck ist eine eigenständige Sendesoftware für Webradio. Sie bietet Automation rund um die Uhr, Live-Sendungen mit Quellen-Priorität, Sendeplan, Playlist- und Medienverwaltung, Recorder, laut.fm-Verwaltung, Klangoptimierung und auf Wunsch einen komplett KI-moderierten Sender. AirDeck läuft als **Windows-Programm**, als **Server/Docker** oder gesteuert per **Android-App**. Einen eigenen Server brauchst du nicht.
 
@@ -140,7 +140,7 @@ Ohne Docker geht es mit Node.js ≥ 22.18 und ffmpeg: `npm install && npm start`
 Webentwicklerinnen und Webentwickler dürfen eigene Features einbauen. Aufbau, Regeln und Andockpunkte stehen in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ```bash
-npm run check        # Typprüfung (Server + Studio) und alle Tests (aktuell 146, davon 140 grün, 6 übersprungen ohne z. B. echte MySQL/ffmpeg-Umgebung)
+npm run check        # Typprüfung (Server + Studio) und alle Tests (aktuell 149, davon 143 grün, 6 übersprungen ohne z. B. echte MySQL/ffmpeg-Umgebung)
 ```
 
 ## Haftungsausschluss
