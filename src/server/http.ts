@@ -264,6 +264,9 @@ export function createHttpServer(app: AirDeckApp, studioDir: string): Server {
   add('GET', '/api/v1/stations/:sid/automation', 'automation:read', (c) => app.automationView(sid(c)));
   add('PATCH', '/api/v1/stations/:sid/automation', 'automation:write', async (c) => app.setAutomation(sid(c), (await c.body()) as never));
   add('GET', '/api/v1/stations/:sid/now-playing', 'now_playing:read', (c) => app.nowPlaying(sid(c)));
+  // Wer automatisiert diesen Sender tatsächlich (AirDeck-Server-Playout oder laut.fm über den
+  // Radioadmin)? Das Studio zeigt bei laut.fm den echten aktuellen Titel statt leerer Decks.
+  add('GET', '/api/v1/stations/:sid/automation-source', 'now_playing:read', (c) => app.svc.status.automationSource(sid(c)));
   add('POST', '/api/v1/stations/:sid/now-playing', 'automation:write', async (c) => {
     const b = await c.body();
     return app.setNowPlaying(sid(c), String(b.mediaId ?? ''), String(b.deck ?? 'A') as never);

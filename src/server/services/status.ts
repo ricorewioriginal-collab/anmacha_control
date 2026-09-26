@@ -95,4 +95,18 @@ export class StatusService {
   lautfmPublicStatus(name: string): Promise<StreamStatus> {
     return this.cached(`l:${name}`, 10_000, () => lautfmStatus(name, PUBLIC_API));
   }
+
+  /**
+   * Wer automatisiert diesen Sender gerade tatsächlich? AirDeck-Server-Playout, laut.fm über den
+   * Radioadmin (eigener Algorithmus, AirDeck hat darauf keinen Einfluss) oder gar niemand. Das Studio
+   * zeigt bei "lautfm" den aktuellen/letzten Titel aus der öffentlichen laut.fm-API statt leerer Decks -
+   * AirDeck kennt den nächsten Titel in diesem Fall nicht (laut.fm veröffentlicht ihn nicht im Voraus).
+   */
+  async automationSource(stationId: string): Promise<{ source: 'airdeck' | 'lautfm' | 'none'; now: StreamStatus['now'] }> {
+    if (this.app.playouts.get(stationId)?.playout.status().running) return { source: 'airdeck', now: null };
+    const stationName = this.app.rt(stationId).data.lautfm?.stationName;
+    if (!stationName) return { source: 'none', now: null };
+    const laut = await this.lautfmPublicStatus(stationName).catch(() => null);
+    return { source: 'lautfm', now: laut?.now ?? null };
+  }
 }

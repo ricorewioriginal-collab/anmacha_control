@@ -63,6 +63,7 @@ const S = {
   /** @type {string|null} */ lastAutoDeck: null,
   /** @type {any} */ playout: null,
   playoutAt: 0,
+  /** @type {{ source: 'airdeck'|'lautfm'|'none', now: any }|null} */ automationSource: null,
   /** @type {{ rmsDb: number, peakDb: number, decks?: Record<string, number> }|null} */ srvLevel: null,
   srvLevelAt: 0,
   /** @type {{ rec: MediaRecorder, stream: MediaStream, sourceId: string }|null} */ mic: null,
@@ -243,6 +244,22 @@ async function logout() {
 
 /** @type {EventSource|null} */
 let es = null;
+/** @type {ReturnType<typeof setInterval>|null} */
+let autoSourceTimer = null;
+
+/** Wer automatisiert den Sender gerade wirklich (AirDeck-Server-Playout oder laut.fm über den
+ * Radioadmin)? Bei laut.fm zeigt AirDeck den echten aktuellen Titel statt leerer Decks - den
+ * nächsten kennt AirDeck in dem Fall nicht, laut.fm veröffentlicht ihn nicht im Voraus. */
+async function refreshAutomationSource() {
+  S.automationSource = await api.get(url('/automation-source')).catch(() => null);
+  const banner = $('lautfm-auto-banner');
+  const isLautfm = S.automationSource?.source === 'lautfm';
+  banner.hidden = !isLautfm;
+  if (isLautfm) {
+    const now = S.automationSource.now;
+    $('lautfm-auto-now').textContent = now ? `${now.artist ? `${now.artist} – ` : ''}${now.title || 'Kein Titel gemeldet'}` : 'Kein Titel gemeldet';
+  }
+}
 
 async function loadStation() {
   localStorage.setItem('airdeck.station', S.station.id);
@@ -263,6 +280,9 @@ async function loadStation() {
   renderAll();
   es?.close();
   es = api.events(S.station.id, onEvent, (ok) => $('conn').classList.toggle('ok', ok));
+  if (autoSourceTimer) clearInterval(autoSourceTimer);
+  void refreshAutomationSource();
+  autoSourceTimer = setInterval(refreshAutomationSource, 15_000);
   const ctx = { api, url, library: () => S.library, folders: () => api.get(url('/folders')), mediaUrl: (/** @type {string} */ id) => api.mediaUrl(S.station.id, id) };
   views = {
     planning: mountPlanning($('view-planning'), ctx),
