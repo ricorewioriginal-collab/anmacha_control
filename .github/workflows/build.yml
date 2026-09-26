@@ -256,6 +256,34 @@ jobs:
           curl -fs -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8750/api/v1/database | tee db.json | grep -q '"engine":"PostgreSQL"'
           docker compose down
 
+  demo:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Demo-Image bauen und Vollfunktions-Reset pruefen
+        run: |
+          set -e
+          docker compose -f packaging/demo/docker-compose.demo.yml build
+          sh packaging/demo/reset-demo.sh
+          curl -fs http://127.0.0.1:8751/api/v1/health | grep -q '"ok":true'
+
+          LOGIN=$(curl -fs -X POST -H 'Content-Type: application/json'             -d '{"username":"demo","password":"airdeck-demo"}'             http://127.0.0.1:8751/api/v1/auth/login)
+          TOKEN=$(printf '%s' "$LOGIN" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>process.stdout.write(JSON.parse(s).token||''))")
+          test -n "$TOKEN" || (echo "Demo-Login fehlgeschlagen" && exit 1)
+
+          WALL=$(curl -fs -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8751/api/v1/stations/main/cardwall)
+          printf '%s' "$WALL" | grep -q 'Demo Jingle' || (echo "Demo-Cardwall ist leer" && exit 1)
+          printf '%s' "$WALL" | grep -q 'AirDeck-FM ID' || (echo "Demo-Station-ID fehlt im Cardwall" && exit 1)
+
+          curl -fs -X POST -H "Authorization: Bearer $TOKEN"             http://127.0.0.1:8751/api/v1/stations/main/cardwall/cart1/trigger > /dev/null
+          sleep 2
+          curl -fs -H "Authorization: Bearer $TOKEN"             http://127.0.0.1:8751/api/v1/stations/main/playout | grep -q '"running":true'             || (echo "Demo-Playout/Cardwall startet nicht" && exit 1)
+
+          docker compose -f packaging/demo/docker-compose.demo.yml logs airdeck-demo
+          docker compose -f packaging/demo/docker-compose.demo.yml down -v
+          echo "Demo: Login, Cardwall, Playout und Reset OK"
+
   # docs/DOCKER.md verspricht ausdrücklich "Raspberry Pi 4/5 mit 64 Bit" - bisher baute und testete die
   # CI das Image nur für amd64 (der GitHub-Runner selbst). Per QEMU-Emulation wirklich für arm64 bauen
   # und starten, damit dieses Versprechen nicht nur eine unbelegte Behauptung in der Doku ist.
