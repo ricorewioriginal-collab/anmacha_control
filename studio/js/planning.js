@@ -14,6 +14,17 @@ const KIND = /** @type {Record<string,string>} */ ({ media: 'Titel', folder: 'Or
 const daysText = (/** @type {number[]} */ d) => (!d?.length || d.length === 7 ? 'täglich' : d.map((i) => DAYS[i]).join(' '));
 const localInput = (/** @type {number} */ t) => new Date(t - new Date(t).getTimezoneOffset() * 60000).toISOString().slice(0, 16);
 
+// --- Sendeplan-Gitter (Drag & Drop) -----------------------------------------------------------
+const SP_PX_PER_MIN = 1; // 60px je Stunde
+/** @param {string} t */
+const spToMin = (t) => { const [hh, mm] = t.split(':').map(Number); return (hh || 0) * 60 + (mm || 0); };
+/** @param {number} m */
+const spFromMin = (m) => `${String(Math.floor(((m % 1440) + 1440) % 1440 / 60)).padStart(2, '0')}:${String((((m % 1440) + 1440) % 1440) % 60).padStart(2, '0')}`;
+/** @param {number} m */
+const spSnap = (m) => Math.max(0, Math.min(1440 - 15, Math.round(m / 15) * 15));
+/** @param {number[]} days @param {number} from @param {number} to */
+const spSwapDay = (days, from, to) => { const set = new Set(days); set.delete(from); set.add(to); return [...set].sort((a, b) => a - b); };
+
 /** Beschreibung eines Ziels (Job/Uhr-Event). @param {any} t @param {Ctx} ctx @param {any[]} playlists */
 function targetText(t, ctx, playlists) {
   const what =
@@ -90,12 +101,15 @@ export function mountPlanning(root, ctx) {
       'Wiederkehrende Elemente zur vollen Minute, z. B. Station-ID zu :00, Jingle zu :30.'));
     // --- Sendeplan ---
     const sched = panel('Sendeplan', [h('button', { class: 'btn small primary', onclick: () => editPlan() }, '＋ Sendung')],
-      table(['Sendung', 'Tage', 'Zeit', 'Playlist', ''], plan.plans.map((/** @type {any} */ p) => h('tr', { class: p.id === plan.activePlanId ? 'active-row' : '' },
-        h('td', {}, p.label, p.id === plan.activePlanId ? h('span', { class: 'pill active', style: 'margin-left:6px' }, 'läuft') : null),
-        h('td', {}, daysText(p.days)), h('td', { class: 'num' }, `${p.from}–${p.to}`),
-        h('td', {}, `${playlists.find((x) => x.id === p.playlistId)?.name ?? '?'}${p.shuffle ? ' · gemischt' : ''}`),
-        act(iconBtn('Bearbeiten', '✎', () => editPlan(p)), iconBtn('Löschen', '✕', () => run(async () => { await ctx.api.del(ctx.url(`/plans/${p.id}`)); await load(); }))))),
-      'Kein Sendeplan: Die Automation folgt der Sendeuhr. Mit Sendungen spielt im Zeitfenster die gewählte Playlist.'));
+      h('div', {},
+        h('p', { class: 'muted', style: 'margin:0 0 8px' }, 'Sendung ziehen zum Verschieben (Zeit/Tag), unteren Rand ziehen für die Dauer, Playlist auf ein freies Feld ziehen für eine neue Sendung.'),
+        schedGrid(),
+        h('div', { style: 'margin-top:12px' }, table(['Sendung', 'Tage', 'Zeit', 'Playlist', ''], plan.plans.map((/** @type {any} */ p) => h('tr', { class: p.id === plan.activePlanId ? 'active-row' : '' },
+          h('td', {}, p.label, p.id === plan.activePlanId ? h('span', { class: 'pill active', style: 'margin-left:6px' }, 'läuft') : null),
+          h('td', {}, daysText(p.days)), h('td', { class: 'num' }, `${p.from}–${p.to}`),
+          h('td', {}, `${playlists.find((x) => x.id === p.playlistId)?.name ?? '?'}${p.shuffle ? ' · gemischt' : ''}`),
+          act(iconBtn('Bearbeiten', '✎', () => editPlan(p)), iconBtn('Löschen', '✕', () => run(async () => { await ctx.api.del(ctx.url(`/plans/${p.id}`)); await load(); }))))),
+          'Kein Sendeplan: Die Automation folgt der Sendeuhr. Mit Sendungen spielt im Zeitfenster die gewählte Playlist.'))));
     // --- Playlists ---
     const pls = panel('Playlists', [
       h('button', { class: 'btn small', onclick: saveQueue }, 'Queue speichern'),
@@ -104,7 +118,10 @@ export function mountPlanning(root, ctx) {
     ], h('div', {}, ...(playlists.length ? playlists.map((p) => {
       const open = openPl === p.id;
       return h('div', { class: 'pl' },
-        h('div', { class: 'pl-head' },
+        h('div', {
+          class: 'pl-head', draggable: true, title: 'In den Sendeplan ziehen für eine neue Sendung',
+          ondragstart: (/** @type {DragEvent} */ e) => e.dataTransfer?.setData('application/json', JSON.stringify({ mode: 'new', playlistId: p.id, name: p.name })),
+        },
           h('span', { class: 'pl-dot', style: `background:${p.color}` }),
           h('button', { class: 'pl-name', onclick: () => { openPl = open ? null : p.id; render(); } }, `${open ? '▾' : '▸'} ${p.name}`),
           h('span', { class: 'muted' }, `${p.items.length} Titel · ${fmt(p.items.reduce((/** @type {number} */ a, /** @type {string} */ id) => a + (byId.get(id)?.durationMs ?? 0), 0))}`),
@@ -125,6 +142,80 @@ export function mountPlanning(root, ctx) {
         h('td', { class: 'num' }, clockTime(x.at)), h('td', {}, x.artist ? `${x.artist} – ${x.title}` : x.title), h('td', {}, h('span', { class: 'tag' }, x.category)))),
       'Noch nichts gespielt.'));
     root.replaceChildren(h('div', { class: 'view-grid' }, jobs, clock, sched, pls, hist));
+  }
+
+  /** Sendeplan als Wochengitter: Sendungen ziehen (Zeit/Tag), unteren Rand ziehen (Dauer), Playlist hineinziehen (neu). */
+  function schedGrid() {
+    const cols = DAYS.map((_, day) => {
+      const dayPlans = plan.plans.filter((/** @type {any} */ p) => !p.days?.length || p.days.length === 7 || p.days.includes(day));
+      const blocks = dayPlans.map((/** @type {any} */ p) => {
+        const from = spToMin(p.from);
+        const toRaw = spToMin(p.to);
+        const overnight = toRaw <= from;
+        const top = from * SP_PX_PER_MIN;
+        const height = Math.max(18, ((overnight ? 1440 : toRaw) - from) * SP_PX_PER_MIN);
+        const daily = !p.days?.length || p.days.length === 7;
+        return h('div', {
+          class: `sp-block${p.id === plan.activePlanId ? ' active' : ''}`,
+          style: `top:${top}px;height:${height}px`,
+          draggable: true,
+          title: `${p.label} · ${daysText(p.days)} · ${p.from}–${p.to} · Klicken zum Bearbeiten`,
+          ondragstart: (/** @type {DragEvent} */ e) => { const r = /** @type {HTMLElement} */ (e.currentTarget).getBoundingClientRect(); e.dataTransfer?.setData('application/json', JSON.stringify({ mode: 'move', planId: p.id, fromDay: day, grabY: e.clientY - r.top })); },
+          onclick: () => editPlan(p),
+        },
+          h('span', { class: 'sp-label' }, p.label),
+          h('span', { class: 'sp-time num' }, `${p.from}–${p.to}`),
+          overnight ? null : h('span', {
+            class: 'sp-resize', title: 'Dauer ändern', draggable: true,
+            onclick: (/** @type {Event} */ e) => e.stopPropagation(),
+            ondragstart: (/** @type {DragEvent} */ e) => { e.stopPropagation(); e.dataTransfer?.setData('application/json', JSON.stringify({ mode: 'resize', planId: p.id })); },
+          }));
+      });
+      return h('div', {
+        class: 'sp-col', 'data-day': String(day),
+        ondragover: (/** @type {DragEvent} */ e) => e.preventDefault(),
+        ondrop: (/** @type {DragEvent} */ e) => onSchedDrop(e, day),
+      }, ...blocks);
+    });
+    const hours = Array.from({ length: 24 }, (_, hh) => h('div', { class: 'sp-hourlabel', style: `top:${hh * 60 * SP_PX_PER_MIN}px` }, `${String(hh).padStart(2, '0')}:00`));
+    return h('div', { class: 'sp-grid' },
+      h('div', { class: 'sp-head' }, h('div', { class: 'sp-corner' }), ...DAYS.map((d) => h('div', { class: 'sp-day' }, d))),
+      h('div', { class: 'sp-scroll' },
+        h('div', { class: 'sp-body' },
+          h('div', { class: 'sp-hours' }, ...hours),
+          ...cols)));
+  }
+
+  /** @param {DragEvent} e @param {number} day */
+  async function onSchedDrop(e, day) {
+    e.preventDefault();
+    const raw = e.dataTransfer?.getData('application/json');
+    if (!raw) return;
+    /** @type {any} */ const data = JSON.parse(raw);
+    const col = /** @type {HTMLElement} */ (e.currentTarget);
+    const rect = col.getBoundingClientRect();
+    if (data.mode === 'new') {
+      if (!playlists.length) return;
+      const start = spSnap((e.clientY - rect.top) / SP_PX_PER_MIN);
+      const body = { label: data.name, days: [day], from: spFromMin(start), to: spFromMin(start + 60), playlistId: data.playlistId, shuffle: false };
+      return run(async () => { await ctx.api.post(ctx.url('/plans'), body); status(`Sendung „${data.name}“ eingeplant`); await load(); });
+    }
+    const p = plan.plans.find((/** @type {any} */ x) => x.id === data.planId);
+    if (!p) return;
+    if (data.mode === 'resize') {
+      const from = spToMin(p.from);
+      const end = spSnap((e.clientY - rect.top) / SP_PX_PER_MIN);
+      if (end <= from + 15) return;
+      return run(async () => { await ctx.api.patch(ctx.url(`/plans/${p.id}`), { ...p, to: spFromMin(end) }); await load(); });
+    }
+    // Verschieben: Zeit ändert sich immer, Tag nur bei nicht-täglichen Sendungen (sonst wäre unklar, welcher Tag gemeint ist)
+    const start = spSnap((e.clientY - rect.top - (data.grabY ?? 0)) / SP_PX_PER_MIN);
+    let dur = spToMin(p.to) - spToMin(p.from);
+    if (dur <= 0) dur += 1440;
+    const daily = !p.days?.length || p.days.length === 7;
+    const days = daily || day === data.fromDay ? p.days : spSwapDay(p.days, data.fromDay, day);
+    const body = { ...p, from: spFromMin(start), to: spFromMin(start + dur), days };
+    return run(async () => { await ctx.api.patch(ctx.url(`/plans/${p.id}`), body); await load(); });
   }
 
   /** @param {string[]} arr @param {number} a @param {number} b */

@@ -375,6 +375,24 @@ tr.active-row td { background: rgba(34,197,94,.08); }
 .pl-items li { display: flex; gap: 8px; align-items: center; }
 .pl-items li > span:first-child { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .rec-now { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+.pl-head[draggable] { cursor: grab; }
+/* Sendeplan-Gitter (Drag & Drop) */
+.sp-grid { border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.sp-head { display: grid; grid-template-columns: 44px repeat(7, 1fr); background: var(--panel-solid); }
+.sp-corner { border-right: 1px solid var(--line); }
+.sp-day { padding: 5px 0; text-align: center; font-size: 11px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; border-left: 1px solid var(--line); }
+.sp-scroll { max-height: 480px; overflow-y: auto; }
+.sp-body { display: grid; grid-template-columns: 44px repeat(7, 1fr); position: relative; height: 1440px; }
+.sp-hours { position: relative; border-right: 1px solid var(--line); }
+.sp-hourlabel { position: absolute; left: 0; right: 4px; text-align: right; transform: translateY(-6px); font-size: 10px; color: var(--muted); }
+.sp-col { position: relative; border-left: 1px solid var(--line); background-image: repeating-linear-gradient(to bottom, transparent 0, transparent 59px, var(--line) 59px, var(--line) 60px); }
+.sp-col:first-of-type { border-left: 0; }
+.sp-block { position: absolute; left: 2px; right: 2px; border-radius: 6px; background: linear-gradient(135deg, rgba(47, 140, 255, .35), rgba(139, 92, 246, .28)); border: 1px solid var(--line-2); padding: 3px 5px; font-size: 11px; overflow: hidden; cursor: grab; display: flex; flex-direction: column; gap: 1px; }
+.sp-block.active { border-color: #22c55e; box-shadow: 0 0 0 1px #22c55e inset; }
+.sp-label { font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sp-time { color: var(--muted); font-size: 10px; }
+.sp-resize { position: absolute; left: 0; right: 0; bottom: 0; height: 7px; cursor: ns-resize; }
+.sp-resize::after { content: ''; position: absolute; left: 50%; bottom: 2px; width: 20px; height: 2px; margin-left: -10px; background: var(--line-2); border-radius: 2px; }
 /* laut.fm */
 .lf-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; }
 .lf-content { display: flex; flex-direction: column; gap: 10px; }
