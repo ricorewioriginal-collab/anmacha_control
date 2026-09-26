@@ -309,6 +309,8 @@ export function createHttpServer(app: AirDeckApp, studioDir: string): Server {
 
   // --- Ordner, URL-Streams, M3U, Titelanzeige, Verlauf ---
   add('GET', '/api/v1/stations/:sid/folders', 'media:read', (c) => app.svc.media.folders(sid(c)));
+  add('GET', '/api/v1/stations/:sid/media/integrity', 'media:read', (c) => app.svc.media.integrityCheck(sid(c)));
+  add('POST', '/api/v1/stations/:sid/media/:id/relink', 'media:write', async (c) => app.svc.media.relinkMedia(sid(c), c.params.id!, String((await c.body()).file ?? '')));
   add('POST', '/api/v1/stations/:sid/media/url', 'media:write', async (c) => app.svc.media.addUrlMedia(sid(c), (await c.body()) as never));
   add('POST', '/api/v1/stations/:sid/queue/fill-from', 'queue:write', async (c) => ({ added: app.queueFillFrom(sid(c), (await c.body()) as never) }));
   add('GET', '/api/v1/stations/:sid/queue.m3u', 'queue:read', (c) => {

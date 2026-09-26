@@ -169,6 +169,71 @@ export class MediaService {
     return [...new Set(this.app.rt(stationId).data.library.map((m) => m.folder ?? '').filter(Boolean))].sort((a, b) => a.localeCompare(b, 'de'));
   }
 
+  /** Dateien im Medienordner des Senders, auf die kein Bibliothekseintrag mehr zeigt (z. B. nach unvollständigem Restore). */
+  async orphanFiles(stationId: string): Promise<string[]> {
+    const dir = join(this.app.mediaDir, stationId);
+    let entries;
+    try {
+      entries = await readdir(dir, { withFileTypes: true });
+    } catch {
+      return [];
+    }
+    const known = new Set(this.app.rt(stationId).data.library.filter((m) => !m.url && !m.linkedPath).map((m) => m.file));
+    return entries.filter((e) => e.isFile() && AUDIO_FILE_RE.test(e.name) && !known.has(e.name)).map((e) => e.name).sort((a, b) => a.localeCompare(b, 'de'));
+  }
+
+  /**
+   * Bibliotheks-Integritätsprüfung: fehlende Dateien (in der DB, aber nicht auf der Platte) und
+   * mögliche Duplikate (gleicher Interpret/Titel/Länge). Baut auf der bestehenden Bibliothek auf,
+   * keine zweite Mediendatenbank.
+   */
+  async integrityCheck(stationId: string): Promise<{ missing: MediaItem[]; duplicates: MediaItem[][]; orphans: string[] }> {
+    const lib = this.app.rt(stationId).data.library;
+    const missing: MediaItem[] = [];
+    const groups = new Map<string, MediaItem[]>();
+    const norm = (x: string) => x.toLowerCase().normalize('NFKD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, ' ').trim();
+    for (const m of lib) {
+      if (!m.url && !existsSync(this.mediaPath(stationId, m))) {
+        missing.push(m);
+        continue;
+      }
+      if (m.durationMs == null) continue;
+      const key = `${norm(m.artist)}|${norm(m.title)}|${Math.round(m.durationMs / 1000)}`;
+      if (!key.trim().replace(/\|/g, '')) continue;
+      (groups.get(key) ?? groups.set(key, []).get(key)!).push(m);
+    }
+    const duplicates = [...groups.values()].filter((g) => g.length > 1);
+    return { missing, duplicates, orphans: await this.orphanFiles(stationId) };
+  }
+
+  /** Fehlenden Eintrag auf eine vorhandene, unbekannte Datei im Medienordner umbiegen (statt neu hochzuladen). */
+  relinkMedia(stationId: string, id: string, file: string): MediaItem {
+    const m = this.media(stationId, id);
+    if (m.url) throw new AppError(400, 'invalid_media', 'URL-Medien können nicht neu verknüpft werden');
+    const target = join(this.app.mediaDir, stationId, file);
+    if (!existsSync(this.mediaPath(stationId, m))) {
+      // nur tatsächlich fehlende Einträge dürfen umgebogen werden
+    } else {
+      throw new AppError(409, 'not_missing', 'Dieser Eintrag hat bereits eine gültige Datei');
+    }
+    if (!AUDIO_FILE_RE.test(file) || file.includes('/') || file.includes('\\') || !existsSync(target)) throw new AppError(400, 'invalid_file', 'Datei nicht im Medienordner gefunden');
+    m.file = file;
+    m.linkedPath = undefined;
+    m.durationMs = null;
+    m.check = undefined;
+    m.lufs = undefined;
+    m.truePeakDb = undefined;
+    this.app.publish('library.changed', stationId, { updated: m });
+    this.app.changed();
+    this.app.audit.write({ kind: 'media', event: 'relinked', stationId, id, file });
+    const ffprobe = this.app.ffmpeg?.ffprobe;
+    if (ffprobe) probeMedia(ffprobe, this.mediaPath(stationId, m)).then(({ durationMs }) => {
+      if (durationMs && this.app.rt(stationId).data.library.includes(m)) this.updateMedia(stationId, m.id, { durationMs });
+    });
+    this.queueLoudness(stationId, m.id);
+    return m;
+  }
+
   addUrlMedia(stationId: string, input: { url: string; title?: string; artist?: string; durationMs?: number; folder?: string }): MediaItem {
     const url = String(input.url ?? '').trim();
     if (!/^https?:\/\/[^\s]+$/i.test(url)) throw new AppError(400, 'invalid_url', 'Nur http(s)-URLs sind erlaubt');
