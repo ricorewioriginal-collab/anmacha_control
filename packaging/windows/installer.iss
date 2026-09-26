@@ -325,6 +325,48 @@ begin
       if Pos(Lowercase(S[I]), 'abcdefghijklmnopqrstuvwxyz') = 0 then begin Result := True; Exit; end;
 end;
 
+procedure CurPageChanged(CurPageID: Integer);
+var
+  ModeName, LanName, AdminName, StorageName, ComponentsText: String;
+begin
+  if CurPageID <> ConfirmPage.ID then Exit;
+
+  if ServerModePage.SelectedValueIndex = 1 then ModeName := 'SERVER'
+  else if ServerModePage.SelectedValueIndex = 2 then ModeName := 'HYBRID'
+  else ModeName := 'LOCAL';
+
+  if LanPage.SelectedValueIndex = 0 then LanName := 'Y (LAN)' else LanName := 'N (nur dieser PC)';
+
+  if AdminChoicePage.SelectedValueIndex = 0 then
+    AdminName := Trim(AdminPage.Values[0])
+  else
+    AdminName := 'spaeter im AirDeck-Setup';
+
+  if StoragePage.SelectedValueIndex = 1 then StorageName := 'MySQL / MariaDB'
+  else if StoragePage.SelectedValueIndex = 2 then StorageName := 'Firebase'
+  else StorageName := 'SQLite / lokal';
+
+  ComponentsText := 'Core/Studio: Y';
+  if WizardIsComponentSelected('ffmpeg') then
+    ComponentsText := ComponentsText + ' · FFmpeg/Encoder: Y'
+  else
+    ComponentsText := ComponentsText + ' · FFmpeg/Encoder: N';
+  if WizardIsComponentSelected('android') then
+    ComponentsText := ComponentsText + ' · Android APK: Y'
+  else
+    ComponentsText := ComponentsText + ' · Android APK: N';
+
+  ConfirmPage.SubCaptionLabel.Caption :=
+    'Bitte pruefen:' + #13#10#13#10 +
+    'Betriebsart: ' + ModeName + #13#10 +
+    'Port: ' + Trim(NetworkPage.Values[0]) + #13#10 +
+    'Netzwerk: ' + LanName + #13#10 +
+    'Administrator: ' + AdminName + #13#10 +
+    'Datenspeicher: ' + StorageName + #13#10 +
+    'Komponenten: ' + ComponentsText + #13#10#13#10 +
+    'Y installiert AirDeck mit diesen Einstellungen. N bricht hier ab; mit Zurueck kannst du Aenderungen vornehmen.';
+end;
+
 function NextButtonClick(CurPageID: Integer): Boolean;
 var
   PortNum: Integer;
