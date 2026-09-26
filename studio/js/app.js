@@ -1501,7 +1501,10 @@ function bindStatic() {
     }
   });
   $('btn-notify').addEventListener('click', editNotify);
-  mountUpdates(api);
+  // Update-Prüfung braucht globale Admin-Rechte (siehe /api/v1/update/settings) - für stationsbeschränkte
+  // Konten (z. B. den Demo-Zugang) macht der Knopf keinen Sinn und würde nur unnötig 403 erzeugen.
+  $('btn-update').hidden = !isGlobalAdmin();
+  if (isGlobalAdmin()) mountUpdates(api);
   buildQuick();
   bindLiveVoice();
   bindProcessing();
