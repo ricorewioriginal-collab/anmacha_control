@@ -64,6 +64,35 @@ test('Rotationsregeln sind einstellbar (P2 #17): werden übernommen, validiert u
   }
 });
 
+test('Uhr-Vorlage (Kategorien-Takt, P2 #18): einstellbar, ungültige Kategorien werden verworfen, treibt Auto-Fill wirklich an', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'airdeck-clocktpl-'));
+  let app = new AirDeckApp(dir, { stableMs: 0, ffmpeg: null });
+  try {
+    const before = app.automationView('main') as { clock: { slots: string[] } };
+    assert.deepEqual(before.clock.slots, ['station_id', 'music', 'music', 'jingle', 'music', 'music', 'sweeper', 'music', 'music', 'drop', 'music', 'music'], 'Standard-Stunde vor jeder Änderung');
+
+    // Eigene Vorlage speichern, mit einer ungültigen "Kategorie" gemischt - die muss verworfen werden
+    const saved = app.setAutomation('main', { clock: { id: 'custom', name: 'Meine Stunde', slots: ['music', 'jingle', 'not_a_real_category', 'music'] } as never }) as { clock: { slots: string[] } };
+    assert.deepEqual(saved.clock.slots, ['music', 'jingle', 'music'], 'ungültige Kategorie wird herausgefiltert, nicht blind übernommen');
+
+    // Bleibt nach echtem Neustart erhalten
+    app.shutdown();
+    app = new AirDeckApp(dir, { stableMs: 0, ffmpeg: null });
+    assert.deepEqual((app.automationView('main') as { clock: { slots: string[] } }).clock.slots, ['music', 'jingle', 'music']);
+
+    // Wirkt sich wirklich auf Auto-Fill aus: nur Jingle+Musik im Takt, obwohl die Bibliothek auch andere Kategorien hat
+    for (const [id, cat] of [['m1', 'music'], ['m2', 'music'], ['j1', 'jingle'], ['n1', 'news']] as const) {
+      app.svc.media.addMedia('main', { id, title: id, artist: id, category: cat, file: `${id}.mp3`, durationMs: 10_000, addedAt: 0 });
+    }
+    app.autoFill(app.rt('main'), true);
+    const cats = (app.queueView('main') as { items: { mediaId: string }[] }).items.map((x) => x.mediaId[0]);
+    assert.ok(cats.every((c) => c === 'm' || c === 'j'), `Auto-Fill folgt der Vorlage (nur Musik/Jingle), nicht: ${cats.join(',')}`);
+  } finally {
+    app.shutdown();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('Zeitplan-Job feuert, Wiederholung wird weitergeschoben', async () => {
   const { app, done } = setup();
   try {

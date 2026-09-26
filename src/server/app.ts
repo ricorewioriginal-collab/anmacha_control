@@ -792,7 +792,8 @@ export class AirDeckApp {
     if (typeof patch.autoFill === 'boolean') rt.data.autoFill = patch.autoFill;
     if (typeof patch.minQueue === 'number' && patch.minQueue >= 1 && patch.minQueue <= 100) rt.data.minQueue = Math.floor(patch.minQueue);
     if (patch.clock && Array.isArray(patch.clock.slots)) {
-      rt.data.clock = { id: String(patch.clock.id ?? 'custom'), name: String(patch.clock.name ?? 'Sendeuhr').slice(0, 80), slots: patch.clock.slots.slice(0, 200) };
+      const slots = patch.clock.slots.filter((s): s is MediaItem['category'] => (MEDIA_CATEGORIES as readonly string[]).includes(s)).slice(0, 200);
+      rt.data.clock = { id: String(patch.clock.id ?? 'custom'), name: String(patch.clock.name ?? 'Sendeuhr').slice(0, 80), slots };
       rt.data.clockCursor = 0;
     }
     if (patch.rotation && typeof patch.rotation === 'object') {

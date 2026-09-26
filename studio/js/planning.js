@@ -6,6 +6,14 @@ import { DAYS, clockTime, download, fmt, formDialog, h, mediaTitle, run, status 
 const REPEAT = /** @type {Record<string,string>} */ ({ none: 'einmalig', hourly: 'stündlich', daily: 'täglich', weekdays: 'Mo–Fr', weekly: 'wöchentlich' });
 const MODE = /** @type {Record<string,string>} */ ({ now: 'sofort (Crossfade)', track: 'nach dem Titel', fx: 'über der Musik' });
 const KIND = /** @type {Record<string,string>} */ ({ media: 'Titel', folder: 'Ordner (Rotation)', url: 'URL / Stream', playlist: 'Playlist' });
+const CLOCK_CAT_LABEL = /** @type {Record<string,string>} */ ({
+  music: 'Musik', jingle: 'Jingle', sweeper: 'Sweeper', station_id: 'Station-ID', drop: 'Drop', news: 'Nachrichten',
+  ad: 'Werbung', voice_track: 'Voicetrack', tts: 'TTS', bed: 'Bett', stream: 'Stream',
+});
+const CLOCK_CAT_COLOR = /** @type {Record<string,string>} */ ({
+  music: '#1f7ae0', jingle: '#e2542b', sweeper: '#6a4de0', station_id: '#1f9ec2', drop: '#b43ad6', news: '#5a5ee8',
+  ad: '#e0a21f', voice_track: '#1fae6a', tts: '#28a3a8', bed: '#4b6a8f', stream: '#c23a6e',
+});
 
 /**
  * @typedef {{ api: import('./api.js').Api, url: (p: string) => string, library: () => any[], folders: () => Promise<string[]> }} Ctx
@@ -89,6 +97,15 @@ export function mountPlanning(root, ctx) {
     status('Rotationsregeln gespeichert');
   }
 
+  /** @param {string[]} slots */
+  async function saveClockSlots(slots) {
+    const clock = { id: automation.clock?.id ?? 'custom', name: automation.clock?.name ?? 'Sendeuhr', slots };
+    await run(async () => { automation = await ctx.api.patch(ctx.url('/automation'), { clock }); });
+    render();
+  }
+
+  let clockDragFrom = /** @type {number|null} */ (null);
+
   function render() {
     const byId = new Map(ctx.library().map((m) => [m.id, m]));
     // --- Zeitplan ---
@@ -117,6 +134,31 @@ export function mountPlanning(root, ctx) {
       h('label', {}, h('div', { class: 'muted' }, 'Titel erst wieder nach … Titeln'), rotTitle),
       h('label', {}, h('div', { class: 'muted' }, 'Genre erst wieder nach … Titeln (0 = aus)'), rotGenre),
       h('button', { class: 'btn small primary', style: 'align-self:flex-end', onclick: () => saveRotation(rotArtist, rotTitle, rotGenre) }, 'Speichern')));
+    // --- Uhr-Vorlage (Kategorien-Takt, wiederholt sich, treibt den Auto-Fill) ---
+    const slots = automation.clock?.slots ?? [];
+    const addSlotSel = /** @type {HTMLSelectElement} */ (h('select', {}, ...Object.entries(CLOCK_CAT_LABEL).map(([v, l]) => h('option', { value: v }, l))));
+    const clockChips = slots.length
+      ? h('ol', { class: 'clock-slots' }, ...slots.map((/** @type {string} */ cat, /** @type {number} */ i) => h('li', {
+          class: 'clock-chip', draggable: true, style: `--c:${CLOCK_CAT_COLOR[cat] ?? '#2f8cff'}`, title: 'Ziehen zum Umsortieren',
+          ondragstart: () => { clockDragFrom = i; },
+          ondragover: (/** @type {DragEvent} */ e) => e.preventDefault(),
+          ondrop: (/** @type {DragEvent} */ e) => {
+            e.preventDefault();
+            if (clockDragFrom === null || clockDragFrom === i) return;
+            const next = [...slots];
+            const [moved] = next.splice(clockDragFrom, 1);
+            next.splice(i, 0, /** @type {string} */ (moved));
+            clockDragFrom = null;
+            saveClockSlots(next);
+          },
+        },
+          h('span', {}, CLOCK_CAT_LABEL[cat] ?? cat),
+          h('button', { title: 'Entfernen', onclick: () => saveClockSlots(slots.filter((/** @type {string} */ _, /** @type {number} */ k) => k !== i)) }, '✕'))))
+      : h('div', { class: 'empty' }, 'Keine Vorlage: Auto-Fill greift direkt auf Musik zu, ohne festen Takt (z. B. Jingle alle paar Titel).');
+    const clockTpl = panel('Uhr-Vorlage (Kategorien-Takt)', [], h('div', {},
+      h('p', { class: 'muted', style: 'margin:0 0 8px' }, 'Wiederkehrender Kategorien-Takt, den Auto-Fill immer wieder von vorn durchläuft (z. B. Station-ID, Musik, Musik, Jingle, …). Ziehen zum Umsortieren.'),
+      clockChips,
+      h('div', { class: 'row', style: 'margin-top:8px' }, addSlotSel, h('button', { class: 'btn small', onclick: () => saveClockSlots([...slots, addSlotSel.value]) }, '＋ Takt hinzufügen'))));
     // --- Sendeplan ---
     const sched = panel('Sendeplan', [h('button', { class: 'btn small primary', onclick: () => editPlan() }, '＋ Sendung')],
       h('div', {},
@@ -159,7 +201,7 @@ export function mountPlanning(root, ctx) {
       table(['Zeit', 'Titel', 'Art'], history.slice(0, 200).map((x) => h('tr', {},
         h('td', { class: 'num' }, clockTime(x.at)), h('td', {}, x.artist ? `${x.artist} – ${x.title}` : x.title), h('td', {}, h('span', { class: 'tag' }, x.category)))),
       'Noch nichts gespielt.'));
-    root.replaceChildren(h('div', { class: 'view-grid' }, jobs, clock, rotation, sched, pls, hist));
+    root.replaceChildren(h('div', { class: 'view-grid' }, jobs, clock, rotation, clockTpl, sched, pls, hist));
   }
 
   /** Sendeplan als Wochengitter: Sendungen ziehen (Zeit/Tag), unteren Rand ziehen (Dauer), Playlist hineinziehen (neu). */
