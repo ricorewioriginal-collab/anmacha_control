@@ -800,9 +800,10 @@ export class Playout {
   }
 
   private mixFrames(m: MediaItem, total: number | null): number {
-    // Externe Stream-URLs (category 'stream') sollen genau wie Musik sauber ein-/ausgeblendet werden,
-    // nicht hart geschnitten - ein Sender kann eine Stream-Übernahme jederzeit als Programminhalt einplanen.
-    const base = m.segueMs ?? (m.category === 'music' || m.category === 'stream' ? this.opts.crossfadeMs : 0);
+    // Musik, externe Stream-URLs (category 'stream') und Moderationslinks (category 'voice_track')
+    // sollen sauber ein-/ausgeblendet werden, nicht hart geschnitten. Jingles/Sweeper/Station-IDs/News/
+    // Werbung bleiben bewusst beim harten Schnitt (knackige Kennung), außer per Titel (segueMs) gesetzt.
+    const base = m.segueMs ?? (m.category === 'music' || m.category === 'stream' || m.category === 'voice_track' ? this.opts.crossfadeMs : 0);
     return msToFrames(total ? Math.min(base, framesToMs(total) / 2) : base);
   }
 
