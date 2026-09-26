@@ -1736,6 +1736,11 @@ function renderNowPlaying() {
   const m = S.nowPlaying?.media;
   $('np-title').textContent = m?.title ?? '–';
   $('np-artist').textContent = m?.artist ?? '';
+  $('top-title').textContent = m?.title ?? '–';
+  $('top-artist').textContent = m?.artist ?? '';
+  const tc = coverEl(m, 'top-now-cover');
+  tc.id = 'top-cover';
+  $('top-cover').replaceWith(tc);
   const cover = $('np-cover');
   const nc = coverEl(m, 'cover big');
   nc.id = 'np-cover';
@@ -2368,6 +2373,7 @@ function liveProgress() {
   $('np-progress').style.width = pos != null && dur ? `${Math.min(100, (pos / dur) * 100)}%` : '0';
   $('m-time').textContent = $('np-time').textContent;
   $('m-progress').style.width = $('np-progress').style.width;
+  $('top-time').textContent = $('np-time').textContent;
   const running = eng() ? serverMode() && S.mode?.base === 'AUTO' : S.auto;
   const mp = $('m-play');
   if (mp.dataset.on !== String(running)) {
