@@ -58,6 +58,10 @@ test('Zusammenfassung: ok, ohne ffmpeg eingeschränkt, Stream-Zustand', () => {
     assert.equal(h.summary().encoder, 'running');
     // Senderfilter für Einzelberichte
     assert.deepEqual((h.stream((s) => s === 's2') as { outputs: unknown[] }).outputs.length, 1);
+    // Ein fremder verbundener Sender darf den Fehler des eigenen Senders nicht verdecken.
+    assert.equal((h.stream((s) => s === 's2') as { state: string }).state, 'error');
+    assert.equal((h.stream((s) => s === 's1') as { state: string }).state, 'connected');
+    assert.deepEqual(h.stream(() => false), { state: 'idle', outputs: [] });
 
     const noLame = new HealthManager(source(dir, { ffmpeg: () => ({ ...ff, encoders: { mp3: false, opus: true } }) }));
     assert.equal(noLame.dependencies().find((d) => d.id === 'ffmpeg')!.state, 'BROKEN');
