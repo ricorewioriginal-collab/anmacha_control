@@ -29,7 +29,14 @@ test('Studio-HTML: IDs sind eindeutig und Nextcloud ist nur in Medien integriert
 });
 
 test('Referenzlayout: zentrale Studio-Bereiche bleiben im DOM vorhanden', () => {
-  for (const id of ['decks', 'carts-panel', 'carts', 'work-panel', 'queue-body', 'live-panel', 'outputs']) {
+  for (const id of ['decks', 'carts-panel', 'carts', 'work-panel', 'queue-body', 'live-panel', 'outputs', 'studio-schedule', 'studio-schedule-track']) {
     assert.match(html, new RegExp(`id="${id}"`), `#${id} fehlt`);
   }
+});
+
+
+test('Sendeplan bleibt doppelt erreichbar: kompakt im Studio und vollständig über Navigation', () => {
+  assert.match(html, /id="studio-schedule"/, 'kompakte Studio-Timeline fehlt');
+  assert.match(html, /data-view="planning"/, 'Navigation zur vollständigen Planung fehlt');
+  assert.match(html, /id="view-planning"/, 'vollständige Planungsansicht fehlt');
 });
