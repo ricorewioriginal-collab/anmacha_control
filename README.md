@@ -27,6 +27,7 @@ Windows kann bei nicht signierten Dateien warnen: „Weitere Informationen“ �
 ## 🚀 Live-Demo ausprobieren
 
 **[airdeck-demo.ricorewi-radio.de](https://airdeck-demo.ricorewi-radio.de)** – Studio direkt im Browser, ohne Installation.
+Login: Benutzername `demo`, Passwort `airdeck-demo`
 
 ⚠️ Reine Testinstanz: setzt sich **automatisch alle 10 Minuten komplett zurück** (alle Daten weg), läuft ohne Audio-Engine – keine echte 24/7-Sendung möglich. Bitte nichts Echtes hier ablegen.
 

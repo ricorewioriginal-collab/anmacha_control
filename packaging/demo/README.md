@@ -37,18 +37,29 @@ ohne dass daraus eine echte, dauerhafte Radiosendung wird.
    erzeugt) und legt danach automatisch wieder einen Beispielsender „AirDeck-FM" mit Hörerbereich an,
    damit die Demo nicht als leerer Einrichtungsassistent dasteht.
 
-## Aktuellen Zugang holen
+## Zugang für Besucher
 
-Nach jedem Reset gibt es ein neues Admin-Konto (neues Einmal-Passwort, neuer Admin-Token - wie bei jeder
-frischen AirDeck-Installation). Zum Nachschauen:
+Jeder Reset legt intern zwar ein neues, zufälliges Admin-Konto an (wie bei jeder frischen
+AirDeck-Installation) - **das ist aber nicht der Zugang für Demo-Besucher**, den kennt niemand ohne
+Server-Zugriff. Stattdessen legt [`reset-demo.sh`](reset-demo.sh) nach jedem Reset zusätzlich einen
+**festen** Demo-Zugang an, der immer gleich bleibt:
 
+| | |
+|---|---|
+| Benutzername | `demo` |
+| Passwort | `airdeck-demo` |
+
+Dieser Zugang ist absichtlich öffentlich (steht auch im Haupt-[README.md](../../README.md)) und bewusst
+eingeschränkt: nur auf den Demo-Sender selbst (kann keine anderen Sender/Benutzer anlegen oder löschen),
+und ohnehin alle 10 Minuten zurückgesetzt. Eigenen Namen/Passwort ändern via Umgebungsvariablen
+`AIRDECK_DEMO_USER` / `AIRDECK_DEMO_PASSWORD` vor `reset-demo.sh` (Passwort braucht mindestens 10 Zeichen,
+Buchstaben und eine Ziffer oder ein Sonderzeichen).
+
+Falls doch mal das interne (zufällige) Admin-Konto gebraucht wird, z. B. zum Debuggen:
 ```bash
 cd /opt/airdeck-demo
 docker compose -f packaging/demo/docker-compose.demo.yml logs airdeck-demo | grep -A1 -e "Admin-Token" -e "Einmal-Passwort"
 ```
-
-Diese Zugangsdaten sind absichtlich **nicht** automatisch öffentlich sichtbar - überlegt euch bewusst, ob
-und wie ihr sie Besuchern der Demo zeigen wollt (z. B. auf einer kleinen Hinweisseite direkt daneben).
 
 ## Wichtig
 

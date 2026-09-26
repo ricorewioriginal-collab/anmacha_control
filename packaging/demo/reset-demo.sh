@@ -35,4 +35,15 @@ curl -fs -X PATCH -H "$auth" -H "Content-Type: application/json" \
 curl -fs -X PUT -H "$auth" -H "Content-Type: application/json" \
   -d '{"requests":true,"messages":true,"voting":true,"voice":false}' "$api/listener" > /dev/null
 
-echo "[$(date -Is)] Demo zurückgesetzt und mit Beispielsender \"AirDeck-FM\" bestückt."
+# Fester Demo-Zugang statt eines sich staendig aendernden Tokens: wer ueber GitHub/README zur Demo
+# kommt, hat keinen Token und keinen SSH-Zugriff auf den Server, um sich einen zu holen. Benutzer/
+# Passwort sind bewusst oeffentlich (siehe README.md) - der Zugang ist auf den einen Demo-Sender
+# beschraenkt (stationIds: main, nicht "*"), kann also keine anderen Sender/Benutzer anlegen oder
+# loeschen, und alle 10 Minuten ist ohnehin alles wieder auf Anfang.
+demo_user="${AIRDECK_DEMO_USER:-demo}"
+demo_pass="${AIRDECK_DEMO_PASSWORD:-airdeck-demo}"
+curl -fs -X POST -H "Authorization: Bearer $token" -H "Content-Type: application/json" \
+  -d "{\"username\":\"$demo_user\",\"name\":\"Demo\",\"password\":\"$demo_pass\",\"roles\":[\"admin\"],\"stationIds\":[\"main\"],\"mustChangePassword\":false}" \
+  "http://127.0.0.1:8751/api/v1/users" > /dev/null
+
+echo "[$(date -Is)] Demo zurückgesetzt, Beispielsender \"AirDeck-FM\" und fester Demo-Zugang ($demo_user) eingerichtet."
