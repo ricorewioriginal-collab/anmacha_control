@@ -7,7 +7,7 @@ import { deviceName, loadProfiles, removeProfile, saveProfile, testConnection } 
 import { runSetup } from './setup.js';
 import { mountListeners } from './listeners.js';
 import { AudioEngine, DECKS, SilenceDetector, openMic, recordStream } from './audio.js';
-import { $, CATEGORY_STYLE, clockTime, download, fmt, formDialog, h, hydrateIcons, icon, mediaTitle, run, status } from './ui.js';
+import { $, CATEGORY_STYLE, DAYS, clockTime, download, fmt, formDialog, h, hydrateIcons, icon, mediaTitle, run, status } from './ui.js';
 import { mountPlanning, mountRecorder } from './planning.js';
 import { mountMediaManagement } from './mediamgmt.js';
 import { mountPlaylistManagement } from './playlists.js';
@@ -61,6 +61,7 @@ const S = {
   /** @type {any[]} */ outputs: [],
   /** @type {any[]} */ streamProfiles: [],
   /** @type {any} */ nowPlaying: null,
+  /** @type {any} */ planning: null,
   cartGroup: 'Alle',
   auto: false,
   streaming: false,
@@ -379,6 +380,7 @@ async function loadStation() {
   S.nowPlaying = np;
   updateLautfmNav();
   renderAll();
+  void refreshStudioSchedule();
   es?.close();
   es = api.events(S.station.id, onEvent, (ok) => $('conn').classList.toggle('ok', ok));
   if (autoSourceTimer) clearInterval(autoSourceTimer);
@@ -453,7 +455,7 @@ function onEvent(type, data) {
         playCart({ id: '_fx', mediaId: data.mediaId });
       }
       break;
-    case 'schedule.fired': status(`Zeitplan: ${data.label ?? data.kind} (${data.origin})`); break;
+    case 'schedule.fired': status(`Zeitplan: ${data.label ?? data.kind} (${data.origin})`); void refreshStudioSchedule(); break;
     case 'MODE_CHANGED':
       status(`Betriebsart: ${MODE_LABEL[data.mode] ?? data.mode}`, data.mode === 'EMERGENCY');
       run(async () => { S.mode = await api.get(url('/mode')); renderMode(); renderSources(); renderLibrary(); });
@@ -529,7 +531,72 @@ function renderAll() {
   renderSources();
   renderOutputs();
   renderNowPlaying();
+  renderStudioSchedule();
   /** @type {HTMLInputElement} */ ($('chk-autofill')).checked = !!S.queue.autoFill;
+}
+
+/** Kompakte Tages-Timeline im Live-Studio; die vollständige Bearbeitung bleibt unter „Sendeplan & Events“. */
+async function refreshStudioSchedule() {
+  S.planning = await api.get(url('/planning')).catch(() => null);
+  renderStudioSchedule();
+}
+
+function renderStudioSchedule() {
+  const track = document.getElementById('studio-schedule-track');
+  const hours = document.getElementById('studio-schedule-hours');
+  const empty = document.getElementById('studio-schedule-empty');
+  const date = document.getElementById('studio-schedule-date');
+  const nowEl = document.getElementById('studio-schedule-now');
+  if (!track || !hours || !empty || !date || !nowEl) return;
+
+  const now = new Date();
+  const day = (now.getDay() + 6) % 7; // Montag = 0 wie DAYS/PlanningService
+  date.textContent = `${DAYS[day]} · ${now.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' })}`;
+
+  const startMin = 6 * 60;
+  const endMin = 24 * 60;
+  const span = endMin - startMin;
+  hours.replaceChildren(...[6,8,10,12,14,16,18,20,22,24].map((hh) =>
+    h('span', { style: `left:${((hh * 60 - startMin) / span) * 100}%` }, hh === 24 ? '24:00' : `${String(hh).padStart(2,'0')}:00`)
+  ));
+
+  track.querySelectorAll('.studio-plan-block').forEach((el) => el.remove());
+  const plans = Array.isArray(S.planning?.plans) ? S.planning.plans : [];
+  const today = plans.filter((p) => !p.days?.length || p.days.length === 7 || p.days.includes(day));
+  const toMin = (t) => { const [hh, mm] = String(t || '00:00').split(':').map(Number); return hh * 60 + mm; };
+
+  for (const p of today) {
+    let from = toMin(p.from);
+    let to = toMin(p.to);
+    if (to <= from) to += 1440;
+    const visFrom = Math.max(startMin, from);
+    const visTo = Math.min(endMin, to);
+    if (visTo <= visFrom) continue;
+    const active = p.id === S.planning?.activePlanId;
+    const block = h('button', {
+      class: `studio-plan-block${active ? ' active' : ''}`,
+      style: `left:${((visFrom - startMin) / span) * 100}%;width:${Math.max(2.5, ((visTo - visFrom) / span) * 100)}%`,
+      title: `${p.label} · ${p.from}–${p.to} · vollständigen Sendeplan öffnen`,
+      onclick: () => showView('planning'),
+    },
+      h('strong', {}, p.label || 'Sendung'),
+      h('span', {}, `${p.from}–${p.to}`),
+      active ? h('b', {}, 'ON AIR') : null
+    );
+    track.append(block);
+  }
+
+  empty.hidden = today.length > 0;
+  if (!today.length) empty.textContent = 'Heute sind keine Sendungen eingeplant.';
+
+  const nowMin = now.getHours() * 60 + now.getMinutes();
+  if (nowMin >= startMin && nowMin <= endMin) {
+    nowEl.hidden = false;
+    nowEl.style.left = `${((nowMin - startMin) / span) * 100}%`;
+    nowEl.setAttribute('title', `Jetzt ${clockTime(Date.now())}`);
+  } else {
+    nowEl.hidden = true;
+  }
 }
 
 // ---------- Audio ----------
@@ -1774,6 +1841,7 @@ function bindStatic() {
   });
   $('btn-menu').addEventListener('click', () => $('sidebar').classList.toggle('open'));
   $('btn-storage').addEventListener('click', editStorage);
+  $('studio-schedule-refresh').addEventListener('click', () => void refreshStudioSchedule());
   // Dateien irgendwo ins Fenster gezogen: in die Bibliothek laden statt die Datei im Browser zu öffnen
   addEventListener('dragover', (e) => {
     if (e.dataTransfer?.types.includes('Files')) {
@@ -2014,6 +2082,7 @@ function showView(name) {
   $('sidebar').classList.remove('open');
   for (const id of ['overview', 'studio', 'planning', 'mediathek', 'playlists', 'recorder', 'lautfm', 'ai', 'nextcloud', 'bridges', 'listeners', 'users', 'handbuch']) $(`view-${id}`).hidden = id !== name;
   if (name !== 'studio') views[name]?.show();
+  else void refreshStudioSchedule();
 }
 
 // ---------- Liquidsoap ----------
