@@ -1154,7 +1154,8 @@ dialog h3 { font-size:17px; color:#f2fbff; }
       "np np"
       "decks decks"
       "lib carts"
-      "queue carts";
+      "queue carts"
+      "schedule schedule";
     gap: 9px;
     min-width: 0;
   }
@@ -1167,6 +1168,7 @@ dialog h3 { font-size:17px; color:#f2fbff; }
   #view-studio .lib-panel { grid-area: lib; }
   #view-studio .queue-panel { grid-area: queue; }
   #view-studio .carts-panel { grid-area: carts; }
+  #view-studio .studio-schedule { grid-area: schedule; }
   #view-studio #live-panel { display: grid; grid-template-columns: minmax(0, 1fr); gap: 9px; }
 
   #view-studio .np-panel {
@@ -1266,4 +1268,133 @@ dialog h3 { font-size:17px; color:#f2fbff; }
   .studio-titlebar { align-items:flex-start; flex-direction:column; }
   .studio-title-actions { width:100%; }
   .studio-title-actions .btn { flex:1; justify-content:center; }
+}
+
+
+/* Kompakter Sendeplan im Studio – gleiche Daten wie die vollständige Planungsansicht */
+.studio-schedule {
+  min-height: 154px;
+  overflow: hidden;
+}
+.studio-schedule .panel-head {
+  margin-bottom: 6px;
+}
+.studio-schedule .panel-head .muted {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+}
+.studio-schedule-hours {
+  position: relative;
+  height: 22px;
+  margin: 0 10px 0 10px;
+  border-bottom: 1px solid rgba(0, 177, 255, .18);
+}
+.studio-schedule-hours span {
+  position: absolute;
+  bottom: 4px;
+  transform: translateX(-50%);
+  color: #7893b8;
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
+}
+.studio-schedule-track {
+  position: relative;
+  min-height: 86px;
+  margin: 0 10px 8px;
+  border: 1px solid rgba(0, 176, 255, .22);
+  border-radius: 8px;
+  overflow: hidden;
+  background:
+    repeating-linear-gradient(90deg,
+      rgba(0, 170, 255, .065) 0,
+      rgba(0, 170, 255, .065) 1px,
+      transparent 1px,
+      transparent calc(100% / 9)),
+    linear-gradient(180deg, rgba(5, 23, 47, .92), rgba(3, 14, 31, .96));
+}
+.studio-plan-block {
+  position: absolute;
+  top: 13px;
+  height: 58px;
+  min-width: 42px;
+  padding: 7px 9px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 2px;
+  overflow: hidden;
+  border: 1px solid rgba(0, 214, 255, .55);
+  border-radius: 7px;
+  color: #eefbff;
+  background: linear-gradient(135deg, rgba(0, 126, 255, .82), rgba(74, 67, 219, .78));
+  box-shadow: 0 6px 18px rgba(0, 87, 255, .18);
+  cursor: pointer;
+  text-align: left;
+}
+.studio-plan-block:nth-of-type(3n+1) {
+  background: linear-gradient(135deg, rgba(0, 171, 118, .82), rgba(0, 111, 159, .78));
+}
+.studio-plan-block:nth-of-type(3n+2) {
+  background: linear-gradient(135deg, rgba(179, 39, 130, .82), rgba(104, 40, 194, .78));
+}
+.studio-plan-block strong,
+.studio-plan-block span {
+  max-width: 100%;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.studio-plan-block strong { font-size: 11px; }
+.studio-plan-block span { color: rgba(255,255,255,.78); font-size: 9px; }
+.studio-plan-block b {
+  position: absolute;
+  right: 5px;
+  top: 5px;
+  padding: 2px 5px;
+  border-radius: 999px;
+  background: #ff285f;
+  color: #fff;
+  font-size: 8px;
+  letter-spacing: .04em;
+}
+.studio-plan-block.active {
+  border-color: #ff4b7d;
+  box-shadow: 0 0 0 1px rgba(255,75,125,.4), 0 0 20px rgba(255,28,103,.24);
+}
+.studio-schedule-now {
+  position: absolute;
+  z-index: 5;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: #ff315f;
+  box-shadow: 0 0 9px rgba(255,49,95,.85);
+  pointer-events: none;
+}
+.studio-schedule-now::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -4px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #ff315f;
+}
+.studio-schedule .empty {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: #7188a8;
+  background: transparent;
+}
+
+@media (max-width: 1100px) {
+  .studio-schedule { margin: 8px 0; }
+}
+@media (max-width: 700px) {
+  .studio-schedule-hours span:nth-child(even) { display:none; }
+  .studio-schedule .panel-head { flex-wrap: wrap; }
 }
