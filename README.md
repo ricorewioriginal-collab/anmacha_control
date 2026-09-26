@@ -62,11 +62,11 @@ Windows kann bei nicht signierten Dateien warnen: „Weitere Informationen“ �
 **[airdeck-demo.ricorewi-radio.de](https://airdeck-demo.ricorewi-radio.de)** – Studio direkt im Browser, ohne Installation.
 Login: Benutzername `demo`, Passwort `airdeck-demo`
 
-⚠️ Reine Testinstanz: setzt sich **automatisch alle 10 Minuten komplett zurück** (alle Daten weg), läuft ohne Audio-Engine – keine echte 24/7-Sendung möglich. Bitte nichts Echtes hier ablegen.
+⚠️ Reine Testinstanz: setzt sich **automatisch alle 10 Minuten komplett zurück** (alle Daten weg). Die Demo enthält ffmpeg, einen isolierten internen Icecast/AirDeckCast-Ausgang, HLS, Testmedien und ein befülltes Cardwall, damit die Broadcast-Funktionen real ausprobiert werden können. Bitte nichts Echtes hier ablegen.
 
 ## 📸 Vorschau – jeder Arbeitsbereich, jedes Bedienfeld
 
-Alle Screenshots zeigen den Beispielsender **„AirDeck-FM“** mit Testdaten (kein echter Sender). Jedes Bild ist einzeln verlinkt und öffnet in voller Auflösung – anklicken zum Vergrößern.
+Alle Screenshots zeigen den Beispielsender **„AirDeck-FM“** mit Testdaten (kein echter Sender). Sie werden auf dem Hauptbranch automatisch aus der aktuellen Demo neu erzeugt, sobald sich die UI ändert. Jedes Bild ist einzeln verlinkt und öffnet in voller Auflösung – anklicken zum Vergrößern.
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/ricorewioriginal-collab/anmacha_control/AirDeck-Radio-Automation-%26-Broadcast/docs/screenshots/slideshow.gif" alt="AirDeck Slideshow: Dashboard, Studio, Decks, Quellen, Sendeplan, Medienverwaltung, KI-Automation, Hörer, Benutzer, Handbuch" width="820">
@@ -89,10 +89,10 @@ Alle Screenshots zeigen den Beispielsender **„AirDeck-FM“** mit Testdaten (k
 | [![KI-Automation](https://raw.githubusercontent.com/ricorewioriginal-collab/anmacha_control/AirDeck-Radio-Automation-%26-Broadcast/docs/screenshots/view-ai.png)](https://raw.githubusercontent.com/ricorewioriginal-collab/anmacha_control/AirDeck-Radio-Automation-%26-Broadcast/docs/screenshots/view-ai.png) | [![Anbindungen](https://raw.githubusercontent.com/ricorewioriginal-collab/anmacha_control/AirDeck-Radio-Automation-%26-Broadcast/docs/screenshots/view-bridges.png)](https://raw.githubusercontent.com/ricorewioriginal-collab/anmacha_control/AirDeck-Radio-Automation-%26-Broadcast/docs/screenshots/view-bridges.png) | [![Hörer](https://raw.githubusercontent.com/ricorewioriginal-collab/anmacha_control/AirDeck-Radio-Automation-%26-Broadcast/docs/screenshots/view-listeners.png)](https://raw.githubusercontent.com/ricorewioriginal-collab/anmacha_control/AirDeck-Radio-Automation-%26-Broadcast/docs/screenshots/view-listeners.png) |
 | Director-Status, Moderation/Musikplanung, Freigaben, Protokoll | AzuraCast/Icecast/SAM/mAirList/RadioDJ als Relay & Status-Spiegel | Posteingang (Wunsch, Gruß, Votes), Hörerseiten-Link zum Einbetten |
 
-| Nextcloud-Medien | Benutzer & Rollen | Handbuch (im Programm) |
+| Medien & Nextcloud | Benutzer & Rollen | Handbuch (im Programm) |
 |---|---|---|
-| [![Nextcloud](https://raw.githubusercontent.com/ricorewioriginal-collab/anmacha_control/AirDeck-Radio-Automation-%26-Broadcast/docs/screenshots/view-nextcloud.png)](https://raw.githubusercontent.com/ricorewioriginal-collab/anmacha_control/AirDeck-Radio-Automation-%26-Broadcast/docs/screenshots/view-nextcloud.png) | [![Benutzer & Rollen](https://raw.githubusercontent.com/ricorewioriginal-collab/anmacha_control/AirDeck-Radio-Automation-%26-Broadcast/docs/screenshots/view-users.png)](https://raw.githubusercontent.com/ricorewioriginal-collab/anmacha_control/AirDeck-Radio-Automation-%26-Broadcast/docs/screenshots/view-users.png) | [![Handbuch](https://raw.githubusercontent.com/ricorewioriginal-collab/anmacha_control/AirDeck-Radio-Automation-%26-Broadcast/docs/screenshots/view-handbuch.png)](https://raw.githubusercontent.com/ricorewioriginal-collab/anmacha_control/AirDeck-Radio-Automation-%26-Broadcast/docs/screenshots/view-handbuch.png) |
-| Cloud-Ordner durchsuchen, Medien übernehmen, Mitschnitte hochladen | Rollenmatrix, Konten mit Sender-Zuordnung, letzte Anmeldung | Volltextsuche, gleiche Seitenleiste/Kopfzeile wie das restliche Programm |
+| [![Medien & Nextcloud](https://raw.githubusercontent.com/ricorewioriginal-collab/anmacha_control/AirDeck-Radio-Automation-%26-Broadcast/docs/screenshots/view-mediathek.png)](https://raw.githubusercontent.com/ricorewioriginal-collab/anmacha_control/AirDeck-Radio-Automation-%26-Broadcast/docs/screenshots/view-mediathek.png) | [![Benutzer & Rollen](https://raw.githubusercontent.com/ricorewioriginal-collab/anmacha_control/AirDeck-Radio-Automation-%26-Broadcast/docs/screenshots/view-users.png)](https://raw.githubusercontent.com/ricorewioriginal-collab/anmacha_control/AirDeck-Radio-Automation-%26-Broadcast/docs/screenshots/view-users.png) | [![Handbuch](https://raw.githubusercontent.com/ricorewioriginal-collab/anmacha_control/AirDeck-Radio-Automation-%26-Broadcast/docs/screenshots/view-handbuch.png)](https://raw.githubusercontent.com/ricorewioriginal-collab/anmacha_control/AirDeck-Radio-Automation-%26-Broadcast/docs/screenshots/view-handbuch.png) |
+| Nextcloud ist als Quellen-Reiter direkt in der Medienverwaltung integriert – kein separater Sidebar-Bereich mehr | Rollenmatrix, Konten mit Sender-Zuordnung, letzte Anmeldung | Volltextsuche, gleiche Seitenleiste/Kopfzeile wie das restliche Programm |
 
 ### Jedes einzelne Bedienfeld im Studio-Arbeitsbereich
 
