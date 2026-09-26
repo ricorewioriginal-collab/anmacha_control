@@ -11,7 +11,7 @@ PASS gilt nur für den ausdrücklich beschriebenen Prüfumfang. Vorhandener Code
 | 3 | ZERO TO AIR – CLEAN INSTALL | IN PROGRESS | Code/Testbestand inventarisieren; reale UI, Persistenz, Neustart und Zielplattform praktisch prüfen. |
 | 4 | DEPENDENCY / RUNTIME AUDIT | FAIL | Runtime-Versionen teils unfixiert (node:22-slim, FFmpeg latest); Artefakt-Inventar fehlt. |
 | 5 | WINDOWS INSTALLER | IN PROGRESS | Code/Testbestand inventarisieren; reale UI, Persistenz, Neustart und Zielplattform praktisch prüfen. |
-| 6 | LINUX / DEBIAN | FAIL | packaging/linux/control empfiehlt ffmpeg nur; Installation ohne Recommends hat keinen Encoder. |
+| 6 | LINUX / DEBIAN | IN PROGRESS | `54fe05b`: ffmpeg von Recommends nach Depends verschoben. CI Run 36270262561: Debian-Paket gebaut, installiert, Dienst gestartet, via systemd neu gestartet und gepurgt – erfolgreich. Vollständige Clean-Install-/Reboot-/TLS-/Upgrade-Abnahme bleibt offen. |
 | 7 | DOCKER | IN PROGRESS | Code/Testbestand inventarisieren; reale UI, Persistenz, Neustart und Zielplattform praktisch prüfen. |
 | 8 | ANDROID | IN PROGRESS | Code/Testbestand inventarisieren; reale UI, Persistenz, Neustart und Zielplattform praktisch prüfen. |
 | 9 | RUNTIME SELF TEST / SYSTEMDIAGNOSE | FAIL | health.ts meldet Dependencies; umfassender funktionaler Systemtest mit Export fehlt. |
@@ -72,7 +72,7 @@ PASS gilt nur für den ausdrücklich beschriebenen Prüfumfang. Vorhandener Code
 
 ## Vorhandene CI-Evidenz
 
-Build für `e44164b`: test, windows, android, linux und docker erfolgreich (Run 36263301155). Der Masterprompt verlangt darüber hinaus reale Workflows. Historische Testzahlen in README/alten Audits sind nicht als aktuelle Messung zu verwenden.
+Build für `e44164b`: test, windows, android, linux und docker erfolgreich (Run 36263301155). Zusätzlich bestätigt Run 36270262561 für `54fe05b` bislang test, docker, docker-arm64, linux und android erfolgreich; Windows lief bei letzter Prüfung noch. Der Linux-Job baut das Debian-Paket und prüft Installation, Dienststart, systemd-Neustart und Purge mit ffmpeg als Pflichtabhängigkeit. Der Masterprompt verlangt darüber hinaus reale Workflows. Historische Testzahlen in README/alten Audits sind nicht als aktuelle Messung zu verwenden.
 
 ## Lokale Prüfung
 
