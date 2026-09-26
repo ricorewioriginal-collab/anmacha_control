@@ -69,6 +69,10 @@ export async function run(fn) {
 export function formDialog(title, fields, submitLabel = 'Speichern') {
   const dlg = /** @type {HTMLDialogElement} */ ($('dialog'));
   const form = /** @type {HTMLFormElement} */ ($('dialog-form'));
+  // Verteidigung gegen einen liegen gebliebenen onsubmit-Handler (z. B. vom Einrichtungs-Assistenten,
+  // der denselben Dialog wiederverwendet): sonst würde method="dialog" nie schließen und dieser
+  // Aufruf nie auflösen - der Nutzer sähe einfach gar keine Reaktion auf "Speichern"/"Verbinden".
+  form.onsubmit = null;
   form.replaceChildren(h('h3', {}, title));
   for (const f of fields) {
     const id = `f-${f.name}`;

@@ -173,6 +173,7 @@ export async function runSetup(ctx) {
 
   const close = () => {
     dlg.close();
+    form.onsubmit = null;
     ctx.onDone();
   };
 
@@ -205,6 +206,7 @@ export async function runSetup(ctx) {
     }
     if (step.id === 'finish') {
       dlg.close();
+      form.onsubmit = null;
       if (v.restart && s.canRestart) {
         status('AirDeck wird neu gestartet …');
         await ctx.api.post('/system/restart').catch(() => {});

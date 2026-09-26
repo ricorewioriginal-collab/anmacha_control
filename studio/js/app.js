@@ -301,7 +301,7 @@ async function loadStation() {
   views = {
     planning: mountPlanning($('view-planning'), ctx),
     recorder: mountRecorder($('view-recorder'), ctx),
-    lautfm: mountLautfm($('view-lautfm'), { ...ctx, onLautfmConnected: () => run(async () => { S.stations = await api.get('/stations'); S.station = S.stations.find((/** @type {any} */ s) => s.id === S.station.id) ?? S.station; updateLautfmNav(); }) }),
+    lautfm: mountLautfm($('view-lautfm'), { ...ctx, onLautfmConnected: () => run(async () => { S.stations = await api.get('/stations'); S.station = S.stations.find((/** @type {any} */ s) => s.id === S.station.id) ?? S.station; renderStationSelect(); updateLautfmNav(); }) }),
     ai: mountAi($('view-ai'), ctx),
     nextcloud: mountNextcloud($('view-nextcloud'), ctx),
     bridges: mountBridges($('view-bridges'), ctx),
@@ -1161,6 +1161,7 @@ async function voicetrack(index, q) {
   const prevMedia = index > 0 ? items[index - 1].media : (S.libById.get(S.playout?.status?.current?.mediaId) ?? S.nowPlaying?.media);
   const dlg = /** @type {HTMLDialogElement} */ ($('dialog'));
   const form = /** @type {HTMLFormElement} */ ($('dialog-form'));
+  form.onsubmit = null; // s. formDialog() in ui.js: ein liegen gebliebener Handler (z. B. vom Einrichtungs-Assistenten) würde method="dialog" nie schließen lassen
 
   /** @type {MediaStream|null} */ let stream = null;
   /** @type {MediaRecorder|null} */ let rec = null;
