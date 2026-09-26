@@ -141,12 +141,19 @@ export function shuffleSeparated(items: string[], artistOf: (id: string) => stri
   return order;
 }
 
+/**
+ * @param maxLengthMs Hard-Time-Grenze (Soft Timing): verbleibende Zeit bis zu einem festen Termin
+ * (z. B. Nachrichten um :00). Ist gesetzt, werden - so weit möglich - nur Titel gewählt, die noch
+ * hineinpassen; passt gar keiner mehr (auch nach Lockern der Rotationsregeln), wird der KÜRZESTE
+ * verfügbare Titel gewählt, um die Überschreitung zu minimieren, statt blind irgendeinen zu starten.
+ */
 export function pickNext(
   library: readonly MediaItem[],
   category: MediaCategory,
   history: readonly string[],
   rules: RotationRules = DEFAULT_ROTATION,
   random: () => number = Math.random,
+  maxLengthMs?: number | null,
 ): MediaItem | null {
   const pool = library.filter((m) => m.category === category);
   if (pool.length === 0) return null;
@@ -162,12 +169,13 @@ export function pickNext(
   const passTitle = (m: MediaItem) => lastPlayedIndex(m.id) >= rules.titleSeparation;
   const passArtist = (m: MediaItem) => !(m.artist && recentArtists(rules.artistSeparation).has(m.artist.toLowerCase()));
   const passGenre = (m: MediaItem) => !rules.genreSeparation || !(m.genre && recentGenres(rules.genreSeparation).has(m.genre.toLowerCase()));
+  const fitsDeadline = (m: MediaItem) => maxLengthMs == null || (playLength(m) ?? Infinity) <= maxLengthMs;
   const attempts: Array<(m: MediaItem) => boolean> = [
-    (m) => passTitle(m) && passArtist(m) && passGenre(m),
-    (m) => passTitle(m) && passArtist(m),
-    (m) => passTitle(m),
-    (m) => lastPlayedIndex(m.id) > 0,
-    () => true,
+    (m) => passTitle(m) && passArtist(m) && passGenre(m) && fitsDeadline(m),
+    (m) => passTitle(m) && passArtist(m) && fitsDeadline(m),
+    (m) => passTitle(m) && fitsDeadline(m),
+    (m) => lastPlayedIndex(m.id) > 0 && fitsDeadline(m),
+    (m) => fitsDeadline(m),
   ];
   for (const ok of attempts) {
     const hits = pool.filter(ok);
@@ -177,6 +185,12 @@ export function pickNext(
       const top = hits.filter((m) => lastPlayedIndex(m.id) === best);
       return top[Math.floor(random() * top.length)] ?? top[0]!;
     }
+  }
+  if (maxLengthMs != null) {
+    // Kein Titel passt mehr (auch keiner mit gelockerten Rotationsregeln): sanft landen statt
+    // stur zu überziehen - den kürzesten verfügbaren Titel nehmen, egal wie oft er schon lief.
+    const shortest = [...pool].sort((a, b) => (playLength(a) ?? Infinity) - (playLength(b) ?? Infinity));
+    return shortest[0] ?? null;
   }
   return null;
 }
@@ -294,6 +308,14 @@ export class PlayQueue {
  * Füllt die Queue nach Sendeuhr auf, bis mindestens minItems drin sind.
  * Kategorien ohne Material werden übersprungen (Automation bleibt stabil).
  */
+/** Fester Termin (Hard Time), auf den Auto-Fill beim Zusammenstellen der Queue Rücksicht nehmen soll. */
+export interface FillDeadline {
+  /** Zeitpunkt des festen Termins (ms, epoch) */
+  at: number;
+  /** Zeitpunkt, ab dem die Queue beginnt abzuspielen (ms, epoch) - i. d. R. jetzt plus Restlaufzeit des laufenden Titels */
+  startAt: number;
+}
+
 export function fillFromClock(
   queue: PlayQueue,
   library: readonly MediaItem[],
@@ -303,17 +325,24 @@ export function fillFromClock(
   minItems: number,
   rules: RotationRules = DEFAULT_ROTATION,
   random: () => number = Math.random,
+  deadline?: FillDeadline | null,
 ): number {
   if (clock.slots.length === 0) return cursor;
   const recent = [...queue.list().map((q) => q.mediaId).reverse(), ...history];
+  const byId = new Map(library.map((m) => [m.id, m]));
+  // Bereits in der Queue verbrachte Zeit zählt mit, damit die Restzeit bis zum Termin stimmt.
+  let elapsed = deadline ? queue.list().reduce((a, q) => a + (playLength(byId.get(q.mediaId)!) ?? 0), 0) : 0;
   let guard = clock.slots.length * Math.max(1, minItems);
   while (queue.length < minItems && guard-- > 0) {
     const cat = clock.slots[cursor % clock.slots.length]!;
     cursor = (cursor + 1) % clock.slots.length;
-    const m = pickNext(library, cat, recent, rules, random);
+    // Nur solange Rücksicht nehmen, wie der Termin noch bevorsteht - danach normal weiterfüllen (Termin ist "durch").
+    const maxLengthMs = deadline && deadline.startAt + elapsed < deadline.at ? deadline.at - (deadline.startAt + elapsed) : undefined;
+    const m = pickNext(library, cat, recent, rules, random, maxLengthMs);
     if (!m) continue;
     queue.add(m.id, 'clock');
     recent.unshift(m.id);
+    elapsed += playLength(m) ?? 0;
   }
   return cursor;
 }

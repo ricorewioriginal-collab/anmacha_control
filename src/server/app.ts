@@ -9,7 +9,7 @@ import {
   DECK_IDS, DEFAULT_CLOCK, DEFAULT_ROTATION, MEDIA_CATEGORIES, PlayQueue, backtime, defaultCardwall, fillFromClock, pickNext as pickFromPool, playLength,
   type CartSlot, type ClockTemplate, type DeckId, type DeckState, type MediaItem, type RotationRules,
 } from '../core/automation.ts';
-import { activeWindow } from '../core/scheduler.ts';
+import { activeWindow, nextHardMark } from '../core/scheduler.ts';
 import { ModeState, automationRuns, type BaseMode, type Mode as BroadcastMode } from '../core/mode.ts';
 import {
   AppError, SYSTEM_PRINCIPAL, newId, normalizeMount, posInt, publicOutput, publicSource, relayKey, safeColor, timingSafeEqualStr, wrap,
@@ -35,6 +35,9 @@ import { AiDirector } from './ai/director.ts';
 import { UserStore } from './users.ts';
 import { Notifier } from './notify.ts';
 import { createServices, type Services } from './services/index.ts';
+
+/** Wie weit Auto-Fill nach einem festen Termin (Hard Time) voraussschaut, um darauf Rücksicht zu nehmen. */
+const HARD_MARK_LOOKAHEAD_MS = 3 * 3600e3;
 
 // Bisherige Importe aus app.ts bleiben gültig
 export * from './model.ts';
@@ -1213,7 +1216,12 @@ export class AirDeckApp {
       }
       return;
     }
-    rt.data.clockCursor = fillFromClock(rt.queue, rt.data.library, rt.data.clock, rt.data.history, rt.data.clockCursor, rt.data.minQueue, rt.data.rotation);
+    // Hard Time/Backtiming: vor einem festen Termin (Nachrichten, Sendungswechsel per Uhr-Event/Job "sofort")
+    // keinen zu langen Titel mehr anfangen - siehe fillFromClock()/pickNext(maxLengthMs).
+    const now = Date.now();
+    const hardMark = nextHardMark(rt.data.clockEvents ?? [], rt.data.jobs ?? [], now, HARD_MARK_LOOKAHEAD_MS);
+    const deadline = hardMark !== null ? { at: hardMark, startAt: now } : null;
+    rt.data.clockCursor = fillFromClock(rt.queue, rt.data.library, rt.data.clock, rt.data.history, rt.data.clockCursor, rt.data.minQueue, rt.data.rotation, undefined, deadline);
   }
 
   publishQueue(stationId: string): void {

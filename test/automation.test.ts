@@ -41,6 +41,32 @@ test('pickNext beachtet Genre-Trennung, wenn eingestellt (P2 #17 Rotation)', () 
   assert.equal(withoutGenre?.genre, 'Pop');
 });
 
+test('pickNext beachtet Hard-Time-Grenze (P2 #19 Soft Timing): wählt einen passenden statt blind einen zu langen Titel', () => {
+  const lib = [m('long', 'A', 'music', 6 * 60_000), m('short', 'B', 'music', 90_000)];
+  // Nur noch 2 Minuten bis zum harten Termin: der 6-Minuten-Titel passt nicht, der 90-Sekunden-Titel schon
+  const fits = pickNext(lib, 'music', [], { artistSeparation: 0, titleSeparation: 0 }, () => 0, 120_000);
+  assert.equal(fits?.id, 'short');
+  // Ohne Grenze bleibt die normale Auswahl möglich (hier zufällig, aber nicht ausgeschlossen)
+  const noLimit = pickNext(lib, 'music', [], { artistSeparation: 0, titleSeparation: 0 }, () => 0);
+  assert.ok(noLimit);
+});
+
+test('pickNext: passt kein Titel mehr in die Restzeit, wird sanft gelandet (kürzester Titel statt Überziehen)', () => {
+  const lib = [m('long1', 'A', 'music', 5 * 60_000), m('long2', 'B', 'music', 4 * 60_000)];
+  // Nur noch 30 Sekunden übrig - keiner passt, also der kürzeste (long2)
+  const landed = pickNext(lib, 'music', [], { artistSeparation: 0, titleSeparation: 0 }, () => 0, 30_000);
+  assert.equal(landed?.id, 'long2');
+});
+
+test('fillFromClock berücksichtigt einen Hard-Time-Termin über mehrere Slots hinweg', () => {
+  const lib = [m('long', 'A', 'music', 6 * 60_000), m('short', 'B', 'music', 60_000)];
+  const q = new PlayQueue();
+  const now = Date.now();
+  // Termin in 90 Sekunden: für den ersten Musik-Slot passt nur "short" (60s), danach ist der Termin praktisch erreicht
+  fillFromClock(q, lib, { id: 'c', name: 'c', slots: ['music'] }, [], 0, 1, undefined, () => 0, { at: now + 90_000, startAt: now });
+  assert.equal(q.list()[0]?.mediaId, 'short');
+});
+
 test('pickNext lockert Regeln statt stehen zu bleiben', () => {
   const lib = [m('a1', 'A')];
   assert.equal(pickNext(lib, 'music', ['a1'])?.id, 'a1');

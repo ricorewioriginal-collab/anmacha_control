@@ -91,6 +91,41 @@ export function dueJobs<T extends Pick<ScheduledJob, 'at'>>(jobs: readonly T[], 
   return jobs.filter((j) => j.at > from && j.at <= to);
 }
 
+/** Nächster Termin nach `after`, an dem ein Uhr-Event auslöst (Minuten/Stunden/Wochentage-Muster). */
+export function nextClockOccurrence(e: Pick<ClockEvent, 'enabled' | 'minutes' | 'hours' | 'days'>, after: number): number | null {
+  if (!e.enabled || e.minutes.length === 0) return null;
+  const d = new Date(after);
+  d.setSeconds(0, 0);
+  for (let guard = 0; guard < 7 * 24 * 60; guard++) {
+    d.setMinutes(d.getMinutes() + 1);
+    if (d.getTime() <= after) continue;
+    if (e.minutes.includes(d.getMinutes()) && (e.hours.length === 0 || e.hours.includes(d.getHours())) && (e.days.length === 0 || e.days.includes(weekday(d)))) {
+      return d.getTime();
+    }
+  }
+  return null;
+}
+
+/**
+ * Nächster "harter" Termin (Hard Time) innerhalb von `lookaheadMs`: ein Uhr-Event oder Zeitplan-Job
+ * im Modus "sofort" (mode: 'now'). Auto-Fill soll davor keinen zu langen Titel mehr anfangen.
+ */
+export function nextHardMark(clockEvents: readonly ClockEvent[], jobs: readonly ScheduledJob[], now: number, lookaheadMs: number): number | null {
+  const limit = now + lookaheadMs;
+  let best: number | null = null;
+  for (const e of clockEvents) {
+    if (e.mode !== 'now') continue;
+    const t = nextClockOccurrence(e, now);
+    if (t !== null && t <= limit && (best === null || t < best)) best = t;
+  }
+  for (const j of jobs) {
+    if (j.mode !== 'now') continue;
+    const t = j.at > now ? j.at : nextOccurrence(j, now);
+    if (t !== null && t <= limit && (best === null || t < best)) best = t;
+  }
+  return best;
+}
+
 /** Uhr-Events, die zur Minute des Datums passen. */
 export function clockDue<T extends ClockEvent>(events: readonly T[], d: Date): T[] {
   const min = d.getMinutes();

@@ -93,6 +93,27 @@ test('Uhr-Vorlage (Kategorien-Takt, P2 #18): einstellbar, ungültige Kategorien 
   }
 });
 
+test('Hard Time/Backtiming (P2 #19): Auto-Fill startet vor einem festen Termin keinen zu langen Titel mehr', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'airdeck-hardtime-'));
+  const app = new AirDeckApp(dir, { stableMs: 0, ffmpeg: null });
+  try {
+    app.svc.media.addMedia('main', { id: 'long', title: 'long', artist: 'A', category: 'music', file: 'long.mp3', durationMs: 6 * 60_000, addedAt: 0 });
+    app.svc.media.addMedia('main', { id: 'short', title: 'short', artist: 'B', category: 'music', file: 'short.mp3', durationMs: 60_000, addedAt: 0 });
+    app.setAutomation('main', { clock: { id: 'c', name: 'c', slots: ['music'] } });
+
+    // Harter Termin (Uhr-Event, Modus "sofort") in 90 Sekunden - der 6-Minuten-Titel würde ihn klar reißen
+    const d = new Date(Date.now() + 90_000);
+    app.svc.planning.saveClockEvent('main', null, { kind: 'media', mediaId: 'short', mode: 'now', minutes: [d.getMinutes()], hours: [d.getHours()], days: [] });
+
+    app.autoFill(app.rt('main'), true);
+    const first = (app.queueView('main') as { items: { mediaId: string }[] }).items[0]?.mediaId;
+    assert.equal(first, 'short', 'wählt den Titel, der noch vor dem Termin passt, statt blind den langen zu starten');
+  } finally {
+    app.shutdown();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('Zeitplan-Job feuert, Wiederholung wird weitergeschoben', async () => {
   const { app, done } = setup();
   try {
