@@ -678,8 +678,13 @@ export class AirDeckApp {
     const key = relayKey(stationId, target);
     let r = this.relays.get(key);
     if (!r) {
-      // profileId-Ausgänge hängen an einem AirDeckCast-Zusatzprofil statt am Hauptbus dieses Targets (siehe profileRelayFor)
-      r = new RelayTarget(() => [...this.outputs.values()].filter((o) => o.cfg.stationId === stationId && o.cfg.sourceTarget === target && o.cfg.enabled && !o.cfg.profileId));
+      // profileId-Ausgänge hängen an einem AirDeckCast-Zusatzprofil statt am Hauptbus dieses Targets (siehe profileRelayFor).
+      // failoverFor-Ausgänge (Ersatzziel) hängen nur mit an, solange ihr Primärausgang nicht "connected" ist.
+      r = new RelayTarget(() => [...this.outputs.values()].filter((o) => {
+        if (o.cfg.stationId !== stationId || o.cfg.sourceTarget !== target || !o.cfg.enabled || o.cfg.profileId) return false;
+        if (!o.cfg.failoverFor) return true;
+        return this.outputs.get(o.cfg.failoverFor)?.state.status !== 'connected';
+      }));
       this.relays.set(key, r);
     }
     return r;
@@ -690,9 +695,32 @@ export class AirDeckApp {
   mountOutput(cfg: OutputConfig): BroadcastOutput {
     this.outputs.get(cfg.id)?.stop();
     const Cls = cfg.type === 'shoutcast' ? ShoutcastOutput : IcecastOutput;
-    const o = new Cls(cfg, () => this.secrets.get(cfg.passwordRef), (s: OutputState) => this.publish('stream.state_changed', cfg.stationId, { id: cfg.id, ...s }));
+    const o = new Cls(cfg, () => this.secrets.get(cfg.passwordRef), (s: OutputState) => {
+      this.publish('stream.state_changed', cfg.stationId, { id: cfg.id, ...s });
+      this.syncFailover(cfg.stationId, cfg.sourceTarget);
+    });
     this.outputs.set(cfg.id, o);
     return o;
+  }
+
+  /**
+   * AirDeckCast-Failover: läuft nach jeder Statusänderung eines Ausgangs. Ausgänge mit failoverFor
+   * springen ein, sobald ihr Primärziel nicht "connected" ist (Auth-Fehler, Netzwerkproblem, ...), und
+   * werden wieder beendet, sobald das Primärziel zurück ist.
+   */
+  private syncFailover(stationId: string, sourceTarget: string): void {
+    const relay = this.relayFor(stationId, sourceTarget);
+    for (const o of this.outputs.values()) {
+      if (o.cfg.stationId !== stationId || o.cfg.sourceTarget !== sourceTarget || !o.cfg.enabled || !o.cfg.failoverFor) continue;
+      const primaryUp = this.outputs.get(o.cfg.failoverFor)?.state.status === 'connected';
+      // idempotent: nur bei einem tatsächlichen Wechsel starten/stoppen, sonst reentrant (onChange
+      // feuert schon beim Setzen von "connecting" mitten in start(), bevor dieser Aufruf zurückkehrt)
+      if (primaryUp) {
+        if (o.state.status !== 'idle') o.stop();
+      } else if (o.state.status === 'idle') {
+        relay.startOutput(o);
+      }
+    }
   }
 
   listOutputs(stationId: string): unknown[] {
@@ -718,6 +746,13 @@ export class AirDeckApp {
     if (profileId !== undefined && !(rt.data.streamProfiles ?? []).some((sp) => sp.id === profileId)) {
       throw new AppError(400, 'invalid_profile', 'Unbekanntes Stream-Profil');
     }
+    const failoverFor = input.failoverFor === null || input.failoverFor === '' ? undefined : (input.failoverFor ?? prev?.failoverFor);
+    if (failoverFor !== undefined) {
+      if (failoverFor === outId) throw new AppError(400, 'invalid_failover', 'Ein Ausgang kann nicht sein eigenes Ersatzziel sein');
+      const primary = [...this.outputs.values()].find((o) => o.cfg.id === failoverFor && o.cfg.stationId === stationId);
+      if (!primary) throw new AppError(400, 'invalid_failover', 'Primärausgang für Failover nicht gefunden');
+      if (primary.cfg.failoverFor === outId) throw new AppError(400, 'invalid_failover', 'Zwei Ausgänge können nicht sich gegenseitig absichern');
+    }
     const cfg: OutputConfig = {
       id: outId,
       stationId,
@@ -734,16 +769,18 @@ export class AirDeckApp {
       streamId: type === 'shoutcast' ? posInt('streamId' in input ? input.streamId : prev?.streamId) : undefined,
       bitrateKbps: posInt('bitrateKbps' in input ? input.bitrateKbps : prev?.bitrateKbps),
       profileId: profileId as string | undefined,
+      failoverFor: failoverFor as string | undefined,
       enabled: Boolean(input.enabled ?? prev?.enabled ?? true),
     };
     if (typeof input.password === 'string' && input.password) this.secrets.set(cfg.passwordRef, input.password);
     const o = this.mountOutput(cfg);
     if (cfg.enabled) {
       if (cfg.profileId) this.profileRelayFor(stationId, cfg.profileId).startOutput(o);
-      else this.relayFor(stationId, cfg.sourceTarget).startOutput(o);
+      else if (!cfg.failoverFor) this.relayFor(stationId, cfg.sourceTarget).startOutput(o);
     }
     this.audit.write({ kind: 'output', event: prev ? 'updated' : 'created', actor: p.id, outputId: outId });
     this.syncStreamProfiles(stationId);
+    this.syncFailover(stationId, cfg.sourceTarget);
     this.changed();
     return publicOutput(o, this.secrets);
   }
@@ -755,6 +792,7 @@ export class AirDeckApp {
     this.secrets.delete(o.cfg.passwordRef);
     this.audit.write({ kind: 'output', event: 'removed', actor: p.id, outputId: id });
     this.syncStreamProfiles(stationId);
+    this.syncFailover(stationId, o.cfg.sourceTarget);
     this.changed();
   }
 

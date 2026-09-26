@@ -1421,6 +1421,7 @@ function renderOutputs() {
     h('span', { class: 'out-meta' },
       `${o.type} · ${o.host}:${o.port}${o.mount}${o.priority ? `?prio=${o.priority}` : ''}` +
       (o.profileId ? ` · Profil: ${S.streamProfiles.find((sp) => sp.id === o.profileId)?.name ?? o.profileId}` : '') +
+      (o.failoverFor ? ` · Failover für ${S.outputs.find((x) => x.id === o.failoverFor)?.name ?? o.failoverFor}` : '') +
       (o.state?.error ? ` · ${o.state.error}` : o.state?.bytesSent ? ` · ${(o.state.bytesSent / 1048576).toFixed(1)} MB` : '') +
       (typeof o.state?.listeners === 'number' ? ` · 👂 ${o.state.listeners}` : '')),
   )) : [h('li', { class: 'muted' }, 'Kein Ausgang – ＋ für Icecast/laut.fm')]));
@@ -1442,6 +1443,9 @@ async function editOutput(o) {
     ...(isNew ? [] : [{ name: 'profileId', label: 'Encoder-Profil', value: o?.profileId ?? '',
       options: /** @type {[string,string][]} */ ([['', 'Hauptstream (Standardprofil)'], ...S.streamProfiles.map((sp) => [sp.id, `${sp.name} (${sp.format.toUpperCase()} ${sp.bitrateKbps}k)`])]),
       hint: 'AirDeckCast: statt des Hauptencoders ein zusätzliches Profil senden (z. B. Mobile AAC 64k), unter „Profile“ anlegen.' }]),
+    ...(isNew ? [] : [{ name: 'failoverFor', label: 'Failover für', value: o?.failoverFor ?? '',
+      options: /** @type {[string,string][]} */ ([['', '– kein Ersatzziel –'], ...S.outputs.filter((x) => x.id !== o.id).map((x) => [x.id, x.name])]),
+      hint: 'AirDeckCast: springt nur ein, solange der gewählte Ausgang nicht verbunden ist (Auth-/Netzwerkfehler) - z. B. ein Ersatzserver.' }]),
     { name: 'priority', label: 'Priority-Parameter (optional)', type: 'number', value: o?.priority ?? '', hint: 'Hängt ?prio=<n> an den Mountpoint an (z. B. laut.fm). Leer = aus.' },
     { name: 'tls', label: 'TLS (https)', type: 'checkbox', value: !!o?.tls },
     { name: 'enabled', label: 'Aktiv', type: 'checkbox', value: o?.enabled ?? true },

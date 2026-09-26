@@ -28,6 +28,8 @@ export interface OutputConfig {
   bitrateKbps?: number;
   /** AirDeckCast: statt des Hauptencoders ein benanntes Zusatzprofil (z. B. "Mobile AAC 64k") senden */
   profileId?: string;
+  /** AirDeckCast-Failover: id eines anderen Ausgangs; springt nur ein, solange dieser nicht "connected" ist */
+  failoverFor?: string;
   enabled: boolean;
 }
 
