@@ -906,6 +906,14 @@ function stopPfl(id) {
   pfl = null;
 }
 
+/**
+ * Live-Position eines Engine-Decks JETZT, nicht die des letzten SSE-Updates: „playing“ läuft seit dem
+ * Update weiter, sonst (pausiert/bereit) steht die Position still. Dieselbe Hochrechnung wie in
+ * renderEngineDecks()/liveProgress() für die normale Deck-Anzeige.
+ * @param {any} ed
+ */
+const engDeckPositionMs = (ed) => (ed?.positionMs ?? 0) + (ed?.state === 'playing' ? Date.now() - (S.playoutAt || Date.now()) : 0);
+
 /** CUE: Titel des Decks separat vorhören (nicht auf Sendung), optional auf eigenem Ausgabegerät. @param {string} id */
 async function togglePfl(id) {
   if (pfl?.id === id) return stopPfl(id);
@@ -916,8 +924,14 @@ async function togglePfl(id) {
   if (!mediaId) return status('Deck ist leer', true);
   const el = new Audio(api.mediaUrl(S.station.id, mediaId));
   el.volume = Number(/** @type {HTMLInputElement} */ ($('fx-pfl')).value);
-  el.currentTime = eng() ? (ed?.positionMs ?? 0) / 1000 : d.el.currentTime;
+  el.currentTime = eng() ? engDeckPositionMs(ed) / 1000 : d.el.currentTime;
   await applySink(el, pref(AUDIO_PREF.cue));
+  // Bis das Audio tatsächlich zu spielen beginnt, vergeht (Laden/Puffern) weitere Zeit, in der die
+  // Sendung real weiterläuft – beim ersten "playing"-Ereignis einmal auf die dann aktuelle Position
+  // nachjustieren, statt dauerhaft ein paar hundert ms bis Sekunden hinterherzuhängen.
+  if (eng() && ed?.state === 'playing') {
+    el.addEventListener('playing', () => { if (pfl?.el === el) el.currentTime = engDeckPositionMs(engDeck(id)) / 1000; }, { once: true });
+  }
   el.play().catch(() => status('Vorhören nicht möglich', true));
   pfl = { id, el };
   deckEls[id].cue.setAttribute('aria-pressed', 'true');
