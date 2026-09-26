@@ -42,7 +42,10 @@ button, select, input, textarea { font: inherit; color: inherit; }
 :focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
 
 /* Grundgerüst */
-.app { display: flex; height: 100vh; }
+/* height:100% statt 100vh: in WebView2/Edge wird die vh-Einheit bei DPI-Wechsel oder Restore-nach-
+   Maximieren nicht immer neu berechnet (bekannter Layout-Bug: kleiner oberer Bereich, riesige
+   Leerfläche darunter) - die Prozent-Kette html/body/.app (Zeile 27) ist dagegen robust. */
+.app { display: flex; height: 100%; }
 .main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 
 /* Seitenleiste */
