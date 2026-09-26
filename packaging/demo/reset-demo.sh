@@ -33,7 +33,37 @@ auth="Authorization: Bearer $token"
 curl -fs -X PATCH -H "$auth" -H "Content-Type: application/json" \
   -d '{"name":"AirDeck-FM","slogan":"Testinstanz - setzt sich alle 10 Minuten zurueck"}' "$api" > /dev/null
 curl -fs -X PUT -H "$auth" -H "Content-Type: application/json" \
-  -d '{"requests":true,"messages":true,"voting":true,"voice":false}' "$api/listener" > /dev/null
+  -d '{"requests":true,"messages":true,"voting":true,"voice":true}' "$api/listener" > /dev/null
+
+# Voll funktionsfaehige lokale Demo-Ausgabe: eigener Icecast laeuft im selben Container und ist
+# von aussen nicht direkt erreichbar. Damit koennen Encoder, AirDeckCast-Test, Failover-Status und
+# Server-Playout real ausprobiert werden, ohne fremde Zugangsdaten zu hinterlegen.
+curl -fs -X POST -H "$auth" -H "Content-Type: application/json" \
+  -d '{"name":"AirDeckCast Demo","type":"icecast","host":"127.0.0.1","port":8000,"mount":"/airdeck-demo.mp3","username":"source","password":"airdeck-demo-source","bitrateKbps":128,"enabled":true}' \
+  "$api/outputs" > /dev/null
+
+# Kleine, bei jedem Reset neu erzeugte Testbibliothek. Keine urheberrechtlich geschuetzten Titel,
+# sondern synthetische Toene; dadurch funktionieren Medienverwaltung, Queue, Decks und Automation sofort.
+upload_tone() {
+  freq="$1"; name="$2"; category="$3"; dur="${4:-8}"
+  $compose exec -T airdeck-demo ffmpeg -hide_banner -loglevel error -f lavfi -i "sine=frequency=${freq}:duration=${dur}" \
+    -c:a pcm_s16le -f wav - \
+    | curl -fs -X PUT -H "$auth" -H "Content-Type: audio/wav" --data-binary @- \
+      "http://127.0.0.1:8751/api/v1/stations/main/media?name=${name}.wav&category=${category}" > /dev/null
+}
+upload_tone 440 "DemoTrack-A" "music" 12
+upload_tone 554 "DemoTrack-B" "music" 12
+upload_tone 659 "DemoTrack-C" "music" 12
+upload_tone 880 "AirDeck-FM-ID" "station_id" 3
+upload_tone 988 "Demo-Jingle" "jingle" 3
+
+# Automation direkt startbereit machen. Wenn der Start wider Erwarten fehlschlaegt, bleibt die Demo
+# trotzdem erreichbar; der Fehler steht dann im Containerlog statt den gesamten Reset abzubrechen.
+curl -fs -X PATCH -H "$auth" -H "Content-Type: application/json" \
+  -d '{"autostart":true,"hls":{"enabled":true,"bitrateKbps":96,"segmentSeconds":2}}' \
+  "$api/playout" > /dev/null || true
+curl -fs -X POST -H "$auth" -H "Content-Type: application/json" -d '{"autostart":true}' \
+  "$api/playout/start" > /dev/null || true
 
 # Fester Demo-Zugang statt eines sich staendig aendernden Tokens: wer ueber GitHub/README zur Demo
 # kommt, hat keinen Token und keinen SSH-Zugriff auf den Server, um sich einen zu holen. Benutzer/
@@ -46,4 +76,4 @@ curl -fs -X POST -H "Authorization: Bearer $token" -H "Content-Type: application
   -d "{\"username\":\"$demo_user\",\"name\":\"Demo\",\"password\":\"$demo_pass\",\"roles\":[\"admin\"],\"stationIds\":[\"main\"],\"mustChangePassword\":false}" \
   "http://127.0.0.1:8751/api/v1/users" > /dev/null
 
-echo "[$(date -Is)] Demo zurückgesetzt, Beispielsender \"AirDeck-FM\" und fester Demo-Zugang ($demo_user) eingerichtet."
+echo "[$(date -Is)] Demo vollstaendig zurueckgesetzt: AirDeck-FM, Testmedien, HLS, interner Icecast/AirDeckCast und Demo-Zugang ($demo_user) sind eingerichtet."
