@@ -2,7 +2,7 @@
 // Cardwall sowie Takt, Ereignisse und Datenhaltung. Alle übrigen Fachgebiete liegen als Dienste unter services/
 // und werden über `app.svc.<dienst>` angesprochen. Keine Abhängigkeit zu AnMaCha oder anderen externen Diensten.
 
-import { mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { SourcePriorityEngine, type EngineEvent, type SourceConfig } from '../core/source-priority.ts';
 import {
@@ -25,7 +25,7 @@ import { IcecastOutput, type BroadcastOutput, type OutputConfig, type OutputStat
 import { ShoutcastOutput } from './shoutcast.ts';
 import { fetchListeners } from './stats.ts';
 import { RelayTarget } from './relay.ts';
-import { detectFfmpeg, detectFfmpegAsync, inputDeviceArgs, listInputDevices, type FfmpegInfo } from './ffmpeg.ts';
+import { detectFfmpeg, detectFfmpegAsync, generateTestTone, inputDeviceArgs, listInputDevices, type FfmpegInfo } from './ffmpeg.ts';
 import { IcyMetadataReader } from './icy.ts';
 import { DEFAULT_PLAYOUT, DSP_PRESETS, DeckError, EQ_BANDS, Playout } from './playout.ts';
 import { SyncManager } from './sync.ts';
@@ -1258,6 +1258,45 @@ export class AirDeckApp {
     } else {
       po.playout.removeHls('hls');
     }
+  }
+
+  /**
+   * AirDeckCast-Teststream: ein kurzer, echt hörbarer Testton läuft über den laufenden Sendebus (als
+   * Cart über das Programm, ohne Queue/Automation zu stören) und wird an ALLEN aktivierten Zielen
+   * (Hauptstream, Zusatzprofile, HLS) auf echten Datenzuwachs geprüft - "Verbindung besteht" allein zählt
+   * nicht, es muss während des Tests tatsächlich mehr Bytes geflossen sein als vorher.
+   */
+  async runAirDeckCastTest(stationId: string): Promise<{
+    ok: boolean;
+    outputs: { id: string; name: string; profileId?: string; bytesDelta: number; ok: boolean }[];
+    hls: { enabled: boolean; ok: boolean } | null;
+  }> {
+    const po = this.playouts.get(stationId);
+    if (!po) throw new AppError(409, 'not_running', 'Server-Playout läuft nicht - Testsignal nicht möglich');
+    if (!this.ffmpeg) throw new AppError(501, 'unsupported', 'ffmpeg fehlt');
+    const seconds = 3;
+    const file = join(this.mediaDir, stationId, '_airdeckcast_test.wav');
+    if (!existsSync(file)) await generateTestTone(this.ffmpeg.ffmpeg, file, seconds);
+    const media: MediaItem = { id: '_airdeckcast_test', title: 'AirDeckCast Test', artist: '', category: 'station_id', file: '_airdeckcast_test.wav', durationMs: seconds * 1000, addedAt: Date.now() };
+
+    const outs = [...this.outputs.values()].filter((o) => o.cfg.stationId === stationId && o.cfg.enabled);
+    const before = new Map(outs.map((o) => [o.cfg.id, o.state.bytesSent]));
+    const cfg = { ...DEFAULT_PLAYOUT, autostart: false, ...this.rt(stationId).data.playout };
+    const hlsDir = join(this.hlsDir, stationId);
+    const hlsBytes = () => (existsSync(hlsDir) ? readdirSync(hlsDir).filter((f) => f.endsWith('.ts')).reduce((sum, f) => sum + statSync(join(hlsDir, f)).size, 0) : 0);
+    const hlsBefore = cfg.hls?.enabled ? hlsBytes() : null;
+
+    po.playout.playCart(media, true);
+    await new Promise((r) => setTimeout(r, seconds * 1000 + 1500));
+
+    const outputs = outs.map((o) => {
+      const bytesDelta = o.state.bytesSent - (before.get(o.cfg.id) ?? 0);
+      return { id: o.cfg.id, name: o.cfg.name, profileId: o.cfg.profileId, bytesDelta, ok: bytesDelta > 0 };
+    });
+    const hls = cfg.hls?.enabled ? { enabled: true, ok: hlsBefore !== null && hlsBytes() > hlsBefore } : null;
+    const ok = outputs.every((o) => o.ok) && (!hls || hls.ok);
+    this.audit.write({ kind: 'playout', event: 'airdeckcast_test', stationId, outputs: outputs.length, ok });
+    return { ok, outputs, hls };
   }
 
   /** Notfall-Auswahl, wenn Queue und Sendeuhr nichts liefern: beliebiger Musiktitel, sonst irgendein Titel. */

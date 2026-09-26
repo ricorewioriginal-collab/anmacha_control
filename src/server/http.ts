@@ -290,6 +290,7 @@ export function createHttpServer(app: AirDeckApp, studioDir: string): Server {
   add('POST', '/api/v1/stations/:sid/playout/start', 'automation:write', async (c) => app.startPlayout(c.p, sid(c), (await c.body()) as never));
   add('POST', '/api/v1/stations/:sid/playout/stop', 'automation:write', (c) => app.stopPlayout(c.p, sid(c)));
   add('POST', '/api/v1/stations/:sid/playout/mic', 'automation:write', async (c) => app.setMic(sid(c), (await c.body()).on === true));
+  add('POST', '/api/v1/stations/:sid/airdeckcast-test', 'automation:write', (c) => app.runAirDeckCastTest(sid(c)));
   // Zustandsberichte (angemeldet): Laufzeit, Abhängigkeiten, Datenbank, Audio, Encoder, Stream, KI
   add('GET', '/api/v1/system', null, () => ({ ...(app.svc.system.system() as object), ...app.health.system() }));
   add('GET', '/api/v1/database', null, () => app.databaseReport());

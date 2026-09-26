@@ -1496,6 +1496,33 @@ async function manageStreamProfiles() {
   }
 }
 
+/**
+ * AirDeckCast-Teststream: kurzer, echt hörbarer Testton läuft über den laufenden Sendebus (stört Queue/
+ * Automation nicht) und wird an jedem aktiven Ausgang/Profil/HLS auf echten Datenzuwachs geprüft.
+ */
+async function runAirDeckCastTest() {
+  if (!S.playout?.status?.running) return status('Server-Automation läuft nicht – Test nicht möglich', true);
+  status('AirDeckCast-Test läuft … (ca. 5 Sekunden)');
+  const r = /** @type {any} */ (await run(() => api.post(url('/airdeckcast-test'), {})));
+  if (!r) return;
+  const dlg = /** @type {HTMLDialogElement} */ ($('dialog'));
+  const form = /** @type {HTMLFormElement} */ ($('dialog-form'));
+  form.onsubmit = null;
+  const row = (/** @type {string} */ label, /** @type {boolean} */ ok) => h('li', { class: 'out' }, h('span', { class: `pill ${ok ? 'connected' : 'error'}` }, ok ? 'ok' : 'kein Signal'), h('span', { class: 'out-name' }, label));
+  form.replaceChildren(
+    h('h3', {}, r.ok ? 'AirDeckCast-Test: alles empfängt' : 'AirDeckCast-Test: nicht überall Signal'),
+    h('ul', { class: 'outputs' },
+      ...r.outputs.map((/** @type {any} */ o) => row(`${o.name}${o.profileId ? ` (${S.streamProfiles.find((sp) => sp.id === o.profileId)?.name ?? o.profileId})` : ''} – ${o.bytesDelta} Bytes`, o.ok)),
+      ...(r.hls ? [row(`HLS – ${r.hls.ok ? 'Segmente wachsen' : 'keine neuen Daten'}`, r.hls.ok)] : []),
+      ...(!r.outputs.length && !r.hls ? [h('li', { class: 'muted' }, 'Keine aktiven Ausgänge konfiguriert')] : []),
+    ),
+    h('div', { class: 'dialog-actions' }, h('button', { class: 'btn primary', value: 'ok', formnovalidate: true }, 'Schließen')),
+  );
+  dlg.returnValue = '';
+  dlg.showModal();
+  await new Promise((resolve) => { dlg.onclose = () => resolve(null); });
+}
+
 /** @param {any} [sp] */
 async function editStreamProfile(sp) {
   const isNew = !sp;
@@ -1754,6 +1781,7 @@ function bindStatic() {
   $('btn-add-source').addEventListener('click', () => editSource());
   $('btn-add-output').addEventListener('click', () => editOutput());
   $('btn-profiles').addEventListener('click', () => manageStreamProfiles());
+  $('btn-airdeckcast-test').addEventListener('click', runAirDeckCastTest);
   $('btn-liq').addEventListener('click', liquidsoapDialog);
   $('btn-sys-deps').addEventListener('click', () => void showDeps());
   $('btn-station').addEventListener('click', editStation);
