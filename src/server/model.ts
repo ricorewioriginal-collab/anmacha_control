@@ -6,7 +6,7 @@ import type { WriteStream } from 'node:fs';
 import { PriorityError, type Actor, type SourceConfig } from '../core/source-priority.ts';
 import type { CartSlot, ClockTemplate, DeckId, DeckState, MediaItem, PlayQueue, QueueEntry, RotationRules } from '../core/automation.ts';
 import type { ClockEvent, ProgramPlan, RecordingPlan, ScheduledJob } from '../core/scheduler.ts';
-import type { PlayoutOptions } from './playout.ts';
+import type { PlayoutOptions, StreamFormat } from './playout.ts';
 import type { LautfmConfig } from './lautfm.ts';
 import type { IntegrationsConfig } from './notify.ts';
 import type { AiStationConfig } from './ai/director.ts';
@@ -81,6 +81,18 @@ export interface StationData {
   linkedFolders?: LinkedFolder[];
   /** Grundbetriebsart des Mode-Managers (AUTO/MANUAL); LIVE/EMERGENCY ergeben sich aus dem Sendezustand */
   mode?: BaseMode;
+  /** AirDeckCast: benannte Zusatzprofile (z. B. "Mobile AAC 64k"), die Ausgänge per profileId referenzieren können */
+  streamProfiles?: StreamProfileConfig[];
+}
+
+/** AirDeckCast-Zusatzprofil: eigenes Format/Bitrate, gespeist aus demselben Programmbus wie der Hauptencoder. */
+export interface StreamProfileConfig {
+  id: string;
+  name: string;
+  format: StreamFormat;
+  bitrateKbps: number;
+  mp3Mode?: 'cbr' | 'vbr';
+  mp3Quality?: number;
 }
 
 export interface LinkedFolder {

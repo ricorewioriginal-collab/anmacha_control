@@ -14,6 +14,7 @@ import { ModeState, automationRuns, type BaseMode, type Mode as BroadcastMode } 
 import {
   AppError, SYSTEM_PRINCIPAL, newId, normalizeMount, posInt, publicOutput, publicSource, relayKey, safeColor, timingSafeEqualStr, wrap,
   type HubEvent, type NowPlaying, type PersistedState, type PlayLogEntry, type PlayoutConfig, type Principal, type Station, type StationData, type StationRuntime,
+  type StreamProfileConfig,
 } from './model.ts';
 import { AuditLog } from './store.ts';
 import { DbDocStore, importJsonFilesSync, type DocStore } from './repo/docs.ts';
@@ -54,6 +55,8 @@ export class AirDeckApp {
   readonly stations = new Map<string, StationRuntime>();
   readonly outputs = new Map<string, BroadcastOutput>();
   readonly relays = new Map<string, RelayTarget>();
+  /** AirDeckCast: je Sender+Zusatzprofil ein eigenes Relay (fasst Ausgänge zusammen, die dieses Profil statt des Hauptencoders nutzen) */
+  readonly profileRelays = new Map<string, RelayTarget>();
   /** Sendebus je Sender; forLive = nur für eine Live-Sendung gestartet (endet mit ihr) */
   readonly playouts = new Map<string, { playout: Playout; source: SourceConfig; forLive?: boolean }>();
   /** Mode-Manager je Sender */
@@ -672,7 +675,8 @@ export class AirDeckApp {
     const key = relayKey(stationId, target);
     let r = this.relays.get(key);
     if (!r) {
-      r = new RelayTarget(() => [...this.outputs.values()].filter((o) => o.cfg.stationId === stationId && o.cfg.sourceTarget === target && o.cfg.enabled));
+      // profileId-Ausgänge hängen an einem AirDeckCast-Zusatzprofil statt am Hauptbus dieses Targets (siehe profileRelayFor)
+      r = new RelayTarget(() => [...this.outputs.values()].filter((o) => o.cfg.stationId === stationId && o.cfg.sourceTarget === target && o.cfg.enabled && !o.cfg.profileId));
       this.relays.set(key, r);
     }
     return r;
@@ -694,7 +698,7 @@ export class AirDeckApp {
   }
 
   saveOutput(p: Principal, stationId: string, id: string | null, input: Record<string, unknown>): unknown {
-    this.rt(stationId);
+    const rt = this.rt(stationId);
     const prev = id ? this.outputOf(stationId, id).cfg : undefined;
     const outId = prev?.id ?? newId('out');
     const priority = input.priority === null || input.priority === '' ? undefined : (input.priority ?? prev?.priority);
@@ -707,6 +711,10 @@ export class AirDeckApp {
     if (!/^[a-zA-Z0-9.-]+$/.test(host)) throw new AppError(400, 'invalid_host', 'Ungültiger Host');
     const type = (input.type ?? prev?.type ?? 'icecast') as OutputConfig['type'];
     if (type !== 'icecast' && type !== 'shoutcast') throw new AppError(400, 'invalid_type', 'Unbekannter Ausgangstyp');
+    const profileId = input.profileId === null || input.profileId === '' ? undefined : (input.profileId ?? prev?.profileId);
+    if (profileId !== undefined && !(rt.data.streamProfiles ?? []).some((sp) => sp.id === profileId)) {
+      throw new AppError(400, 'invalid_profile', 'Unbekanntes Stream-Profil');
+    }
     const cfg: OutputConfig = {
       id: outId,
       stationId,
@@ -722,12 +730,17 @@ export class AirDeckApp {
       priority: priority as number | undefined,
       streamId: type === 'shoutcast' ? posInt('streamId' in input ? input.streamId : prev?.streamId) : undefined,
       bitrateKbps: posInt('bitrateKbps' in input ? input.bitrateKbps : prev?.bitrateKbps),
+      profileId: profileId as string | undefined,
       enabled: Boolean(input.enabled ?? prev?.enabled ?? true),
     };
     if (typeof input.password === 'string' && input.password) this.secrets.set(cfg.passwordRef, input.password);
     const o = this.mountOutput(cfg);
-    if (cfg.enabled) this.relayFor(stationId, cfg.sourceTarget).startOutput(o);
+    if (cfg.enabled) {
+      if (cfg.profileId) this.profileRelayFor(stationId, cfg.profileId).startOutput(o);
+      else this.relayFor(stationId, cfg.sourceTarget).startOutput(o);
+    }
     this.audit.write({ kind: 'output', event: prev ? 'updated' : 'created', actor: p.id, outputId: outId });
+    this.syncStreamProfiles(stationId);
     this.changed();
     return publicOutput(o, this.secrets);
   }
@@ -738,7 +751,96 @@ export class AirDeckApp {
     this.outputs.delete(id);
     this.secrets.delete(o.cfg.passwordRef);
     this.audit.write({ kind: 'output', event: 'removed', actor: p.id, outputId: id });
+    this.syncStreamProfiles(stationId);
     this.changed();
+  }
+
+  // ---------- AirDeckCast: Zusatz-Stream-Profile ----------
+
+  profileRelayFor(stationId: string, profileId: string): RelayTarget {
+    const key = `profile:${stationId}:${profileId}`;
+    let r = this.profileRelays.get(key);
+    if (!r) {
+      r = new RelayTarget(() => [...this.outputs.values()].filter((o) => o.cfg.stationId === stationId && o.cfg.profileId === profileId && o.cfg.enabled));
+      this.profileRelays.set(key, r);
+    }
+    return r;
+  }
+
+  listStreamProfiles(stationId: string): StreamProfileConfig[] {
+    return this.rt(stationId).data.streamProfiles ?? [];
+  }
+
+  saveStreamProfile(p: Principal, stationId: string, id: string | null, input: Record<string, unknown>): StreamProfileConfig {
+    const rt = this.rt(stationId);
+    const list = (rt.data.streamProfiles ??= []);
+    const prev = id ? list.find((sp) => sp.id === id) : undefined;
+    if (id && !prev) throw new AppError(404, 'not_found', 'Stream-Profil nicht gefunden');
+    const format = input.format ?? prev?.format ?? 'mp3';
+    if (format !== 'mp3' && format !== 'opus' && format !== 'aac') throw new AppError(400, 'invalid_format', 'Unbekanntes Format');
+    if (format === 'opus' && !this.ffmpeg?.encoders.opus) throw new AppError(501, 'unsupported', 'ffmpeg ohne libopus');
+    if (format === 'mp3' && !this.ffmpeg?.encoders.mp3) throw new AppError(501, 'unsupported', 'ffmpeg ohne libmp3lame');
+    const bitrateKbps = Number(input.bitrateKbps ?? prev?.bitrateKbps ?? 128);
+    if (!Number.isFinite(bitrateKbps) || bitrateKbps < 32 || bitrateKbps > 320) {
+      throw new AppError(400, 'invalid_bitrate', 'Bitrate muss zwischen 32 und 320 kBit/s liegen');
+    }
+    const mp3Mode = input.mp3Mode === 'cbr' || input.mp3Mode === 'vbr' ? input.mp3Mode : prev?.mp3Mode;
+    const mp3Quality = typeof input.mp3Quality === 'number' && input.mp3Quality >= 0 && input.mp3Quality <= 9 ? Math.round(input.mp3Quality) : prev?.mp3Quality;
+    const cfg: StreamProfileConfig = {
+      id: prev?.id ?? newId('sp'),
+      name: String(input.name ?? prev?.name ?? 'Profil').slice(0, 80),
+      format,
+      bitrateKbps: Math.round(bitrateKbps),
+      mp3Mode,
+      mp3Quality,
+    };
+    if (prev) Object.assign(prev, cfg);
+    else list.push(cfg);
+    this.audit.write({ kind: 'stream_profile', event: prev ? 'updated' : 'created', actor: p.id, stationId, profileId: cfg.id });
+    this.syncStreamProfiles(stationId);
+    this.changed();
+    return cfg;
+  }
+
+  removeStreamProfile(p: Principal, stationId: string, id: string): void {
+    const rt = this.rt(stationId);
+    const list = rt.data.streamProfiles ?? [];
+    const idx = list.findIndex((sp) => sp.id === id);
+    if (idx < 0) throw new AppError(404, 'not_found', 'Stream-Profil nicht gefunden');
+    const inUse = [...this.outputs.values()].some((o) => o.cfg.stationId === stationId && o.cfg.profileId === id);
+    if (inUse) throw new AppError(409, 'in_use', 'Profil wird von einer Ausgabe verwendet');
+    list.splice(idx, 1);
+    this.playouts.get(stationId)?.playout.removeProfile(id);
+    this.audit.write({ kind: 'stream_profile', event: 'removed', actor: p.id, stationId, profileId: id });
+    this.changed();
+  }
+
+  /** Gleicht die tatsächlich laufenden Zusatz-Encoderprofile des Sendebusses mit den aktivierten Ausgängen ab. */
+  private syncStreamProfiles(stationId: string): void {
+    const po = this.playouts.get(stationId);
+    if (!po) return;
+    const list = this.rt(stationId).data.streamProfiles ?? [];
+    const neededIds = new Set(
+      [...this.outputs.values()].filter((o) => o.cfg.stationId === stationId && o.cfg.enabled && o.cfg.profileId).map((o) => o.cfg.profileId!),
+    );
+    for (const id of po.playout.listProfiles()) if (!neededIds.has(id)) po.playout.removeProfile(id);
+    for (const id of neededIds) {
+      const sp = list.find((s) => s.id === id);
+      if (!sp) continue;
+      const relay = this.profileRelayFor(stationId, id);
+      const psid = `profile:${id}`;
+      po.playout.addProfile(id, { format: sp.format, bitrateKbps: sp.bitrateKbps, mp3Mode: sp.mp3Mode, mp3Quality: sp.mp3Quality }, {
+        onStreamStart: (contentType) => {
+          relay.open(psid, contentType);
+          relay.setActive(psid);
+        },
+        onStreamData: (chunk) => relay.data(psid, chunk),
+        onStreamStop: () => {
+          relay.setActive(null);
+          relay.close(psid);
+        },
+      });
+    }
   }
 
   // ---------- Queue / Automation / Decks ----------
@@ -1026,6 +1128,7 @@ export class AirDeckApp {
     this.playouts.set(stationId, { playout, source, forLive: opts.forLive });
     playout.setAutomation(automationRuns(this.modeOf(stationId).mode));
     playout.start();
+    this.syncStreamProfiles(stationId);
     // nur für eine Live-Sendung gestartet: Autostart-Einstellung nicht verändern
     if (!opts.forLive) rt.data.playout = { ...cfg, autostart: input.autostart ?? true };
     this.audit.write({ kind: 'playout', event: 'start', actor: p.id, stationId, sourceId: source.id });

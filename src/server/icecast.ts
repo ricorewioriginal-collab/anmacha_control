@@ -26,6 +26,8 @@ export interface OutputConfig {
   streamId?: number;
   /** Angezeigte Bitrate (icy-br) */
   bitrateKbps?: number;
+  /** AirDeckCast: statt des Hauptencoders ein benanntes Zusatzprofil (z. B. "Mobile AAC 64k") senden */
+  profileId?: string;
   enabled: boolean;
 }
 

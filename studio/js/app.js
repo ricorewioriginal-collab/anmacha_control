@@ -57,6 +57,7 @@ const S = {
   /** @type {any[]} */ carts: [],
   /** @type {any[]} */ sources: [],
   /** @type {any[]} */ outputs: [],
+  /** @type {any[]} */ streamProfiles: [],
   /** @type {any} */ nowPlaying: null,
   cartGroup: 'Alle',
   auto: false,
@@ -305,9 +306,10 @@ async function refreshAutomationSource() {
 async function loadStation() {
   localStorage.setItem('airdeck.station', S.station.id);
   applyBranding();
-  const [library, queue, carts, sources, outputs, np, playout, mode] = await Promise.all([
+  const [library, queue, carts, sources, outputs, streamProfiles, np, playout, mode] = await Promise.all([
     api.get(url('/media')), api.get(url('/queue')), api.get(url('/cardwall')),
-    api.get(url('/sources')), api.get(url('/outputs')), api.get(url('/now-playing')), api.get(url('/playout')),
+    api.get(url('/sources')), api.get(url('/outputs')), api.get(url('/stream-profiles')).catch(() => []),
+    api.get(url('/now-playing')), api.get(url('/playout')),
     api.get(url('/mode')).catch(() => null),
   ]);
   S.playout = playout;
@@ -317,6 +319,7 @@ async function loadStation() {
   S.carts = carts;
   S.sources = sources;
   S.outputs = outputs;
+  S.streamProfiles = streamProfiles ?? [];
   S.nowPlaying = np;
   updateLautfmNav();
   renderAll();
@@ -1412,6 +1415,7 @@ function renderOutputs() {
     h('button', { class: 'btn small', onclick: () => editOutput(o) }, '⋯'),
     h('span', { class: 'out-meta' },
       `${o.type} · ${o.host}:${o.port}${o.mount}${o.priority ? `?prio=${o.priority}` : ''}` +
+      (o.profileId ? ` · Profil: ${S.streamProfiles.find((sp) => sp.id === o.profileId)?.name ?? o.profileId}` : '') +
       (o.state?.error ? ` · ${o.state.error}` : o.state?.bytesSent ? ` · ${(o.state.bytesSent / 1048576).toFixed(1)} MB` : '') +
       (typeof o.state?.listeners === 'number' ? ` · 👂 ${o.state.listeners}` : '')),
   )) : [h('li', { class: 'muted' }, 'Kein Ausgang – ＋ für Icecast/laut.fm')]));
@@ -1430,6 +1434,9 @@ async function editOutput(o) {
     { name: 'password', label: isNew ? 'Passwort' : 'Passwort (leer = unverändert)', type: 'password', value: '' },
     { name: 'streamId', label: 'SHOUTcast v2: Stream-ID (leer = v1)', type: 'number', value: o?.streamId ?? '' },
     { name: 'bitrateKbps', label: 'Angezeigte Bitrate (kbit/s)', type: 'number', value: o?.bitrateKbps ?? '' },
+    ...(isNew ? [] : [{ name: 'profileId', label: 'Encoder-Profil', value: o?.profileId ?? '',
+      options: /** @type {[string,string][]} */ ([['', 'Hauptstream (Standardprofil)'], ...S.streamProfiles.map((sp) => [sp.id, `${sp.name} (${sp.format.toUpperCase()} ${sp.bitrateKbps}k)`])]),
+      hint: 'AirDeckCast: statt des Hauptencoders ein zusätzliches Profil senden (z. B. Mobile AAC 64k), unter „Profile“ anlegen.' }]),
     { name: 'priority', label: 'Priority-Parameter (optional)', type: 'number', value: o?.priority ?? '', hint: 'Hängt ?prio=<n> an den Mountpoint an (z. B. laut.fm). Leer = aus.' },
     { name: 'tls', label: 'TLS (https)', type: 'checkbox', value: !!o?.tls },
     { name: 'enabled', label: 'Aktiv', type: 'checkbox', value: o?.enabled ?? true },
@@ -1449,6 +1456,58 @@ async function editOutput(o) {
   }
   S.outputs = (await run(() => api.get(url('/outputs')))) ?? S.outputs;
   renderOutputs();
+}
+
+/**
+ * AirDeckCast: Zusatz-Stream-Profile verwalten (z. B. Standard MP3 128k + Mobile AAC 64k gleichzeitig).
+ * Ein Ausgang kann eines dieser Profile statt des Hauptencoders nutzen (siehe editOutput).
+ */
+async function manageStreamProfiles() {
+  const dlg = /** @type {HTMLDialogElement} */ ($('dialog'));
+  const form = /** @type {HTMLFormElement} */ ($('dialog-form'));
+  for (;;) {
+    form.onsubmit = null;
+    const rows = S.streamProfiles.map((sp) => h('li', { class: 'out' },
+      h('span', { class: 'out-name' }, sp.name),
+      h('button', { class: 'btn small', type: 'submit', name: 'action', value: `edit:${sp.id}`, formnovalidate: true }, '⋯'),
+      h('span', { class: 'out-meta' }, `${sp.format.toUpperCase()} · ${sp.bitrateKbps} kbit/s`),
+    ));
+    form.replaceChildren(
+      h('h3', {}, 'Zusatz-Stream-Profile'),
+      h('p', { class: 'muted' }, 'AirDeckCast: derselbe Programmbus, zusätzliche Encoder-Ausgaben – z. B. eine sparsame Mobilversion neben dem Hauptstream.'),
+      h('ul', { class: 'outputs' }, ...(rows.length ? rows : [h('li', { class: 'muted' }, 'Noch kein Zusatzprofil – ＋ für z. B. Mobile AAC 64k')])),
+      h('div', { class: 'dialog-actions' },
+        h('button', { class: 'btn', value: 'cancel', formnovalidate: true }, 'Schließen'),
+        h('button', { class: 'btn primary', type: 'submit', name: 'action', value: 'add', formnovalidate: true }, '＋ Profil')),
+    );
+    const action = await new Promise((resolve) => {
+      dlg.onclose = () => resolve(dlg.returnValue);
+      dlg.returnValue = '';
+      dlg.showModal();
+    });
+    if (!action || action === 'cancel') return;
+    if (action === 'add') await editStreamProfile();
+    else if (action.startsWith('edit:')) await editStreamProfile(S.streamProfiles.find((sp) => sp.id === action.slice(5)));
+  }
+}
+
+/** @param {any} [sp] */
+async function editStreamProfile(sp) {
+  const isNew = !sp;
+  const v = await formDialog(isNew ? 'Profil anlegen' : `Profil: ${sp.name}`, [
+    { name: 'name', label: 'Name', value: sp?.name ?? 'Mobile AAC', required: true },
+    { name: 'format', label: 'Format', value: sp?.format ?? 'aac', options: [['mp3', 'MP3'], ['aac', 'AAC'], ['opus', 'Opus']] },
+    { name: 'bitrateKbps', label: 'Bitrate (kbit/s)', type: 'number', value: sp?.bitrateKbps ?? 64 },
+    ...(isNew ? [] : [{ name: 'remove', label: 'Profil löschen', type: 'checkbox', value: false }]),
+  ]);
+  if (!v) return;
+  if (v.remove) {
+    await run(() => api.del(url(`/stream-profiles/${encodeURIComponent(sp.id)}`)));
+  } else {
+    const body = { name: v.name, format: v.format, bitrateKbps: v.bitrateKbps };
+    await run(() => (isNew ? api.post(url('/stream-profiles'), body) : api.patch(url(`/stream-profiles/${encodeURIComponent(sp.id)}`), body)));
+  }
+  S.streamProfiles = (await run(() => api.get(url('/stream-profiles')))) ?? S.streamProfiles;
 }
 
 /**
@@ -1689,6 +1748,7 @@ function bindStatic() {
   $('po-settings').addEventListener('click', editPlayout);
   $('btn-add-source').addEventListener('click', () => editSource());
   $('btn-add-output').addEventListener('click', () => editOutput());
+  $('btn-profiles').addEventListener('click', () => manageStreamProfiles());
   $('btn-liq').addEventListener('click', liquidsoapDialog);
   $('btn-sys-deps').addEventListener('click', () => void showDeps());
   $('btn-station').addEventListener('click', editStation);

@@ -384,6 +384,7 @@ export class Playout {
       rt.proc = null;
       p?.stdin?.end();
       setTimeout(() => p?.kill('SIGKILL'), 1000).unref();
+      rt.hooks.onStreamStop();
     }
     this.monitorProc?.kill('SIGKILL');
     this.monitorProc = null;

@@ -207,6 +207,12 @@ export function createHttpServer(app: AirDeckApp, studioDir: string): Server {
   add('PATCH', '/api/v1/stations/:sid/outputs/:id', 'outputs:write', async (c) => app.saveOutput(c.p, sid(c), c.params.id!, await c.body()));
   add('DELETE', '/api/v1/stations/:sid/outputs/:id', 'outputs:write', (c) => app.removeOutput(c.p, sid(c), c.params.id!));
 
+  // --- AirDeckCast: Zusatz-Stream-Profile (ein Programmbus, mehrere Encoder-Ausgänge) ---
+  add('GET', '/api/v1/stations/:sid/stream-profiles', 'outputs:read', (c) => app.listStreamProfiles(sid(c)));
+  add('POST', '/api/v1/stations/:sid/stream-profiles', 'outputs:write', async (c) => app.saveStreamProfile(c.p, sid(c), null, await c.body()));
+  add('PATCH', '/api/v1/stations/:sid/stream-profiles/:id', 'outputs:write', async (c) => app.saveStreamProfile(c.p, sid(c), c.params.id!, await c.body()));
+  add('DELETE', '/api/v1/stations/:sid/stream-profiles/:id', 'outputs:write', (c) => app.removeStreamProfile(c.p, sid(c), c.params.id!));
+
   // --- Medien ---
   add('GET', '/api/v1/stations/:sid/media', 'media:read', (c) => app.svc.media.library(sid(c)));
   add('PUT', '/api/v1/stations/:sid/media', 'media:write', async (c) => {

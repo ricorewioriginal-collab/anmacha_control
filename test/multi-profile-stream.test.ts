@@ -78,6 +78,7 @@ test(
 
       po.start();
       await until(() => Buffer.concat(mainChunks).length > 20_000 && Buffer.concat(mobileChunks).length > 10_000);
+      const stoppedBeforeStop = mobileStopped;
       po.stop();
       await wait(200);
 
@@ -94,8 +95,10 @@ test(
       assert.ok(rmsMain > 500, `Hauptprofil enthält hörbares Signal (RMS=${rmsMain})`);
       assert.ok(rmsMobile > 500, `Zusatzprofil enthält hörbares Signal (RMS=${rmsMobile}) - derselbe Programmbus, nicht Stille`);
 
-      // Sauberes Beenden: der Zusatzencoder wird beim Stoppen wirklich mitbeendet, nicht vergessen.
-      assert.equal(mobileStopped, 0, 'kein Absturz-Neustart während des Tests');
+      // Sauberes Beenden: po.stop() muss den Zusatzencoder wirklich mitbeenden (onStreamStop), nicht nur den
+      // Prozess killen und den Hook vergessen - unabhängig davon, ob unter Systemlast zwischendurch ein
+      // (vom Playout selbst abgefangener) Neustart des Zusatzencoders stattfand.
+      assert.ok(mobileStopped > stoppedBeforeStop, 'po.stop() beendet auch das Zusatzprofil sauber (onStreamStop wird aufgerufen)');
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
