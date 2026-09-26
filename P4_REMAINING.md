@@ -1,11 +1,11 @@
 # P4 – verbleibende Arbeit
 
-Ausgangscommit: 296b799. Arbeitsbranch: codex/p4-beta-qualification.
+Arbeitsstand: Default-Branch `AirDeck-Radio-Automation-&-Broadcast`. Letzter P4-Fix: `54fe05b` (Linux: ffmpeg Pflichtabhängigkeit); CI-Evidenz wird fortlaufend ergänzt.
 
 ## Beta-Blocker
 
 1. Vollständigen Zero-to-Air-UI-Workflow mit Standardstream und hörbarem Audio auf sauberer Installation nachweisen.
-2. Linux: FFmpeg als Pflichtabhängigkeit deklarieren und Installation ohne Recommends prüfen.
+2. Linux: Pflichtabhängigkeit ist mit `54fe05b` behoben und der Debian-Paket-/systemd-Test in CI grün. Noch offen: vollständige Clean-Install-/Reboot-/Upgrade-/TLS-Abnahme.
 3. Backup/Restore auf frischer Instanz: Passwort-geschützter portabler Secret-Export, Import über UI, Medienoption, Konfiguration, Retention; anschließend echtes Audio. Aktuelles Backup ist keine vollständige Disaster-Recovery-Sicherung.
 4. Windows-Dienst ohne Login, Android-Gerät/Emulator, Docker-Persistenz und Clean-Install-/Upgrade-Matrix qualifizieren.
 5. Update-Kanäle, Backup vor Migration, transaktionaler Rollback und Versionsidentität.
@@ -16,7 +16,7 @@ Ausgangscommit: 296b799. Arbeitsbranch: codex/p4-beta-qualification.
 
 ## Nächster konkreter Schritt
 
-Senderbezogenen Stream-Gesamtstatus korrigieren und prüfen: Ein verbundener fremder Sender verdeckt aktuell den Fehler des eigenen Senders. Danach Linux-Abhängigkeit und Zero-to-Air prüfen.
+Der senderbezogene Stream-Gesamtstatus ist bereits mit Merge `21057bc` korrigiert und regressionsgetestet. Linux-FFmpeg-Pflichtabhängigkeit ist mit `54fe05b` behoben. Nächster Beta-Blocker: Zero-to-Air/Clean-Install real nachweisen; parallel Windows-Installer-CI vollständig abschließen. Danach Backup/Restore und Systemdiagnose.
 
 ## Grenzen der bisherigen Evidenz
 
