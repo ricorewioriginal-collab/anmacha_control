@@ -49,13 +49,18 @@ upload_tone() {
   $compose exec -T airdeck-demo ffmpeg -hide_banner -loglevel error -f lavfi -i "sine=frequency=${freq}:duration=${dur}" \
     -c:a pcm_s16le -f wav - \
     | curl -fs -X PUT -H "$auth" -H "Content-Type: audio/wav" --data-binary @- \
-      "http://127.0.0.1:8751/api/v1/stations/main/media?name=${name}.wav&category=${category}" > /dev/null
+      "http://127.0.0.1:8751/api/v1/stations/main/media?name=${name}.wav&category=${category}"
 }
-upload_tone 440 "DemoTrack-A" "music" 12
-upload_tone 554 "DemoTrack-B" "music" 12
-upload_tone 659 "DemoTrack-C" "music" 12
-upload_tone 880 "AirDeck-FM-ID" "station_id" 3
-upload_tone 988 "Demo-Jingle" "jingle" 3
+track_a="$(upload_tone 440 "DemoTrack-A" "music" 12 | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')"
+track_b="$(upload_tone 554 "DemoTrack-B" "music" 12 | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')"
+track_c="$(upload_tone 659 "DemoTrack-C" "music" 12 | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')"
+station_id="$(upload_tone 880 "AirDeck-FM-ID" "station_id" 3 | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')"
+jingle="$(upload_tone 988 "Demo-Jingle" "jingle" 3 | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')"
+
+# Demo-Cardwall direkt mit echten Testmedien befüllen.
+curl -fs -X PATCH -H "$auth" -H "Content-Type: application/json" -d "{\"mediaId\":\"$jingle\",\"label\":\"Demo Jingle\"}" "$api/cardwall/cart1" > /dev/null
+curl -fs -X PATCH -H "$auth" -H "Content-Type: application/json" -d "{\"mediaId\":\"$station_id\",\"label\":\"AirDeck-FM ID\"}" "$api/cardwall/cart2" > /dev/null
+curl -fs -X PATCH -H "$auth" -H "Content-Type: application/json" -d "{\"mediaId\":\"$track_a\",\"label\":\"Demo Track A\"}" "$api/cardwall/cart3" > /dev/null
 
 # Automation direkt startbereit machen. Wenn der Start wider Erwarten fehlschlaegt, bleibt die Demo
 # trotzdem erreichbar; der Fehler steht dann im Containerlog statt den gesamten Reset abzubrechen.
