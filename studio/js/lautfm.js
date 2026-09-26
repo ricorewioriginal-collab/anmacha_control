@@ -327,7 +327,10 @@ export function mountLautfm(root, ctx) {
       const isAd = (/** @type {any} */ t) => /^(ad|ads|advert|advertisement|commercial|werbung)$/i.test(String(t.type ?? ''));
       const hits = list.filter(isAd);
       const types = [...new Set(list.map((t) => t.type).filter(Boolean))];
-      out.replaceChildren(
+      // Element.replaceChildren() wandelt ein direkt übergebenes null (anders als der h()-Helfer)
+      // in einen sichtbaren Textknoten "null" um - darum hier filtern (echter Fund: stand ohne
+      // Werbe-Trigger am Tag als sichtbares "null" unter der Tabelle bzw. dem Leer-Hinweis).
+      out.replaceChildren(...[
         kv('Werbe-Trigger', hits.length),
         kv('Hörer bei Werbung (Summe)', hits.reduce((a, t) => a + (t.listeners ?? 0), 0)),
         kv('Gefundene Typen', types.join(', ') || '– (laut.fm liefert keinen Typ)'),
@@ -342,7 +345,8 @@ export function mountLautfm(root, ctx) {
         hits.length ? h('button', { class: 'btn small', onclick: () => {
           const csv = ['Start;Ende;Spot;Hörer;Live', ...hits.map((t) => [t.started_at, t.ends_at, `${t.artist?.name ?? ''} - ${t.title ?? ''}`.replace(/;/g, ','), t.listeners ?? '', t.live ? 'ja' : 'nein'].join(';'))].join('\n');
           h('a', { href: URL.createObjectURL(new Blob([csv], { type: 'text/csv' })), download: `werbe-log-${day.value}.csv` }).click();
-        } }, 'Als CSV') : null);
+        } }, 'Als CSV') : null,
+      ].filter((n) => n != null));
     });
     day.addEventListener('change', load);
     load();

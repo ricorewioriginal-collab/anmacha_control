@@ -156,7 +156,10 @@ export async function runSetup(ctx) {
   const render = (/** @type {string} */ error = '') => {
     const step = STEPS[i];
     form.onsubmit = (e) => e.preventDefault();
-    form.replaceChildren(
+    // Element.replaceChildren() filtert anders als der h()-Helfer NICHT null/undefined heraus, sondern
+    // wandelt sie in einen sichtbaren Textknoten "null" um - darum hier selbst filtern (sonst stand auf
+    // JEDEM Schritt des Einrichtungs-Assistenten ein sichtbares "null" im Dialog, s. echter Playwright-Fund).
+    form.replaceChildren(...[
       h('div', { class: 'wizard-head' }, h('small', { class: 'muted' }, `Einrichtung · Schritt ${i + 1} von ${STEPS.length}`), h('h3', {}, step.title)),
       h('div', { class: 'wizard-bar' }, h('i', { style: `width:${Math.round(((i + 1) / STEPS.length) * 100)}%` })),
       step.intro ? h('p', { class: 'muted' }, step.intro) : null,
@@ -168,7 +171,7 @@ export async function runSetup(ctx) {
         i > 0 ? h('button', { class: 'btn', type: 'button', onclick: () => { i--; render(); } }, 'Zurück') : null,
         step.id !== 'finish' && step.id !== 'welcome' ? h('button', { class: 'btn', type: 'button', onclick: () => void next(true) }, 'Überspringen') : null,
         h('button', { class: 'btn primary', type: 'button', onclick: () => void next(false) }, step.id === 'finish' ? 'Abschließen' : 'Weiter')),
-    );
+    ].filter((n) => n != null));
   };
 
   const close = () => {
