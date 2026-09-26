@@ -1,10 +1,10 @@
 # AirDeck – Radio-Automation & Live-Broadcast
 
 <p>
-  <img src="assets/icons/airdeck-gesamt.png" width="96" alt="AirDeck">
-  <img src="assets/icons/airdeck-windows.png" width="96" alt="AirDeck Windows">
-  <img src="assets/icons/airdeck-android.png" width="96" alt="AirDeck Android">
-  <img src="assets/icons/airdeck-server.png" width="96" alt="AirDeck Server">
+  <img src="https://raw.githubusercontent.com/ricorewioriginal-collab/anmacha_control/AirDeck-Radio-Automation-%26-Broadcast/assets/icons/airdeck-gesamt.png" width="96" alt="AirDeck">
+  <img src="https://raw.githubusercontent.com/ricorewioriginal-collab/anmacha_control/AirDeck-Radio-Automation-%26-Broadcast/assets/icons/airdeck-windows.png" width="96" alt="AirDeck Windows">
+  <img src="https://raw.githubusercontent.com/ricorewioriginal-collab/anmacha_control/AirDeck-Radio-Automation-%26-Broadcast/assets/icons/airdeck-android.png" width="96" alt="AirDeck Android">
+  <img src="https://raw.githubusercontent.com/ricorewioriginal-collab/anmacha_control/AirDeck-Radio-Automation-%26-Broadcast/assets/icons/airdeck-server.png" width="96" alt="AirDeck Server">
 </p>
 
 [![Build](https://github.com/ricorewioriginal-collab/anmacha_control/actions/workflows/build.yml/badge.svg)](https://github.com/ricorewioriginal-collab/anmacha_control/actions/workflows/build.yml)
@@ -66,57 +66,61 @@ Login: Benutzername `demo`, Passwort `airdeck-demo`
 
 ## 📸 Vorschau – jeder Arbeitsbereich, jedes Bedienfeld
 
-Alle Screenshots zeigen den Beispielsender **„AirDeck-FM“** mit Testdaten (kein echter Sender). Zum Vergrößern anklicken.
+Alle Screenshots zeigen den Beispielsender **„AirDeck-FM“** mit Testdaten (kein echter Sender). Jedes Bild ist einzeln verlinkt und öffnet in voller Auflösung – anklicken zum Vergrößern.
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/ricorewioriginal-collab/anmacha_control/AirDeck-Radio-Automation-%26-Broadcast/docs/screenshots/slideshow.gif" alt="AirDeck Slideshow: Dashboard, Studio, Decks, Quellen, Sendeplan, Medienverwaltung, KI-Automation, Hörer, Benutzer, Handbuch" width="820">
+</p>
 
 ### Die Arbeitsbereiche
 
 | Dashboard (Senderübersicht) | Studio-Arbeitsbereich (Gesamtansicht) | Sendeplan & Events |
 |---|---|---|
-| [![Dashboard](docs/screenshots/view-dashboard.png)](docs/screenshots/view-dashboard.png) | [![Studio](docs/screenshots/view-studio.png)](docs/screenshots/view-studio.png) | [![Sendeplan](docs/screenshots/view-planning.png)](docs/screenshots/view-planning.png) |
+| [![Dashboard](https://raw.githubusercontent.com/ricorewioriginal-collab/anmacha_control/AirDeck-Radio-Automation-%26-Broadcast/docs/screenshots/view-dashboard.png)](https://raw.githubusercontent.com/ricorewioriginal-collab/anmacha_control/AirDeck-Radio-Automation-%26-Broadcast/docs/screenshots/view-dashboard.png) | [![Studio](https://raw.githubusercontent.com/ricorewioriginal-collab/anmacha_control/AirDeck-Radio-Automation-%26-Broadcast/docs/screenshots/view-studio.png)](https://raw.githubusercontent.com/ricorewioriginal-collab/anmacha_control/AirDeck-Radio-Automation-%26-Broadcast/docs/screenshots/view-studio.png) | [![Sendeplan](https://raw.githubusercontent.com/ricorewioriginal-collab/anmacha_control/AirDeck-Radio-Automation-%26-Broadcast/docs/screenshots/view-planning.png)](https://raw.githubusercontent.com/ricorewioriginal-collab/anmacha_control/AirDeck-Radio-Automation-%26-Broadcast/docs/screenshots/view-planning.png) |
 | Alle Sender auf einen Blick: Titel, Status, Modus, Schnellzugriff | Decks, Cardwall, Queue, Stream/Encoder, Quellen, Automation, Pegel – frei anordenbar | Zeitplan, Stunden-Uhr, Rotation & Regeln, Uhr-Vorlage, Preflight, Sendeplan-Raster |
 
 | Medienverwaltung | Playlistverwaltung | Recorder |
 |---|---|---|
-| [![Medienverwaltung](docs/screenshots/view-mediathek.png)](docs/screenshots/view-mediathek.png) | [![Playlistverwaltung](docs/screenshots/view-playlists.png)](docs/screenshots/view-playlists.png) | [![Recorder](docs/screenshots/view-recorder.png)](docs/screenshots/view-recorder.png) |
+| [![Medienverwaltung](https://raw.githubusercontent.com/ricorewioriginal-collab/anmacha_control/AirDeck-Radio-Automation-%26-Broadcast/docs/screenshots/view-mediathek.png)](https://raw.githubusercontent.com/ricorewioriginal-collab/anmacha_control/AirDeck-Radio-Automation-%26-Broadcast/docs/screenshots/view-mediathek.png) | [![Playlistverwaltung](https://raw.githubusercontent.com/ricorewioriginal-collab/anmacha_control/AirDeck-Radio-Automation-%26-Broadcast/docs/screenshots/view-playlists.png)](https://raw.githubusercontent.com/ricorewioriginal-collab/anmacha_control/AirDeck-Radio-Automation-%26-Broadcast/docs/screenshots/view-playlists.png) | [![Recorder](https://raw.githubusercontent.com/ricorewioriginal-collab/anmacha_control/AirDeck-Radio-Automation-%26-Broadcast/docs/screenshots/view-recorder.png)](https://raw.githubusercontent.com/ricorewioriginal-collab/anmacha_control/AirDeck-Radio-Automation-%26-Broadcast/docs/screenshots/view-recorder.png) |
 | Bibliothek, Upload, Ordner-Import, Lautheit, Integritätsprüfung | Manuell/Shuffle, Titel verwalten, Farbe & Modus je Playlist | Mitschnitt starten, automatische Zeitfenster, Replays |
 
 | KI-Automation | Anbindungen (Bridge zu bestehenden Systemen) | Hörer-Interaktion |
 |---|---|---|
-| [![KI-Automation](docs/screenshots/view-ai.png)](docs/screenshots/view-ai.png) | [![Anbindungen](docs/screenshots/view-bridges.png)](docs/screenshots/view-bridges.png) | [![Hörer](docs/screenshots/view-listeners.png)](docs/screenshots/view-listeners.png) |
+| [![KI-Automation](https://raw.githubusercontent.com/ricorewioriginal-collab/anmacha_control/AirDeck-Radio-Automation-%26-Broadcast/docs/screenshots/view-ai.png)](https://raw.githubusercontent.com/ricorewioriginal-collab/anmacha_control/AirDeck-Radio-Automation-%26-Broadcast/docs/screenshots/view-ai.png) | [![Anbindungen](https://raw.githubusercontent.com/ricorewioriginal-collab/anmacha_control/AirDeck-Radio-Automation-%26-Broadcast/docs/screenshots/view-bridges.png)](https://raw.githubusercontent.com/ricorewioriginal-collab/anmacha_control/AirDeck-Radio-Automation-%26-Broadcast/docs/screenshots/view-bridges.png) | [![Hörer](https://raw.githubusercontent.com/ricorewioriginal-collab/anmacha_control/AirDeck-Radio-Automation-%26-Broadcast/docs/screenshots/view-listeners.png)](https://raw.githubusercontent.com/ricorewioriginal-collab/anmacha_control/AirDeck-Radio-Automation-%26-Broadcast/docs/screenshots/view-listeners.png) |
 | Director-Status, Moderation/Musikplanung, Freigaben, Protokoll | AzuraCast/Icecast/SAM/mAirList/RadioDJ als Relay & Status-Spiegel | Posteingang (Wunsch, Gruß, Votes), Hörerseiten-Link zum Einbetten |
 
 | Nextcloud-Medien | Benutzer & Rollen | Handbuch (im Programm) |
 |---|---|---|
-| [![Nextcloud](docs/screenshots/view-nextcloud.png)](docs/screenshots/view-nextcloud.png) | [![Benutzer & Rollen](docs/screenshots/view-users.png)](docs/screenshots/view-users.png) | [![Handbuch](docs/screenshots/view-handbuch.png)](docs/screenshots/view-handbuch.png) |
+| [![Nextcloud](https://raw.githubusercontent.com/ricorewioriginal-collab/anmacha_control/AirDeck-Radio-Automation-%26-Broadcast/docs/screenshots/view-nextcloud.png)](https://raw.githubusercontent.com/ricorewioriginal-collab/anmacha_control/AirDeck-Radio-Automation-%26-Broadcast/docs/screenshots/view-nextcloud.png) | [![Benutzer & Rollen](https://raw.githubusercontent.com/ricorewioriginal-collab/anmacha_control/AirDeck-Radio-Automation-%26-Broadcast/docs/screenshots/view-users.png)](https://raw.githubusercontent.com/ricorewioriginal-collab/anmacha_control/AirDeck-Radio-Automation-%26-Broadcast/docs/screenshots/view-users.png) | [![Handbuch](https://raw.githubusercontent.com/ricorewioriginal-collab/anmacha_control/AirDeck-Radio-Automation-%26-Broadcast/docs/screenshots/view-handbuch.png)](https://raw.githubusercontent.com/ricorewioriginal-collab/anmacha_control/AirDeck-Radio-Automation-%26-Broadcast/docs/screenshots/view-handbuch.png) |
 | Cloud-Ordner durchsuchen, Medien übernehmen, Mitschnitte hochladen | Rollenmatrix, Konten mit Sender-Zuordnung, letzte Anmeldung | Volltextsuche, gleiche Seitenleiste/Kopfzeile wie das restliche Programm |
 
 ### Jedes einzelne Bedienfeld im Studio-Arbeitsbereich
 
 | Decks (4× CUE/Vorhören) | Cardwall | Now Playing |
 |---|---|---|
-| [![Decks](docs/screenshots/panel-decks.png)](docs/screenshots/panel-decks.png) | [![Cardwall](docs/screenshots/panel-carts.png)](docs/screenshots/panel-carts.png) | [![Now Playing](docs/screenshots/panel-np.png)](docs/screenshots/panel-np.png) |
+| [![Decks](https://raw.githubusercontent.com/ricorewioriginal-collab/anmacha_control/AirDeck-Radio-Automation-%26-Broadcast/docs/screenshots/panel-decks.png)](https://raw.githubusercontent.com/ricorewioriginal-collab/anmacha_control/AirDeck-Radio-Automation-%26-Broadcast/docs/screenshots/panel-decks.png) | [![Cardwall](https://raw.githubusercontent.com/ricorewioriginal-collab/anmacha_control/AirDeck-Radio-Automation-%26-Broadcast/docs/screenshots/panel-carts.png)](https://raw.githubusercontent.com/ricorewioriginal-collab/anmacha_control/AirDeck-Radio-Automation-%26-Broadcast/docs/screenshots/panel-carts.png) | [![Now Playing](https://raw.githubusercontent.com/ricorewioriginal-collab/anmacha_control/AirDeck-Radio-Automation-%26-Broadcast/docs/screenshots/panel-np.png)](https://raw.githubusercontent.com/ricorewioriginal-collab/anmacha_control/AirDeck-Radio-Automation-%26-Broadcast/docs/screenshots/panel-np.png) |
 
 | Playlist / Archiv | Queue (mit Backtiming) | Schnelltrigger |
 |---|---|---|
-| [![Playlist/Archiv](docs/screenshots/panel-lib.png)](docs/screenshots/panel-lib.png) | [![Queue](docs/screenshots/panel-queue.png)](docs/screenshots/panel-queue.png) | [![Schnelltrigger](docs/screenshots/panel-quick.png)](docs/screenshots/panel-quick.png) |
+| [![Playlist/Archiv](https://raw.githubusercontent.com/ricorewioriginal-collab/anmacha_control/AirDeck-Radio-Automation-%26-Broadcast/docs/screenshots/panel-lib.png)](https://raw.githubusercontent.com/ricorewioriginal-collab/anmacha_control/AirDeck-Radio-Automation-%26-Broadcast/docs/screenshots/panel-lib.png) | [![Queue](https://raw.githubusercontent.com/ricorewioriginal-collab/anmacha_control/AirDeck-Radio-Automation-%26-Broadcast/docs/screenshots/panel-queue.png)](https://raw.githubusercontent.com/ricorewioriginal-collab/anmacha_control/AirDeck-Radio-Automation-%26-Broadcast/docs/screenshots/panel-queue.png) | [![Schnelltrigger](https://raw.githubusercontent.com/ricorewioriginal-collab/anmacha_control/AirDeck-Radio-Automation-%26-Broadcast/docs/screenshots/panel-quick.png)](https://raw.githubusercontent.com/ricorewioriginal-collab/anmacha_control/AirDeck-Radio-Automation-%26-Broadcast/docs/screenshots/panel-quick.png) |
 
 | Live-Voice (Mikrofon/PTT) | Stream & Encoder | Server-Automation 24/7 |
 |---|---|---|
-| [![Live-Voice](docs/screenshots/panel-live.png)](docs/screenshots/panel-live.png) | [![Stream & Encoder](docs/screenshots/panel-stream.png)](docs/screenshots/panel-stream.png) | [![Server-Automation](docs/screenshots/panel-playout.png)](docs/screenshots/panel-playout.png) |
+| [![Live-Voice](https://raw.githubusercontent.com/ricorewioriginal-collab/anmacha_control/AirDeck-Radio-Automation-%26-Broadcast/docs/screenshots/panel-live.png)](https://raw.githubusercontent.com/ricorewioriginal-collab/anmacha_control/AirDeck-Radio-Automation-%26-Broadcast/docs/screenshots/panel-live.png) | [![Stream & Encoder](https://raw.githubusercontent.com/ricorewioriginal-collab/anmacha_control/AirDeck-Radio-Automation-%26-Broadcast/docs/screenshots/panel-stream.png)](https://raw.githubusercontent.com/ricorewioriginal-collab/anmacha_control/AirDeck-Radio-Automation-%26-Broadcast/docs/screenshots/panel-stream.png) | [![Server-Automation](https://raw.githubusercontent.com/ricorewioriginal-collab/anmacha_control/AirDeck-Radio-Automation-%26-Broadcast/docs/screenshots/panel-playout.png)](https://raw.githubusercontent.com/ricorewioriginal-collab/anmacha_control/AirDeck-Radio-Automation-%26-Broadcast/docs/screenshots/panel-playout.png) |
 
 | Lautstärke / Processing | VU / Pegel | Quellen · Priorität |
 |---|---|---|
-| [![Processing](docs/screenshots/panel-processing.png)](docs/screenshots/panel-processing.png) | [![VU/Pegel](docs/screenshots/panel-meters.png)](docs/screenshots/panel-meters.png) | [![Quellen · Priorität](docs/screenshots/panel-sources.png)](docs/screenshots/panel-sources.png) |
+| [![Processing](https://raw.githubusercontent.com/ricorewioriginal-collab/anmacha_control/AirDeck-Radio-Automation-%26-Broadcast/docs/screenshots/panel-processing.png)](https://raw.githubusercontent.com/ricorewioriginal-collab/anmacha_control/AirDeck-Radio-Automation-%26-Broadcast/docs/screenshots/panel-processing.png) | [![VU/Pegel](https://raw.githubusercontent.com/ricorewioriginal-collab/anmacha_control/AirDeck-Radio-Automation-%26-Broadcast/docs/screenshots/panel-meters.png)](https://raw.githubusercontent.com/ricorewioriginal-collab/anmacha_control/AirDeck-Radio-Automation-%26-Broadcast/docs/screenshots/panel-meters.png) | [![Quellen · Priorität](https://raw.githubusercontent.com/ricorewioriginal-collab/anmacha_control/AirDeck-Radio-Automation-%26-Broadcast/docs/screenshots/panel-sources.png)](https://raw.githubusercontent.com/ricorewioriginal-collab/anmacha_control/AirDeck-Radio-Automation-%26-Broadcast/docs/screenshots/panel-sources.png) |
 
 | System | | |
 |---|---|---|
-| [![System](docs/screenshots/panel-system.png)](docs/screenshots/panel-system.png) | Alle Fenster lassen sich frei verschieben, in der Größe ändern und abdocken (**Fenster & Layout**). | |
+| [![System](https://raw.githubusercontent.com/ricorewioriginal-collab/anmacha_control/AirDeck-Radio-Automation-%26-Broadcast/docs/screenshots/panel-system.png)](https://raw.githubusercontent.com/ricorewioriginal-collab/anmacha_control/AirDeck-Radio-Automation-%26-Broadcast/docs/screenshots/panel-system.png) | Alle Fenster lassen sich frei verschieben, in der Größe ändern und abdocken (**Fenster & Layout**). | |
 
 ### Mobil & Hörerseite
 
 | Handy-Sender (Android) | Hörerbereich (Browser) |
 |---|---|
-| [![Handy-Sender](docs/screenshots/handy-sender.png)](docs/screenshots/handy-sender.png) | [![Hörerbereich](docs/screenshots/hoerer-browser.png)](docs/screenshots/hoerer-browser.png) |
+| [![Handy-Sender](https://raw.githubusercontent.com/ricorewioriginal-collab/anmacha_control/AirDeck-Radio-Automation-%26-Broadcast/docs/screenshots/handy-sender.png)](https://raw.githubusercontent.com/ricorewioriginal-collab/anmacha_control/AirDeck-Radio-Automation-%26-Broadcast/docs/screenshots/handy-sender.png) | [![Hörerbereich](https://raw.githubusercontent.com/ricorewioriginal-collab/anmacha_control/AirDeck-Radio-Automation-%26-Broadcast/docs/screenshots/hoerer-browser.png)](https://raw.githubusercontent.com/ricorewioriginal-collab/anmacha_control/AirDeck-Radio-Automation-%26-Broadcast/docs/screenshots/hoerer-browser.png) |
 | Live senden vom Handy – Mikrofon, Musik und Pegel, ganz ohne AirDeck-Server | Musikwunsch, Grüße und Voting direkt aus dem Browser der Hörer |
 
 ## Funktionen

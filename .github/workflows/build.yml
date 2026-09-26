@@ -400,8 +400,11 @@ jobs:
     permissions:
       contents: write
     steps:
+      # Nur die eigenen Artefakte laden - "docker-arm64" (docker/build-push-action) legt daneben ein
+      # internes Buildx-Cache-Artefakt ab ("<owner>~<repo>~....dockerbuild"), dessen Download
+      # gelegentlich fehlschlägt und ohne dieses Muster den ganzen Release-Job unnötig scheitern lässt.
       - uses: actions/download-artifact@v4
-        with: { path: artifacts }
+        with: { path: artifacts, pattern: 'AirDeck-*' }
       - name: Dateien vorbereiten
         run: |
           mkdir -p out
