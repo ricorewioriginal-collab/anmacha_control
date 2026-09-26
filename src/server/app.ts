@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { SourcePriorityEngine, type EngineEvent, type SourceConfig } from '../core/source-priority.ts';
 import {
   DECK_IDS, DEFAULT_CLOCK, DEFAULT_ROTATION, MEDIA_CATEGORIES, PlayQueue, backtime, defaultCardwall, fillFromClock, pickNext as pickFromPool, playLength,
-  type CartSlot, type ClockTemplate, type DeckId, type DeckState, type MediaItem,
+  type CartSlot, type ClockTemplate, type DeckId, type DeckState, type MediaItem, type RotationRules,
 } from '../core/automation.ts';
 import { activeWindow } from '../core/scheduler.ts';
 import { ModeState, automationRuns, type BaseMode, type Mode as BroadcastMode } from '../core/mode.ts';
@@ -787,13 +787,22 @@ export class AirDeckApp {
     this.publishQueue(stationId);
   }
 
-  setAutomation(stationId: string, patch: { autoFill?: boolean; minQueue?: number; clock?: ClockTemplate }): unknown {
+  setAutomation(stationId: string, patch: { autoFill?: boolean; minQueue?: number; clock?: ClockTemplate; rotation?: Partial<RotationRules> }): unknown {
     const rt = this.rt(stationId);
     if (typeof patch.autoFill === 'boolean') rt.data.autoFill = patch.autoFill;
     if (typeof patch.minQueue === 'number' && patch.minQueue >= 1 && patch.minQueue <= 100) rt.data.minQueue = Math.floor(patch.minQueue);
     if (patch.clock && Array.isArray(patch.clock.slots)) {
       rt.data.clock = { id: String(patch.clock.id ?? 'custom'), name: String(patch.clock.name ?? 'Sendeuhr').slice(0, 80), slots: patch.clock.slots.slice(0, 200) };
       rt.data.clockCursor = 0;
+    }
+    if (patch.rotation && typeof patch.rotation === 'object') {
+      const r = patch.rotation;
+      const clamp = (v: unknown, lo: number, hi: number, fallback: number) => (typeof v === 'number' && Number.isFinite(v) ? Math.max(lo, Math.min(hi, Math.floor(v))) : fallback);
+      rt.data.rotation = {
+        artistSeparation: clamp(r.artistSeparation, 0, 500, rt.data.rotation.artistSeparation),
+        titleSeparation: clamp(r.titleSeparation, 0, 5000, rt.data.rotation.titleSeparation),
+        genreSeparation: clamp(r.genreSeparation, 0, 500, rt.data.rotation.genreSeparation ?? 0),
+      };
     }
     this.publish('automation.state_changed', stationId, this.automationView(stationId));
     this.changed();

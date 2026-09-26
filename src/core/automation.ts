@@ -94,9 +94,11 @@ export interface RotationRules {
   artistSeparation: number;
   /** Mindestabstand gleicher Titel (Anzahl Titel) */
   titleSeparation: number;
+  /** Mindestabstand gleiches Genre (Anzahl Titel), 0 = keine Trennung nach Genre */
+  genreSeparation?: number;
 }
 
-export const DEFAULT_ROTATION: RotationRules = { artistSeparation: 3, titleSeparation: 20 };
+export const DEFAULT_ROTATION: RotationRules = { artistSeparation: 3, titleSeparation: 20, genreSeparation: 0 };
 
 /** Effektive Laufzeit unter Berücksichtigung von Cue-In/Out und Segue. */
 export function playLength(m: MediaItem): number | null {
@@ -151,13 +153,19 @@ export function pickNext(
   const byId = new Map(library.map((m) => [m.id, m]));
   const recentArtists = (n: number) =>
     new Set(history.slice(0, n).map((id) => byId.get(id)?.artist.toLowerCase()).filter((a): a is string => !!a));
+  const recentGenres = (n: number) =>
+    new Set(history.slice(0, n).map((id) => byId.get(id)?.genre?.toLowerCase()).filter((a): a is string => !!a));
   const lastPlayedIndex = (id: string) => {
     const i = history.indexOf(id);
     return i === -1 ? Infinity : i;
   };
+  const passTitle = (m: MediaItem) => lastPlayedIndex(m.id) >= rules.titleSeparation;
+  const passArtist = (m: MediaItem) => !(m.artist && recentArtists(rules.artistSeparation).has(m.artist.toLowerCase()));
+  const passGenre = (m: MediaItem) => !rules.genreSeparation || !(m.genre && recentGenres(rules.genreSeparation).has(m.genre.toLowerCase()));
   const attempts: Array<(m: MediaItem) => boolean> = [
-    (m) => lastPlayedIndex(m.id) >= rules.titleSeparation && !(m.artist && recentArtists(rules.artistSeparation).has(m.artist.toLowerCase())),
-    (m) => lastPlayedIndex(m.id) >= rules.titleSeparation,
+    (m) => passTitle(m) && passArtist(m) && passGenre(m),
+    (m) => passTitle(m) && passArtist(m),
+    (m) => passTitle(m),
     (m) => lastPlayedIndex(m.id) > 0,
     () => true,
   ];

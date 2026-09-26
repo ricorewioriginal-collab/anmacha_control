@@ -11,8 +11,8 @@ import {
   type MediaItem,
 } from '../src/core/automation.ts';
 
-function m(id: string, artist: string, category: MediaItem['category'] = 'music', durationMs = 180_000): MediaItem {
-  return { id, artist, title: id, category, file: `${id}.mp3`, durationMs, addedAt: 0 };
+function m(id: string, artist: string, category: MediaItem['category'] = 'music', durationMs = 180_000, genre?: string): MediaItem {
+  return { id, artist, title: id, category, file: `${id}.mp3`, durationMs, addedAt: 0, genre };
 }
 
 test('parseFileName trennt Interpret und Titel', () => {
@@ -29,6 +29,16 @@ test('pickNext beachtet Interpret- und Titeltrennung', () => {
   const lib = [m('a1', 'A'), m('a2', 'A'), m('b1', 'B'), m('c1', 'C')];
   const next = pickNext(lib, 'music', ['a1'], { artistSeparation: 2, titleSeparation: 3 }, () => 0);
   assert.ok(next && next.artist !== 'A');
+});
+
+test('pickNext beachtet Genre-Trennung, wenn eingestellt (P2 #17 Rotation)', () => {
+  // Zwei "Pop"-Titel, ein "Rock"-Titel: mit genreSeparation muss zuerst der Rock-Titel kommen
+  const lib = [m('p1', 'A', 'music', 180_000, 'Pop'), m('p2', 'B', 'music', 180_000, 'Pop'), m('r1', 'C', 'music', 180_000, 'Rock')];
+  const withGenre = pickNext(lib, 'music', ['p1'], { artistSeparation: 0, titleSeparation: 0, genreSeparation: 2 }, () => 0);
+  assert.equal(withGenre?.genre, 'Rock');
+  // Ohne Genre-Trennung (Standard: 0 = aus) darf wieder Pop kommen
+  const withoutGenre = pickNext(lib, 'music', ['p1'], { artistSeparation: 0, titleSeparation: 0 }, () => 0);
+  assert.equal(withoutGenre?.genre, 'Pop');
 });
 
 test('pickNext lockert Regeln statt stehen zu bleiben', () => {

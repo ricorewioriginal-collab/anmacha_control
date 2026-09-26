@@ -38,6 +38,32 @@ test('Ordner, Queue aus Ordner füllen, Playlists, Playlist abspielen', () => {
   }
 });
 
+test('Rotationsregeln sind einstellbar (P2 #17): werden übernommen, validiert und überstehen einen Neustart', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'airdeck-rot-'));
+  let app = new AirDeckApp(dir, { stableMs: 0, ffmpeg: null });
+  try {
+    const before = app.automationView('main') as { rotation: { artistSeparation: number; titleSeparation: number; genreSeparation?: number } };
+    assert.deepEqual(before.rotation, { artistSeparation: 3, titleSeparation: 20, genreSeparation: 0 }, 'Standardwerte, bevor irgendwer etwas eingestellt hat');
+
+    const saved = app.setAutomation('main', { rotation: { artistSeparation: 1, titleSeparation: 2, genreSeparation: 5 } }) as { rotation: unknown };
+    assert.deepEqual(saved.rotation, { artistSeparation: 1, titleSeparation: 2, genreSeparation: 5 });
+
+    // Ungültige/außerhalb des erlaubten Bereichs liegende Werte werden begrenzt, nicht einfach übernommen
+    const clamped = app.setAutomation('main', { rotation: { artistSeparation: -5, titleSeparation: 999_999 } }) as { rotation: { artistSeparation: number; titleSeparation: number; genreSeparation: number } };
+    assert.equal(clamped.rotation.artistSeparation, 0, 'negativer Wert wird auf 0 begrenzt');
+    assert.equal(clamped.rotation.titleSeparation, 5000, 'zu großer Wert wird auf das Maximum begrenzt');
+    assert.equal(clamped.rotation.genreSeparation, 5, 'nicht mitgeschickte Felder bleiben unverändert (Teil-Update)');
+
+    // Bleibt nach echtem Neustart (frisches AirDeckApp-Objekt auf denselben Daten) erhalten - nicht nur im Speicher
+    app.shutdown();
+    app = new AirDeckApp(dir, { stableMs: 0, ffmpeg: null });
+    assert.deepEqual((app.automationView('main') as { rotation: unknown }).rotation, { artistSeparation: 0, titleSeparation: 5000, genreSeparation: 5 });
+  } finally {
+    app.shutdown();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('Zeitplan-Job feuert, Wiederholung wird weitergeschoben', async () => {
   const { app, done } = setup();
   try {

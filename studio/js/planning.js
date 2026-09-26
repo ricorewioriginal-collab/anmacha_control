@@ -72,13 +72,21 @@ export function mountPlanning(root, ctx) {
   /** @type {any[]} */ let playlists = [];
   /** @type {any[]} */ let history = [];
   /** @type {string[]} */ let folders = [];
+  /** @type {any} */ let automation = { rotation: { artistSeparation: 3, titleSeparation: 20, genreSeparation: 0 } };
   let openPl = /** @type {string|null} */ (null);
 
   async function load() {
-    [plan, playlists, history, folders] = await Promise.all([
-      ctx.api.get(ctx.url('/planning')), ctx.api.get(ctx.url('/playlists')), ctx.api.get(ctx.url('/history?limit=200')), ctx.folders(),
+    [plan, playlists, history, folders, automation] = await Promise.all([
+      ctx.api.get(ctx.url('/planning')), ctx.api.get(ctx.url('/playlists')), ctx.api.get(ctx.url('/history?limit=200')), ctx.folders(), ctx.api.get(ctx.url('/automation')),
     ]);
     render();
+  }
+
+  /** @param {HTMLInputElement} artistEl @param {HTMLInputElement} titleEl @param {HTMLInputElement} genreEl */
+  async function saveRotation(artistEl, titleEl, genreEl) {
+    const rotation = { artistSeparation: Number(artistEl.value) || 0, titleSeparation: Number(titleEl.value) || 0, genreSeparation: Number(genreEl.value) || 0 };
+    await run(async () => { automation = await ctx.api.patch(ctx.url('/automation'), { rotation }); });
+    status('Rotationsregeln gespeichert');
   }
 
   function render() {
@@ -99,6 +107,16 @@ export function mountPlanning(root, ctx) {
           iconBtn('Bearbeiten', '✎', () => editClock(e)),
           iconBtn('Löschen', '✕', () => run(async () => { await ctx.api.del(ctx.url(`/clock-events/${e.id}`)); await load(); }))))),
       'Wiederkehrende Elemente zur vollen Minute, z. B. Station-ID zu :00, Jingle zu :30.'));
+    // --- Rotation & Regeln ---
+    const rot = automation.rotation ?? { artistSeparation: 3, titleSeparation: 20, genreSeparation: 0 };
+    const rotArtist = /** @type {HTMLInputElement} */ (h('input', { type: 'number', min: '0', max: '500', value: String(rot.artistSeparation) }));
+    const rotTitle = /** @type {HTMLInputElement} */ (h('input', { type: 'number', min: '0', max: '5000', value: String(rot.titleSeparation) }));
+    const rotGenre = /** @type {HTMLInputElement} */ (h('input', { type: 'number', min: '0', max: '500', value: String(rot.genreSeparation ?? 0) }));
+    const rotation = panel('Rotation & Regeln', [], h('div', { class: 'row', style: 'flex-wrap:wrap;gap:12px 20px' },
+      h('label', {}, h('div', { class: 'muted' }, 'Interpret erst wieder nach … Titeln'), rotArtist),
+      h('label', {}, h('div', { class: 'muted' }, 'Titel erst wieder nach … Titeln'), rotTitle),
+      h('label', {}, h('div', { class: 'muted' }, 'Genre erst wieder nach … Titeln (0 = aus)'), rotGenre),
+      h('button', { class: 'btn small primary', style: 'align-self:flex-end', onclick: () => saveRotation(rotArtist, rotTitle, rotGenre) }, 'Speichern')));
     // --- Sendeplan ---
     const sched = panel('Sendeplan', [h('button', { class: 'btn small primary', onclick: () => editPlan() }, '＋ Sendung')],
       h('div', {},
@@ -141,7 +159,7 @@ export function mountPlanning(root, ctx) {
       table(['Zeit', 'Titel', 'Art'], history.slice(0, 200).map((x) => h('tr', {},
         h('td', { class: 'num' }, clockTime(x.at)), h('td', {}, x.artist ? `${x.artist} – ${x.title}` : x.title), h('td', {}, h('span', { class: 'tag' }, x.category)))),
       'Noch nichts gespielt.'));
-    root.replaceChildren(h('div', { class: 'view-grid' }, jobs, clock, sched, pls, hist));
+    root.replaceChildren(h('div', { class: 'view-grid' }, jobs, clock, rotation, sched, pls, hist));
   }
 
   /** Sendeplan als Wochengitter: Sendungen ziehen (Zeit/Tag), unteren Rand ziehen (Dauer), Playlist hineinziehen (neu). */
