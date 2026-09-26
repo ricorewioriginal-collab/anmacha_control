@@ -65,11 +65,14 @@ test('laut.fm verbinden: Origin wird selbst ermittelt, Station gewählt, Anfrage
     // Nutzerbericht: laut.fm-Sender fehlten im Dropdown "Meine Sender" - der zweite Sender des Kontos
     // ("anderes", id 9, noch keinem AirDeck-Sender zugeordnet) muss jetzt automatisch als eigener
     // AirDeck-Sender angelegt werden (nur weil hier mit einem globalen Admin-Token verbunden wurde).
-    const listStations = () => fetch(`${root}/api/v1/stations`, { headers: { Authorization: `Bearer ${token}` } }).then((r) => r.json()) as Promise<Array<{ id: string; name: string }>>;
+    const listStations = () => fetch(`${root}/api/v1/stations`, { headers: { Authorization: `Bearer ${token}` } }).then((r) => r.json()) as Promise<Array<{ id: string; name: string; lautfmConnected: boolean }>>;
     const allStations = await listStations();
     const auto = allStations.find((s) => s.id === 'anderes');
     assert.ok(auto, 'zweiter laut.fm-Sender wurde automatisch als eigener AirDeck-Sender angelegt');
     assert.equal(auto?.name, 'anderes');
+    // Nutzerbericht: laut.fm-Navigation soll sich nur bei tatsächlich verbundenen Sendern zeigen
+    assert.equal(allStations.find((s) => s.id === 'main')?.lautfmConnected, true);
+    assert.equal(auto?.lautfmConnected, true);
     const autoLf = await fetch(`${root}/api/v1/stations/anderes/lautfm`, { headers: { Authorization: `Bearer ${token}` } });
     assert.equal(autoLf.status, 200);
     assert.equal(((await autoLf.json()) as { stationId: number }).stationId, 9);
@@ -110,6 +113,7 @@ test('laut.fm verbinden: Origin wird selbst ermittelt, Station gewählt, Anfrage
     // "eigener-sender" bekam dabei KEINE eigene laut.fm-Identität zugewiesen (bleibt ein eigener Sender)
     const eigenerLf = (await (await eigenerApi('GET', '/lautfm')).json()) as { stationId?: number };
     assert.equal(eigenerLf.stationId, undefined);
+    assert.equal((await listStations()).find((s) => s.id === 'eigener-sender')?.lautfmConnected, false);
   } finally {
     app.shutdown();
     server.closeAllConnections();

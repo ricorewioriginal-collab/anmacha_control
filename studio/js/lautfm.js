@@ -13,7 +13,7 @@ const TABS = /** @type {const} */ ([
 ]);
 const ROLES = /** @type {Array<[string,string]>} */ ([['owner', 'Inhaber'], ['editor', 'Editor'], ['dj', 'DJ']]);
 
-/** @typedef {{ api: import('./api.js').Api, url: (p: string) => string }} Ctx */
+/** @typedef {{ api: import('./api.js').Api, url: (p: string) => string, onLautfmConnected?: () => void }} Ctx */
 
 /** @param {HTMLElement} root @param {Ctx} ctx */
 export function mountLautfm(root, ctx) {
@@ -74,7 +74,7 @@ export function mountLautfm(root, ctx) {
         cfg = (await run(() => ctx.api.put(ctx.url('/lautfm'), { stationId: Number(pick.stationId), stationName: chosen?.name ?? '' }))) ?? cfg;
       }
     }
-    if (cfg?.hasToken && cfg?.stationId) status(`Mit laut.fm verbunden: ${cfg.stationName ?? cfg.stationId}`);
+    if (cfg?.hasToken && cfg?.stationId) { status(`Mit laut.fm verbunden: ${cfg.stationName ?? cfg.stationId}`); ctx.onLautfmConnected?.(); }
     render();
   }
 
@@ -107,6 +107,7 @@ export function mountLautfm(root, ctx) {
     if (!v) return;
     if (v.remove) {
       cfg = await run(() => ctx.api.put(ctx.url('/lautfm'), { token: '', stationId: null }));
+      ctx.onLautfmConnected?.();
       return render();
     }
     if (!v.token && !cfg?.hasToken) return status('Bitte ein Token einfügen', true);

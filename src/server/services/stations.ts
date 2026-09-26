@@ -123,11 +123,16 @@ export class StationService {
     this.app.changed();
   }
 
-  listStations(p: Principal): Station[] {
-    return [...this.app.stations.values()].map((r) => r.station).filter((s) => canSee(p, s.id));
+  listStations(p: Principal): (Station & { lautfmConnected: boolean })[] {
+    return [...this.app.stations.values()].filter((r) => canSee(p, r.station.id)).map((r) => this.withLautfmFlag(r));
   }
 
-  station(id: string): Station {
-    return this.app.rt(id).station;
+  station(id: string): Station & { lautfmConnected: boolean } {
+    return this.withLautfmFlag(this.app.rt(id));
+  }
+
+  /** Ob der Sender selbst eine laut.fm-Identität hat (Radioadmin verbunden) - steuert z. B. die laut.fm-Navigation im Studio. */
+  private withLautfmFlag(r: { station: Station; data: { lautfm?: { stationName?: string } } }): Station & { lautfmConnected: boolean } {
+    return { ...r.station, lautfmConnected: !!r.data.lautfm?.stationName };
   }
 }

@@ -250,6 +250,19 @@ let autoSourceTimer = null;
 /** Wer automatisiert den Sender gerade wirklich (AirDeck-Server-Playout oder laut.fm über den
  * Radioadmin)? Bei laut.fm zeigt AirDeck den echten aktuellen Titel statt leerer Decks - den
  * nächsten kennt AirDeck in dem Fall nicht, laut.fm veröffentlicht ihn nicht im Voraus. */
+/** laut.fm-Navigation nur zeigen, wenn dieser Sender wirklich mit laut.fm (Radioadmin) verbunden ist,
+ * oder noch gar kein Sender verbunden ist (dann ist hier der Einstieg zum erstmaligen Verbinden) -
+ * sonst verwirrt der Punkt Sender, die laut.fm höchstens als Ausgang nutzen (siehe Ausgänge). */
+function updateLautfmNav() {
+  const connected = !!S.station?.lautfmConnected;
+  const show = connected || !S.stations.some((/** @type {any} */ s) => s.lautfmConnected);
+  $('nav-lautfm').hidden = !show;
+  if (!show && currentView === 'lautfm') showView('studio');
+  const mobile = $('nav-lautfm-mobile');
+  mobile.dataset.view = show ? 'lautfm' : 'ai';
+  mobile.querySelector('span').textContent = show ? 'Mehr' : 'KI';
+}
+
 async function refreshAutomationSource() {
   S.automationSource = await api.get(url('/automation-source')).catch(() => null);
   const banner = $('lautfm-auto-banner');
@@ -277,6 +290,7 @@ async function loadStation() {
   S.sources = sources;
   S.outputs = outputs;
   S.nowPlaying = np;
+  updateLautfmNav();
   renderAll();
   es?.close();
   es = api.events(S.station.id, onEvent, (ok) => $('conn').classList.toggle('ok', ok));
@@ -287,7 +301,7 @@ async function loadStation() {
   views = {
     planning: mountPlanning($('view-planning'), ctx),
     recorder: mountRecorder($('view-recorder'), ctx),
-    lautfm: mountLautfm($('view-lautfm'), ctx),
+    lautfm: mountLautfm($('view-lautfm'), { ...ctx, onLautfmConnected: () => run(async () => { S.stations = await api.get('/stations'); S.station = S.stations.find((/** @type {any} */ s) => s.id === S.station.id) ?? S.station; updateLautfmNav(); }) }),
     ai: mountAi($('view-ai'), ctx),
     nextcloud: mountNextcloud($('view-nextcloud'), ctx),
     bridges: mountBridges($('view-bridges'), ctx),
@@ -375,7 +389,7 @@ function onEvent(type, data) {
     case 'ai.pending':
       if (type === 'ai.decision' && !data.ok) status(`KI: ${data.detail}`, true);
       break;
-    case 'station.changed': S.station = data; S.stations = S.stations.map((/** @type {any} */ s) => (s.id === data.id ? data : s)); applyBranding(); renderStationSelect(); break;
+    case 'station.changed': S.station = data; S.stations = S.stations.map((/** @type {any} */ s) => (s.id === data.id ? data : s)); applyBranding(); renderStationSelect(); updateLautfmNav(); break;
     case 'source.takeover_completed': status(`Übernahme: ${sourceName(data.sourceId)} ist auf Sendung (Priority ${data.data?.priority ?? '?'})`); break;
     case 'source.takeover_rejected': status(`Übernahme abgelehnt: ${data.data?.reason ?? ''}`, true); break;
     case 'source.off_air': status('OFF AIR – keine Fallback-Quelle verfügbar', true); break;
