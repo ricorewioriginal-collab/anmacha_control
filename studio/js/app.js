@@ -11,6 +11,7 @@ import { $, CATEGORY_STYLE, clockTime, download, fmt, formDialog, h, hydrateIcon
 import { mountPlanning, mountRecorder } from './planning.js';
 import { mountMediaManagement } from './mediamgmt.js';
 import { mountPlaylistManagement } from './playlists.js';
+import { mountHandbuch } from './handbuch.js';
 import { mountLautfm } from './lautfm.js';
 import { mountAi } from './ai.js';
 import { mountNextcloud } from './nextcloud.js';
@@ -329,6 +330,7 @@ async function loadStation() {
     planning: mountPlanning($('view-planning'), ctx),
     mediathek: mountMediaManagement($('view-mediathek'), { ...ctx, sendToDeck: (deckId, media) => loadDeck(deckId, media), upload }),
     playlists: mountPlaylistManagement($('view-playlists'), ctx),
+    handbuch: mountHandbuch($('view-handbuch')),
     recorder: mountRecorder($('view-recorder'), ctx),
     lautfm: mountLautfm($('view-lautfm'), { ...ctx, onLautfmConnected: () => run(async () => { S.stations = await api.get('/stations'); S.station = S.stations.find((/** @type {any} */ s) => s.id === S.station.id) ?? S.station; renderStationSelect(); updateLautfmNav(); }) }),
     ai: mountAi($('view-ai'), ctx),
@@ -1602,7 +1604,7 @@ function bindStatic() {
   // Tastatur: Alt+1…4 wechselt die Bereiche
   addEventListener('keydown', (e) => {
     if (!e.altKey || e.ctrlKey || e.metaKey) return;
-    const v = ({ 1: 'overview', 2: 'planning', 3: 'recorder', 4: 'lautfm', 5: 'ai', 6: 'nextcloud', 7: 'mediathek', 8: 'playlists' })[/** @type {1|2|3|4|5|6|7|8} */ (Number(e.key))];
+    const v = ({ 1: 'overview', 2: 'planning', 3: 'recorder', 4: 'lautfm', 5: 'ai', 6: 'nextcloud', 7: 'mediathek', 8: 'playlists', 9: 'handbuch' })[/** @type {1|2|3|4|5|6|7|8|9} */ (Number(e.key))];
     if (v) {
       e.preventDefault();
       showView(v);
@@ -1821,7 +1823,7 @@ function showView(name) {
   currentView = name;
   for (const b of document.querySelectorAll('#view-tabs button, #bottom-nav button')) b.setAttribute('aria-pressed', String(/** @type {HTMLElement} */ (b).dataset.view === name));
   $('sidebar').classList.remove('open');
-  for (const id of ['overview', 'studio', 'planning', 'mediathek', 'playlists', 'recorder', 'lautfm', 'ai', 'nextcloud', 'bridges', 'listeners', 'users']) $(`view-${id}`).hidden = id !== name;
+  for (const id of ['overview', 'studio', 'planning', 'mediathek', 'playlists', 'recorder', 'lautfm', 'ai', 'nextcloud', 'bridges', 'listeners', 'users', 'handbuch']) $(`view-${id}`).hidden = id !== name;
   if (name !== 'studio') views[name]?.show();
 }
 

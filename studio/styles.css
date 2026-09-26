@@ -496,3 +496,35 @@ tr.active-row td { background: rgba(34,197,94,.08); }
 /* Hörer-Posteingang */
 .inbox-item { border-top: 1px solid var(--line); padding: 10px 2px; display: grid; gap: 6px; }
 .inbox-item.new { border-left: 3px solid var(--accent, #19c3e6); padding-left: 8px; }
+
+/* Handbuch (In-App-Ansicht, Inhalt aus handbuch.html geladen, eigener Variablen-Satz statt globaler Kollision) */
+#view-handbuch { --hb-bg: #07101f; --hb-panel: #0d1a30; --hb-line: #1f2d4a; --hb-text: #e6edf8; --hb-muted: #8fa3c4; --hb-accent: #2f8cff; --hb-ok: #22c55e; --hb-warn: #f59e0b; color: var(--hb-text); }
+#view-handbuch .hb-wrap { display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: 24px; max-width: 1200px; margin: 0 auto; }
+#view-handbuch a { color: #7cb8ff; }
+#view-handbuch nav.toc { position: sticky; top: 0; align-self: start; max-height: calc(100vh - 120px); overflow: auto; font-size: 14px; }
+#view-handbuch nav.toc a { display: block; padding: 5px 8px; border-radius: 6px; text-decoration: none; color: var(--hb-muted); }
+#view-handbuch nav.toc a:hover { background: rgba(47, 140, 255, .12); color: #fff; }
+#view-handbuch nav.toc .grp { color: var(--hb-muted); font-size: 11px; letter-spacing: .12em; text-transform: uppercase; margin: 12px 8px 4px; }
+#view-handbuch main section { background: var(--hb-panel); border: 1px solid var(--hb-line); border-radius: 12px; padding: 16px 20px; margin-bottom: 16px; scroll-margin-top: 12px; }
+#view-handbuch h1 { font-size: 26px; margin: 8px 0 4px; }
+#view-handbuch h2 { font-size: 20px; margin: 0 0 8px; }
+#view-handbuch h3 { font-size: 16px; margin: 16px 0 6px; color: #cfe0ff; }
+#view-handbuch .lead { color: var(--hb-muted); margin-top: 0; }
+#view-handbuch kbd { border: 1px solid var(--hb-line); border-bottom-width: 2px; border-radius: 4px; padding: 0 5px; font-size: 12px; background: #0b1628; }
+#view-handbuch code { background: #0b1628; border: 1px solid var(--hb-line); border-radius: 4px; padding: 0 4px; font-size: 13px; overflow-wrap: anywhere; }
+#view-handbuch table { width: 100%; border-collapse: collapse; margin: 8px 0; font-size: 14px; }
+#view-handbuch th, #view-handbuch td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--hb-line); vertical-align: top; }
+#view-handbuch th { color: var(--hb-muted); font-weight: 600; }
+#view-handbuch .tip, #view-handbuch .warn, #view-handbuch .todo { border-radius: 8px; padding: 8px 12px; margin: 10px 0; }
+#view-handbuch .tip { background: rgba(34, 197, 94, .08); border-left: 3px solid var(--hb-ok); }
+#view-handbuch .warn { background: rgba(245, 158, 11, .08); border-left: 3px solid var(--hb-warn); }
+#view-handbuch .todo { background: rgba(143, 163, 196, .08); border-left: 3px solid var(--hb-muted); color: var(--hb-muted); }
+#view-handbuch ol, #view-handbuch ul { padding-left: 22px; }
+#view-handbuch .hb-search { width: 100%; margin-bottom: 10px; background: var(--hb-panel); border: 1px solid var(--hb-line); border-radius: 7px; padding: 6px 9px; color: var(--hb-text); }
+@media (max-width: 860px) {
+  #view-handbuch .hb-wrap { grid-template-columns: minmax(0, 1fr); }
+  #view-handbuch nav.toc { position: static; max-height: none; background: var(--hb-panel); border: 1px solid var(--hb-line); border-radius: 12px; padding: 8px; }
+  #view-handbuch nav.toc a { padding: 9px 8px; }
+  #view-handbuch main section { padding: 14px; }
+  #view-handbuch table { display: block; overflow-x: auto; }
+}
