@@ -259,28 +259,28 @@
             </div>
           </section>
 
-          <div class="stack" id="live-panel">
-            <section class="panel" data-win="quick" data-title="Schnelltrigger">
-              <div class="panel-head"><h2>Schnelltrigger</h2></div>
-              <div class="quick" id="quick"></div>
-            </section>
-            <section class="panel live-voice" data-win="live" data-title="Live-Voice">
-              <div class="panel-head"><h2>Live-Voice</h2><span class="pill" id="lv-state">bereit</span></div>
-              <div class="lv-body">
-                <div class="vu-v"><i id="lv-meter"></i></div>
-                <button class="mic-btn" id="lv-mic" title="Mikrofon an/aus"><i data-icon="mic" data-size="30"></i></button>
-                <div class="lv-side">
-                  <label class="chk"><input type="checkbox" id="lv-ptt"> Push-to-Talk</label>
-                  <span class="muted" id="lv-info">Browser-Mikrofon</span>
-                </div>
-              </div>
-            </section>
-          </div>
         </div>
       </div>
 
       <!-- Rechte Spalte -->
       <aside class="side">
+        <div class="stack" id="live-panel">
+          <section class="panel" data-win="quick" data-title="Schnelltrigger">
+            <div class="panel-head"><h2>Schnelltrigger</h2></div>
+            <div class="quick" id="quick"></div>
+          </section>
+          <section class="panel live-voice" data-win="live" data-title="Live-Voice">
+            <div class="panel-head"><h2>Live-Voice</h2><span class="pill" id="lv-state">bereit</span></div>
+            <div class="lv-body">
+              <div class="vu-v"><i id="lv-meter"></i></div>
+              <button class="mic-btn" id="lv-mic" title="Mikrofon an/aus"><i data-icon="mic" data-size="30"></i></button>
+              <div class="lv-side">
+                <label class="chk"><input type="checkbox" id="lv-ptt"> Push-to-Talk</label>
+                <span class="muted" id="lv-info">Browser-Mikrofon</span>
+              </div>
+            </div>
+          </section>
+        </div>
         <section class="panel" data-win="stream" data-title="Stream &amp; Encoder">
           <div class="panel-head"><h2>Stream &amp; Encoder</h2><button class="btn small" id="btn-liq" title="Liquidsoap-Skript erzeugen">LIQ</button><button class="btn small" id="btn-profiles" title="AirDeckCast: Zusatz-Stream-Profile verwalten (z. B. Mobile AAC 64k)">Profile</button><button class="btn small" id="btn-airdeckcast-test" title="AirDeckCast-Teststream: kurzer Testton über alle aktiven Ausgänge/Profile/HLS, prüft ob wirklich Daten ankommen">Test</button><button class="btn small" id="btn-add-output" title="Ausgang hinzufügen">＋</button></div>
           <div class="stream-sum">
