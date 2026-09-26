@@ -631,9 +631,10 @@ function renderPlayout() {
   pill.className = `pill ${state}`;
   pill.textContent = { unsupported: 'kein ffmpeg', running: st?.silent ? 'stille!' : 'sendet', restarting: 'encoder…', stopped: 'aus' }[state];
   $('po-title').textContent = st?.current ? mediaTitle(st.current) : p?.supported ? '–' : 'ffmpeg auf dem Server installieren';
-  $('po-meta').textContent = st?.running
+  const hls = st?.running && p?.config?.hls?.enabled ? ` · HLS: ${location.origin}/hls/${S.station.id}/index.m3u8` : '';
+  $('po-meta').textContent = (st?.running
     ? `${fmt(st.current?.positionMs)} / ${fmt(st.current?.durationMs)} · ${st.format.toUpperCase()} ${st.bitrateKbps} kbit/s${p.config.autostart ? ' · Autostart' : ''}`
-    : p?.config ? `${p.config.format.toUpperCase()} ${p.config.bitrateKbps} kbit/s · Überblendung ${p.config.crossfadeMs / 1000}s` : '';
+    : p?.config ? `${p.config.format.toUpperCase()} ${p.config.bitrateKbps} kbit/s · Überblendung ${p.config.crossfadeMs / 1000}s` : '') + hls;
   /** @type {HTMLButtonElement} */ ($('po-start')).disabled = !p?.supported || !!st?.running;
   /** @type {HTMLButtonElement} */ ($('po-stop')).disabled = !st?.running;
   /** @type {HTMLButtonElement} */ ($('po-skip')).disabled = !st?.running;
@@ -676,13 +677,17 @@ async function editPlayout() {
     { name: 'silenceMs', label: 'Stille-Alarm nach (ms)', type: 'number', value: c.silenceMs ?? 10000 },
     { name: 'sourceId', label: 'Sendet als Quelle', value: c.sourceId ?? '', options: [['', 'Automation (Standard)'], ...S.sources.map((s) => /** @type {[string,string]} */ ([s.id, `P${s.priority} · ${s.name}`]))] },
     { name: 'autostart', label: 'Nach Neustart automatisch senden', type: 'checkbox', value: c.autostart ?? true },
+    { name: 'hlsEnabled', label: 'AirDeckCast: zusätzlich als HLS ausliefern (Apple HTTP Live Streaming, direkt vom AirDeck-Server)', type: 'checkbox', value: !!c.hls?.enabled },
+    { name: 'hlsBitrateKbps', label: 'HLS: Bitrate (kbit/s, AAC)', type: 'number', value: c.hls?.bitrateKbps ?? 128 },
+    { name: 'hlsSegmentSeconds', label: 'HLS: Segmentlänge (Sekunden)', type: 'number', value: c.hls?.segmentSeconds ?? 6 },
   ]);
   if (!v) return;
   const chosen = v.preset && v.preset !== (c.dsp?.preset ?? '') ? presets[v.preset]?.dsp : null;
   const dsp = chosen
     ? { ...chosen, preset: v.preset }
     : { eq: (dev.eqBands ?? []).map((/** @type {number} */ _, /** @type {number} */ i) => v[`eq${i}`] ?? 0), compressor: v.compressor, limiter: v.limiter, highpass: v.highpass, multiband: v.multiband, agc: v.agc, targetLufs: v.targetLufs ?? -16, preset: v.preset };
-  const body = { ...v, dsp, loudness: { auto: v.loudAuto, targetLufs: v.loudTarget ?? -16 } };
+  const { hlsEnabled, hlsBitrateKbps, hlsSegmentSeconds, ...rest } = v;
+  const body = { ...rest, dsp, loudness: { auto: v.loudAuto, targetLufs: v.loudTarget ?? -16 }, hls: { enabled: hlsEnabled, bitrateKbps: hlsBitrateKbps ?? 128, segmentSeconds: hlsSegmentSeconds ?? 6 } };
   if (v.analyze) {
     const a = await run(() => api.post(url('/media/loudness'), { force: true }));
     if (a) status(`${a.queued} Titel werden im Hintergrund gemessen`);

@@ -14,7 +14,7 @@ import { ModeState, automationRuns, type BaseMode, type Mode as BroadcastMode } 
 import {
   AppError, SYSTEM_PRINCIPAL, newId, normalizeMount, posInt, publicOutput, publicSource, relayKey, safeColor, timingSafeEqualStr, wrap,
   type HubEvent, type NowPlaying, type PersistedState, type PlayLogEntry, type PlayoutConfig, type Principal, type Station, type StationData, type StationRuntime,
-  type StreamProfileConfig,
+  type StreamProfileConfig, type HlsConfig,
 } from './model.ts';
 import { AuditLog } from './store.ts';
 import { DbDocStore, importJsonFilesSync, type DocStore } from './repo/docs.ts';
@@ -49,6 +49,8 @@ export class AirDeckApp {
   readonly svc: Services;
   readonly dataDir: string;
   readonly mediaDir: string;
+  /** AirDeckCast: Verzeichnis für HLS-Segmente + Playlists, je Sender ein Unterordner */
+  readonly hlsDir: string;
   readonly engine: SourcePriorityEngine;
   readonly secrets: SecretStore;
   readonly audit: AuditLog;
@@ -117,6 +119,7 @@ export class AirDeckApp {
     if (opts.ffmpegRetryS) this.ffmpegRetryS = opts.ffmpegRetryS;
     this.mediaDir = opts.config?.paths.media ?? join(dataDir, 'media');
     mkdirSync(this.mediaDir, { recursive: true });
+    this.hlsDir = join(dataDir, 'hls');
     this.paths = opts.config?.paths ?? { config: join(dataDir, 'config'), data: dataDir, media: this.mediaDir, logs: join(dataDir, 'logs'), backups: join(dataDir, 'backups') };
     this.mode = opts.config?.mode ?? (opts.headless ? 'server' : 'local');
     this.config = opts.config ?? null;
@@ -1129,6 +1132,7 @@ export class AirDeckApp {
     playout.setAutomation(automationRuns(this.modeOf(stationId).mode));
     playout.start();
     this.syncStreamProfiles(stationId);
+    if (!opts.forLive) this.syncHls(stationId);
     // nur für eine Live-Sendung gestartet: Autostart-Einstellung nicht verändern
     if (!opts.forLive) rt.data.playout = { ...cfg, autostart: input.autostart ?? true };
     this.audit.write({ kind: 'playout', event: 'start', actor: p.id, stationId, sourceId: source.id });
@@ -1229,9 +1233,31 @@ export class AirDeckApp {
     cur.silenceMs = num(input.silenceMs, 2000, 120000) ?? cur.silenceMs;
     if (typeof input.sourceId === 'string') cur.sourceId = input.sourceId || undefined;
     if (typeof input.autostart === 'boolean') cur.autostart = input.autostart;
+    if (input.hls && typeof input.hls === 'object') {
+      const hls = input.hls as Partial<HlsConfig>;
+      cur.hls = {
+        enabled: Boolean(hls.enabled),
+        bitrateKbps: num(hls.bitrateKbps, 32, 320) ?? cur.hls?.bitrateKbps ?? 128,
+        segmentSeconds: num(hls.segmentSeconds, 2, 30) ?? cur.hls?.segmentSeconds ?? 6,
+      };
+    }
     rt.data.playout = cur;
     this.changed();
+    this.syncHls(stationId);
     return cur;
+  }
+
+  /** Gleicht die HLS-Ausgabe des Sendebusses mit der gespeicherten Konfiguration ab (an/aus, Bitrate). */
+  private syncHls(stationId: string): void {
+    const po = this.playouts.get(stationId);
+    if (!po) return;
+    const cfg = { ...DEFAULT_PLAYOUT, autostart: false, ...this.rt(stationId).data.playout };
+    if (cfg.hls?.enabled) {
+      const dir = join(this.hlsDir, stationId);
+      po.playout.addHls('hls', { dir, bitrateKbps: cfg.hls.bitrateKbps ?? 128, segmentSeconds: cfg.hls.segmentSeconds ?? 6 });
+    } else {
+      po.playout.removeHls('hls');
+    }
   }
 
   /** Notfall-Auswahl, wenn Queue und Sendeuhr nichts liefern: beliebiger Musiktitel, sonst irgendein Titel. */

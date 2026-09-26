@@ -149,6 +149,15 @@ export interface PlayoutConfig extends PlayoutOptions {
   sourceId?: string;
   /** Notfall-Ordner: spielt, wenn Queue, Sendeuhr und Sendeplan nichts liefern */
   emergencyFolder?: string;
+  /** AirDeckCast: zusätzlich als HLS (m3u8 + Segmente) ausliefern, direkt vom AirDeck-Server */
+  hls?: HlsConfig;
+}
+
+/** HLS-Ausgabe (Apple HTTP Live Streaming): eigener AAC-Encode desselben Programmbusses, in Segmente geteilt. */
+export interface HlsConfig {
+  enabled: boolean;
+  bitrateKbps?: number;
+  segmentSeconds?: number;
 }
 
 export interface PersistedState {

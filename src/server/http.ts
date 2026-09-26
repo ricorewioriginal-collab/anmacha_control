@@ -779,6 +779,22 @@ export function createHttpServer(app: AirDeckApp, studioDir: string): Server {
       return;
     }
 
+    // AirDeckCast: HLS-Playlist + -Segmente, direkt vom AirDeck-Server ausgeliefert (kein externer Icecast nötig)
+    if (path.startsWith('/hls/')) {
+      const p = auth(app, req, url);
+      if (!p || !AirDeckApp.hasScope(p, 'stream:read')) return json(res, 401, { error: 'unauthorized' });
+      const [, , station, file] = path.split('/');
+      if (!station || !canSee(p, station)) return json(res, 403, { error: 'forbidden' });
+      if (!file || !/^[a-zA-Z0-9_.-]+$/.test(file)) return json(res, 404, { error: 'not_found' });
+      const base = resolve(join(app.hlsDir, station));
+      const full = resolve(base, file);
+      if (!isInside(base, full)) return json(res, 403, { error: 'forbidden' });
+      if (!existsSync(full) || !statSync(full).isFile()) return json(res, 404, { error: 'not_found' });
+      const type = file.endsWith('.m3u8') ? 'application/vnd.apple.mpegurl' : file.endsWith('.ts') ? 'video/mp2t' : 'application/octet-stream';
+      res.writeHead(200, { 'Content-Type': type, 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' });
+      return void createReadStream(full).pipe(res);
+    }
+
     if (!path.startsWith('/api/')) return serveStatic(req, res, studioDir, path);
 
     // laut.fm-Weiterleitung (Radioadmin mit gespeichertem Token bzw. öffentliche API)

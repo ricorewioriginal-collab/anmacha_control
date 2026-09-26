@@ -5,6 +5,8 @@
 // Läuft ohne Browser und startet nach einem Neustart automatisch wieder.
 
 import { spawn, type ChildProcess } from 'node:child_process';
+import { mkdirSync } from 'node:fs';
+import { join } from 'node:path';
 import { performance } from 'node:perf_hooks';
 import type { DeckId, MediaItem } from '../core/automation.ts';
 import { SilenceDetector } from '../core/automation.ts';
@@ -124,6 +126,25 @@ export interface StreamProfileHooks {
 interface StreamProfileRuntime {
   opts: StreamProfileOpts;
   hooks: StreamProfileHooks;
+  proc: ChildProcess | null;
+}
+
+/**
+ * AirDeckCast: HLS-Ausgabe (Apple HTTP Live Streaming) - eigener AAC-Encode desselben Programmbusses,
+ * den ffmpeg selbst in Segmente + Playlist teilt (kein Byte-Stream über onStreamData, sondern Dateien
+ * in einem Verzeichnis, das der HTTP-Server direkt ausliefert).
+ */
+export interface HlsOpts {
+  dir: string;
+  bitrateKbps: number;
+  /** Segmentlänge in Sekunden (Standard 6) */
+  segmentSeconds?: number;
+  /** Anzahl Segmente in der Playlist (Standard 6) */
+  listSize?: number;
+}
+
+interface HlsRuntime {
+  opts: HlsOpts;
   proc: ChildProcess | null;
 }
 
@@ -333,6 +354,8 @@ export class Playout {
   /** AirDeckCast: zusätzliche Encoder-Profile (z. B. "Mobile AAC 64k"), alle aus demselben PCM-Programmbus
    *  gespeist wie der Hauptencoder - ein Programmbus, mehrere Ausgänge, keine zweite Playout-Engine. */
   private readonly profiles = new Map<string, StreamProfileRuntime>();
+  /** AirDeckCast: HLS-Ausgaben (Segmente + Playlist in einem Verzeichnis), ebenfalls aus dem PCM-Programmbus */
+  private readonly hlsOutputs = new Map<string, HlsRuntime>();
 
   constructor(ffmpeg: string, hooks: PlayoutHooks, opts: Partial<PlayoutOptions> = {}, extras: PlayoutExtras = {}) {
     this.ffmpeg = ffmpeg;
@@ -353,6 +376,7 @@ export class Playout {
     this.silence = new SilenceDetector({ thresholdDb: this.opts.silenceThresholdDb, durationMs: this.opts.silenceMs });
     this.startEncoder();
     for (const [id, rt] of this.profiles) this.startProfileEncoder(id, rt);
+    for (const [id, rt] of this.hlsOutputs) this.startHls(id, rt);
     if (this.opts.monitor) this.startMonitor();
     if (this.opts.inputDevice) this.startInput();
     this.t0 = performance.now();
@@ -385,6 +409,12 @@ export class Playout {
       p?.stdin?.end();
       setTimeout(() => p?.kill('SIGKILL'), 1000).unref();
       rt.hooks.onStreamStop();
+    }
+    for (const rt of this.hlsOutputs.values()) {
+      const p = rt.proc;
+      rt.proc = null;
+      p?.stdin?.end();
+      setTimeout(() => p?.kill('SIGKILL'), 1000).unref();
     }
     this.monitorProc?.kill('SIGKILL');
     this.monitorProc = null;
@@ -803,6 +833,55 @@ export class Playout {
     });
   }
 
+  /**
+   * AirDeckCast: HLS-Ausgabe starten/aktualisieren (z. B. für einen anderen Sender-Player). Ersetzt eine
+   * gleichnamige Ausgabe - dieselbe id mit neuen Optionen startet den Segmentierer neu.
+   */
+  addHls(id: string, opts: HlsOpts): void {
+    this.removeHls(id);
+    const rt: HlsRuntime = { opts, proc: null };
+    this.hlsOutputs.set(id, rt);
+    if (this.running) this.startHls(id, rt);
+  }
+
+  removeHls(id: string): void {
+    const rt = this.hlsOutputs.get(id);
+    if (!rt) return;
+    this.hlsOutputs.delete(id);
+    rt.proc?.kill('SIGKILL');
+  }
+
+  listHls(): string[] {
+    return [...this.hlsOutputs.keys()];
+  }
+
+  private startHls(id: string, rt: HlsRuntime): void {
+    const { dir, bitrateKbps, segmentSeconds = 6, listSize = 6 } = rt.opts;
+    mkdirSync(dir, { recursive: true });
+    const proc = spawn(
+      this.ffmpeg,
+      [
+        '-hide_banner', '-loglevel', 'error', '-nostdin', ...RAW_IN, '-i', 'pipe:0',
+        '-c:a', 'aac', '-b:a', `${bitrateKbps}k`,
+        '-f', 'hls', '-hls_time', String(segmentSeconds), '-hls_list_size', String(listSize),
+        '-hls_flags', 'delete_segments+append_list',
+        '-hls_segment_filename', join(dir, 'seg_%05d.ts'),
+        join(dir, 'index.m3u8'),
+      ],
+      { stdio: ['pipe', 'ignore', 'pipe'], windowsHide: true },
+    );
+    rt.proc = proc;
+    proc.stderr!.on('data', () => {});
+    proc.stdin!.on('error', () => {});
+    proc.on('error', (e) => this.hooks.log('hls_error', { id, message: e.message }));
+    proc.on('close', () => {
+      if (rt.proc !== proc) return;
+      rt.proc = null;
+      if (!this.running || !this.hlsOutputs.has(id)) return;
+      setTimeout(() => this.running && this.hlsOutputs.has(id) && !rt.proc && this.startHls(id, rt), 1000).unref();
+    });
+  }
+
   private startMonitor(): void {
     const ffplay = this.extras.ffplay;
     if (!ffplay) return this.hooks.log('monitor_unavailable', { reason: 'ffplay fehlt' });
@@ -970,6 +1049,10 @@ export class Playout {
     const pcm = busToS16(bus);
     if (enc?.stdin && enc.stdin.writableLength < 2 * 1024 * 1024) enc.stdin.write(pcm);
     for (const rt of this.profiles.values()) {
+      const p = rt.proc;
+      if (p?.stdin && p.stdin.writableLength < 2 * 1024 * 1024) p.stdin.write(pcm);
+    }
+    for (const rt of this.hlsOutputs.values()) {
       const p = rt.proc;
       if (p?.stdin && p.stdin.writableLength < 2 * 1024 * 1024) p.stdin.write(pcm);
     }
