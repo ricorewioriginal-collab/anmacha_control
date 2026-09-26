@@ -616,12 +616,21 @@ export class Playout {
   /**
    * Programm wählen: null = Automation, sonst eine Live-Quelle. Beim Wechsel auf Live werden laufende Titel
    * ausgeblendet (die Automation pausiert, siehe setAutomation); Carts laufen weiter.
+   *
+   * Die Automation blendet erst aus, sobald der Live-Kanal wirklich bereit ist (gepuffert, "primed") -
+   * sonst entsteht eine hörbare Stille-Lücke: die Übernahmeentscheidung (Source Priority) kommt oft an,
+   * bevor der Live-Encoder/-Decoder genug Audio angesammelt hat. Ist der Kanal schon bereit, blendet
+   * sofort aus; sonst übernimmt mixLive() das Ausblenden in dem Moment, in dem er bereit wird.
    */
   setProgram(id: string | null): void {
     if (this.program === id) return;
     this.program = id;
-    if (id !== null) for (const v of this.voices) if (v.kind === 'track' && v.fadeTo !== 0) v.fade(0, msToFrames(this.opts.liveFadeMs ?? 400));
+    if (id !== null && (this.live.get(id)?.primed ?? true)) this.fadeOutTracks();
     this.hooks.log('program', { program: id ?? 'automation' });
+  }
+
+  private fadeOutTracks(): void {
+    for (const v of this.voices) if (v.kind === 'track' && v.fadeTo !== 0) v.fade(0, msToFrames(this.opts.liveFadeMs ?? 400));
   }
 
   /** Automation darf selbstständig Titel starten (AUTO/EMERGENCY) oder nicht (MANUAL/LIVE). */
@@ -674,6 +683,8 @@ export class Playout {
       if (!ch.primed) {
         if (ch.fifo.frames < pre && !ch.closing) continue;
         ch.primed = true;
+        // Erst jetzt, mit genug gepuffertem Live-Audio, die Automation ausblenden - siehe setProgram().
+        if (this.program === ch.id) this.fadeOutTracks();
       }
       const { samples, got } = ch.fifo.read(due);
       if (got < due) {

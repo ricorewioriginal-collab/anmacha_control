@@ -24,13 +24,13 @@ Diese Tabelle wird laufend nach echten Tests aktualisiert (kein Feature gilt als
 |---|---|---|
 | **Kernbetrieb** (Server-Automation 24/7, Source-Priority, Crossfade, Ausgänge, REST-API) | ✅ läuft | Grundfunktionen aus früheren Phasen, mit echtem ffmpeg/Icecast getestet |
 | **Oberfläche & Workflow** (Dashboard, Medienverwaltung, Nextcloud-Anbindung, Playlistverwaltung, Live Studio, In-App-Handbuch) | ✅ läuft | Gerade grundlegend überarbeitet: eigene Arbeitsbereiche statt Einzelfunktionen, mit Playwright gegen echte Server getestet |
-| **Crossfade-Audioqualität** | 🟡 teilweise geprüft | Übergänge Musik↔Musik/Jingle per echtem Audio-Dekodier-Test bestätigt; Voice→Musik, Stream→Musik, Live→Automation noch nicht einzeln getestet |
+| **Crossfade-Audioqualität** | ✅ läuft | Musik↔Musik/Jingle, Voice-Track→Musik, externer Stream↔Musik und Live-Quelle↔Automation je per echtem Audio-Dekodier-Test bestätigt (dabei eine echte Stille-Lücke beim Live-Einstieg gefunden und behoben: die Automation blendete aus, bevor der Live-Kanal überhaupt gepuffert war) |
 | **Playlist-Shuffle** | ✅ läuft | Eigener Shuffle-Modus je Playlist (Interpreten-Trennung, „Jetzt neu mischen“); eine übergreifende Rotations-Engine für Sendeuhr/Queue ist ein späterer Schritt |
 | **Medien-Integrität** | ✅ läuft | Fehlende Dateien, Duplikate, Relink für die gesamte Bibliothek (nicht nur eingebundene Ordner) |
 | **Backup/Restore** | ✅ läuft | Echter Ende-zu-Ende-Test: Sichern → Daten löschen → Wiederherstellen → Zustand vergleichen |
 | **Intelligente Rotation, Clock-Templates, Preflight, Hard/Soft-Timing** | ✅ läuft | Interpreten-/Genre-Trennung in der Rotation, Sendeuhr-Vorlagen, Preflight-Prüfung (fehlende Dateien/leere Pools/Rotationskonflikte) vor dem Senden, feste Zeitmarken im Sendeplan |
 | **AirDeckCast** (eigene Streaming-/Verteilschicht, HLS, alternative Profile, Teststream, Failover) | ✅ läuft | Ein Programmbus speist mehrere Encoder-Ausgänge gleichzeitig (Zusatzprofile, HLS direkt vom Server, Teststream mit echtem Datenzuwachs-Nachweis, Ersatzziel springt automatisch bei Ausgangs-Ausfall ein und tritt bei Erholung zurück) |
-| **Geräte-Pairing, LAN-Discovery, Connect-Schicht** | 🟡 teilweise | LAN-Discovery serverseitig vorhanden und seit Kurzem auch aus dem Studio erreichbar; QR/Kurzcode-Pairing und Geräteverwaltung offen |
+| **Geräte-Pairing, LAN-Discovery, Connect-Schicht** | ✅ läuft | Kopplungscode (mit/ohne Benutzerkonto), echter scanbarer QR-Code fürs Koppeln, Geräteliste mit Widerruf, LAN-Discovery serverseitig und aus dem Studio erreichbar |
 | **Erweiterungen/Marktplatz, Team-Chat, Bug-Report-Backend, Statistik, Audit** | ⬜ offen | Noch nicht begonnen |
 | **Long-Run-/Release-Härtung** (Watchdog, Crash Recovery, 24h/48h-Test, RC1) | ⬜ offen | Noch nicht begonnen |
 

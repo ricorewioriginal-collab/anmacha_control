@@ -118,6 +118,7 @@ export class StationService {
     this.app.secrets.delete(`lautfm:${id}`);
     this.removeLogoFile(id);
     rmSync(join(this.app.mediaDir, id), { recursive: true, force: true });
+    rmSync(join(this.app.hlsDir, id), { recursive: true, force: true });
     this.app.stations.delete(id);
     this.app.audit.write({ kind: 'station', event: 'deleted', actor: p.id, stationId: id });
     this.app.changed();

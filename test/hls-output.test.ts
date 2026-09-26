@@ -6,7 +6,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync, existsSync, readFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync, existsSync, readFileSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Server } from 'node:http';
@@ -110,6 +110,41 @@ test(
     } finally {
       app.shutdown();
       server.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
+  'AirDeckCast HLS: Playlist/Segmente werden aufgeräumt, sobald HLS abgeschaltet oder der Sender gelöscht wird',
+  { skip: !ff && 'ffmpeg nicht installiert', timeout: 60_000 },
+  async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'airdeck-hls-cleanup-'));
+    const app = new AirDeckApp(dir, { stableMs: 0, ffmpeg: ff });
+    try {
+      wav(join(app.mediaDir, 'main', 'a.wav'), 8, 440);
+      app.svc.media.addMedia('main', { id: 'a.wav', title: 'a', artist: 'A', category: 'music', file: 'a.wav', durationMs: null, addedAt: 0 });
+      app.setAutomation('main', { autoFill: false });
+      app.queueAdd('main', 'a.wav');
+      app.start();
+      app.startPlayout(admin, 'main', { format: 'mp3', bitrateKbps: 128, hls: { enabled: true, bitrateKbps: 96, segmentSeconds: 2 } });
+
+      const hlsDirMain = join(app.hlsDir, 'main');
+      await until(() => existsSync(hlsDirMain) && readdirSync(hlsDirMain).some((f) => f.endsWith('.ts')), 20_000);
+
+      // Abschalten: alte Playlist/Segmente dürfen nicht liegen bleiben (sonst lädt ein Player sie
+      // versehentlich weiter, als wäre HLS noch aktiv).
+      app.savePlayoutConfig('main', { hls: { enabled: false } });
+      assert.equal(existsSync(hlsDirMain), false, 'HLS-Verzeichnis wird beim Abschalten entfernt');
+
+      // Wieder anschalten, dann den ganzen Sender löschen: auch dabei muss aufgeräumt werden.
+      app.savePlayoutConfig('main', { hls: { enabled: true, bitrateKbps: 96, segmentSeconds: 2 } });
+      await until(() => existsSync(hlsDirMain), 10_000);
+      app.svc.stations.createStation({ id: 'zweiter', name: 'Zweiter' }, false);
+      app.svc.stations.deleteStation(admin, 'main');
+      assert.equal(existsSync(hlsDirMain), false, 'HLS-Verzeichnis wird beim Löschen des Senders entfernt');
+    } finally {
+      app.shutdown();
       rmSync(dir, { recursive: true, force: true });
     }
   },

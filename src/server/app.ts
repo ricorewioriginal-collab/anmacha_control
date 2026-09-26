@@ -2,7 +2,7 @@
 // Cardwall sowie Takt, Ereignisse und Datenhaltung. Alle übrigen Fachgebiete liegen als Dienste unter services/
 // und werden über `app.svc.<dienst>` angesprochen. Keine Abhängigkeit zu AnMaCha oder anderen externen Diensten.
 
-import { existsSync, mkdirSync, readdirSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { SourcePriorityEngine, type EngineEvent, type SourceConfig } from '../core/source-priority.ts';
 import {
@@ -1295,6 +1295,8 @@ export class AirDeckApp {
       po.playout.addHls('hls', { dir, bitrateKbps: cfg.hls.bitrateKbps ?? 128, segmentSeconds: cfg.hls.segmentSeconds ?? 6 });
     } else {
       po.playout.removeHls('hls');
+      // Alte Playlist/Segmente nicht liegen lassen - sonst würde ein Player sie versehentlich als "aktuell" laden.
+      rmSync(join(this.hlsDir, stationId), { recursive: true, force: true });
     }
   }
 
