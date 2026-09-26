@@ -21,12 +21,13 @@ async function view(name, file) {
   await page.waitForTimeout(500);
   await page.screenshot({ path: new URL(file, out).pathname, fullPage: true });
 }
-async function panel(id, file) {
+async function panel(win, file) {
   await page.locator('[data-view="studio"]').first().click();
   await page.waitForSelector('#view-studio:not([hidden])');
-  await page.locator('#' + id).scrollIntoViewIfNeeded();
+  const target = page.locator(`[data-win="${win}"]`).first();
+  await target.scrollIntoViewIfNeeded();
   await page.waitForTimeout(250);
-  await page.locator('#' + id).screenshot({ path: new URL(file, out).pathname });
+  await target.screenshot({ path: new URL(file, out).pathname });
 }
 
 await page.screenshot({ path: new URL('view-dashboard.png', out).pathname, fullPage: true });
@@ -43,21 +44,22 @@ for (const [name, file] of [
   ['handbuch','view-handbuch.png'],
 ]) await view(name, file);
 
-for (const [id, file] of [
+for (const [win, file] of [
   ['decks','panel-decks.png'],
-  ['carts-panel','panel-carts.png'],
-  ['work-panel','panel-lib.png'],
-  ['queue-panel','panel-queue.png'],
-  ['np-panel','panel-np.png'],
-  ['live-panel','panel-live.png'],
-  ['stream-panel','panel-stream.png'],
-  ['playout-panel','panel-playout.png'],
-  ['processing-panel','panel-processing.png'],
-  ['meter-panel','panel-meters.png'],
-  ['sources-panel','panel-sources.png'],
-  ['system-panel','panel-system.png'],
+  ['carts','panel-carts.png'],
+  ['np','panel-np.png'],
+  ['lib','panel-lib.png'],
+  ['queue','panel-queue.png'],
+  ['quick','panel-quick.png'],
+  ['live','panel-live.png'],
+  ['stream','panel-stream.png'],
+  ['playout','panel-playout.png'],
+  ['processing','panel-processing.png'],
+  ['meters','panel-meters.png'],
+  ['sources','panel-sources.png'],
+  ['system','panel-system.png'],
 ]) {
-  if (await page.locator('#' + id).count()) await panel(id, file);
+  if (await page.locator(`[data-win="${win}"]`).count()) await panel(win, file);
 }
 
 await browser.close();
