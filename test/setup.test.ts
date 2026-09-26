@@ -49,6 +49,10 @@ test('Setup-Assistent: frische Installation, Schritte, Neustart-Hinweise, besteh
     assert.equal(app.svc.stations.station('main').name, 'Radio Test');
     await app.svc.setup.apply(admin, 'stream', { type: 'icecast', host: '127.0.0.1', port: 8000, mount: '/live', password: 'pw-123456' });
     assert.equal(app.outputs.size, 1);
+    // Standardinstallation bleibt manuell: AutoDJ/Autostart nur nach expliziter Auswahl.
+    await app.svc.setup.apply(admin, 'automation', {});
+    assert.equal((app.playoutView('main') as { config: { autostart: boolean }, status: { running: boolean } }).config.autostart, false);
+    assert.equal((app.playoutView('main') as { status: { running: boolean } }).status.running, false);
     await app.svc.setup.apply(admin, 'ai', { skip: true });
     s = (await app.svc.setup.apply(admin, 'finish', {})) as typeof s;
     assert.deepEqual(s.restart.sort(), ['mode', 'network']);
