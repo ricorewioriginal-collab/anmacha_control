@@ -3,6 +3,8 @@ name: Build
 on:
   push:
     branches: ['**']
+    paths-ignore:
+      - 'docs/screenshots/**'
   pull_request:
   workflow_dispatch:
 
@@ -283,6 +285,59 @@ jobs:
           docker compose -f packaging/demo/docker-compose.demo.yml logs airdeck-demo
           docker compose -f packaging/demo/docker-compose.demo.yml down -v
           echo "Demo: Login, Cardwall, Playout und Reset OK"
+
+  screenshots:
+    if: github.event_name == 'push' && github.ref_name == github.event.repository.default_branch && !contains(github.event.head_commit.message, '[screenshots]')
+    needs: demo
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Browser und Bildwerkzeuge installieren
+        run: |
+          npm install --no-save --package-lock=false playwright@1.55.0
+          npx playwright install --with-deps chromium
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq imagemagick
+      - name: Demo fuer aktuelle Screenshots starten
+        run: |
+          docker compose -f packaging/demo/docker-compose.demo.yml build
+          sh packaging/demo/reset-demo.sh
+          LOGIN=$(curl -fs -X POST -H 'Content-Type: application/json' \
+            -d '{"username":"demo","password":"airdeck-demo"}' \
+            http://127.0.0.1:8751/api/v1/auth/login)
+          TOKEN=$(printf '%s' "$LOGIN" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>process.stdout.write(JSON.parse(s).token||''))")
+          test -n "$TOKEN"
+          echo "AIRDECK_SCREENSHOT_TOKEN=$TOKEN" >> "$GITHUB_ENV"
+      - name: README-Screenshots neu erzeugen
+        env:
+          AIRDECK_SCREENSHOT_URL: http://127.0.0.1:8751
+        run: |
+          node scripts/screenshots.mjs
+          convert \
+            docs/screenshots/view-dashboard.png \
+            docs/screenshots/view-studio.png \
+            docs/screenshots/view-planning.png \
+            docs/screenshots/view-mediathek.png \
+            docs/screenshots/view-playlists.png \
+            docs/screenshots/view-bridges.png \
+            docs/screenshots/view-listeners.png \
+            docs/screenshots/view-users.png \
+            -resize '820x540>' -gravity center -background '#020817' -extent 820x540 \
+            -delay 140 -loop 0 docs/screenshots/slideshow.gif
+      - name: Screenshots nur bei Aenderungen committen
+        run: |
+          git config user.name "AirDeck CI"
+          git config user.email "actions@users.noreply.github.com"
+          git add docs/screenshots
+          if git diff --cached --quiet; then
+            echo "Screenshots bereits aktuell."
+          else
+            git commit -m "README: aktuelle UI-Screenshots [screenshots]"
+            git push
+          fi
+          docker compose -f packaging/demo/docker-compose.demo.yml down -v
 
   # docs/DOCKER.md verspricht ausdrücklich "Raspberry Pi 4/5 mit 64 Bit" - bisher baute und testete die
   # CI das Image nur für amd64 (der GitHub-Runner selbst). Per QEMU-Emulation wirklich für arm64 bauen
