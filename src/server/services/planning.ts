@@ -1,5 +1,6 @@
 // Planung: Playlists, Zeitplan-Jobs, Stunden-Uhr, Sendeplan und deren Ausführung im Takt des Kerns.
 
+import { existsSync } from 'node:fs';
 import type { AirDeckApp } from '../app.ts';
 import { pickNext as pickFromPool, shuffleSeparated, type MediaItem } from '../../core/automation.ts';
 import {
@@ -7,6 +8,22 @@ import {
   type ClockEvent, type JobTarget, type ProgramPlan, type Repeat, type ScheduledJob,
 } from '../../core/scheduler.ts';
 import { AppError, newId, safeColor, type Playlist } from '../model.ts';
+
+export type PreflightStatus = 'ok' | 'warning' | 'empty' | 'missing';
+
+export interface PreflightItem {
+  source: 'job' | 'clock' | 'plan' | 'pool';
+  id: string;
+  label: string;
+  status: PreflightStatus;
+  message: string;
+}
+
+export interface PreflightReport {
+  generatedAt: number;
+  items: PreflightItem[];
+  summary: { ok: number; warnings: number; problems: number };
+}
 
 export class PlanningService {
   private readonly app: AirDeckApp;
@@ -200,6 +217,75 @@ export class PlanningService {
   planningChanged(stationId: string): void {
     this.app.publish('planning.changed', stationId, this.planning(stationId));
     this.app.changed();
+  }
+
+  /**
+   * Preflight/Simulation (Abschnitt 23): prüft den kompletten Sendeplan (Zeitplan-Jobs, Uhr-Events,
+   * Sendeplan-Sendungen) UND die Uhr-Vorlage auf fehlende Dateien/Streams, leere Ordner/Playlists und
+   * Pools, die für die aktuellen Rotationsregeln zu klein sind - bevor es auf Sendung geht, nicht erst
+   * live beim Abspielen. Reine Prüfung, verändert nichts.
+   */
+  preflight(stationId: string): PreflightReport {
+    const rt = this.app.rt(stationId);
+    const lib = rt.data.library;
+    const now = Date.now();
+    const items: PreflightItem[] = [];
+    const available = (m: MediaItem): boolean => (m.url ? !!m.url.trim() : existsSync(this.app.svc.media.mediaPath(stationId, m)));
+
+    const checkTarget = (source: PreflightItem['source'], id: string, label: string, t: JobTarget): void => {
+      if (t.kind === 'media') {
+        const m = lib.find((x) => x.id === t.mediaId);
+        if (!m) { items.push({ source, id, label, status: 'missing', message: `Titel wurde gelöscht (${t.mediaId})` }); return; }
+        if (!available(m)) {
+          items.push({ source, id, label, status: 'missing', message: `Datei/URL fehlt: „${m.title}“` });
+          return;
+        }
+        items.push({ source, id, label, status: 'ok', message: m.artist ? `${m.artist} – ${m.title}` : m.title });
+      } else if (t.kind === 'folder') {
+        const pool = lib.filter((m) => (m.folder ?? '') === t.folder && available(m));
+        if (!pool.length) { items.push({ source, id, label, status: 'empty', message: `Ordner „${t.folder}“ ist leer` }); return; }
+        items.push({ source, id, label, status: 'ok', message: `Ordner „${t.folder}“ (${pool.length} Titel)` });
+      } else if (t.kind === 'playlist') {
+        const pl = rt.data.playlists?.find((p) => p.id === t.playlistId);
+        if (!pl) { items.push({ source, id, label, status: 'missing', message: 'Playlist wurde gelöscht' }); return; }
+        const valid = pl.items.filter((mid) => { const m = lib.find((x) => x.id === mid); return m && available(m); });
+        if (!valid.length) { items.push({ source, id, label, status: 'empty', message: `Playlist „${pl.name}“ ist leer oder alle Titel fehlen` }); return; }
+        if (valid.length < pl.items.length) {
+          items.push({ source, id, label, status: 'warning', message: `Playlist „${pl.name}“: ${pl.items.length - valid.length} von ${pl.items.length} Titeln fehlen` });
+          return;
+        }
+        items.push({ source, id, label, status: 'ok', message: `Playlist „${pl.name}“ (${valid.length} Titel)` });
+      }
+    };
+
+    for (const j of rt.data.jobs ?? []) {
+      if (j.repeat === 'none' && j.at <= now) continue; // vorbei, nicht mehr relevant
+      checkTarget('job', j.id, j.label || `Zeitplan: ${j.kind}`, j);
+    }
+    for (const e of rt.data.clockEvents ?? []) {
+      if (!e.enabled) continue;
+      checkTarget('clock', e.id, e.label || `Uhr-Event: ${e.kind}`, e);
+    }
+    for (const p of rt.data.plans ?? []) {
+      checkTarget('plan', p.id, p.label, { kind: 'playlist', playlistId: p.playlistId, mode: 'now' });
+    }
+
+    // Uhr-Vorlage (Kategorien-Takt): reicht der Pool je Kategorie für die aktuellen Rotationsregeln?
+    for (const cat of new Set(rt.data.clock.slots)) {
+      const poolSize = lib.filter((m) => m.category === cat && available(m)).length;
+      const id = `pool-${cat}`;
+      const label = `Uhr-Vorlage: Kategorie „${cat}“`;
+      if (poolSize === 0) items.push({ source: 'pool', id, label, status: 'empty', message: `Keine Titel in Kategorie „${cat}“ - dieser Takt kann nicht gefüllt werden` });
+      else if (poolSize <= rt.data.rotation.titleSeparation) items.push({ source: 'pool', id, label, status: 'warning', message: `Nur ${poolSize} Titel in „${cat}“, aber Titeltrennung verlangt ${rt.data.rotation.titleSeparation} - Regel kann nicht eingehalten werden, Titel wiederholen sich früher` });
+      else items.push({ source: 'pool', id, label, status: 'ok', message: `${poolSize} Titel in „${cat}“` });
+    }
+
+    const summary = {
+      ok: items.filter((i) => i.status === 'ok').length,
+      warnings: items.filter((i) => i.status === 'warning').length,
+      problems: items.filter((i) => i.status === 'empty' || i.status === 'missing').length,
+    };
+    return { generatedAt: now, items, summary };
   }
 
   executeTarget(stationId: string, t: JobTarget, origin: string): void {

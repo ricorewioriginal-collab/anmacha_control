@@ -81,6 +81,7 @@ export function mountPlanning(root, ctx) {
   /** @type {any[]} */ let history = [];
   /** @type {string[]} */ let folders = [];
   /** @type {any} */ let automation = { rotation: { artistSeparation: 3, titleSeparation: 20, genreSeparation: 0 } };
+  /** @type {any|null} */ let preflight = null;
   let openPl = /** @type {string|null} */ (null);
 
   async function load() {
@@ -95,6 +96,11 @@ export function mountPlanning(root, ctx) {
     const rotation = { artistSeparation: Number(artistEl.value) || 0, titleSeparation: Number(titleEl.value) || 0, genreSeparation: Number(genreEl.value) || 0 };
     await run(async () => { automation = await ctx.api.patch(ctx.url('/automation'), { rotation }); });
     status('Rotationsregeln gespeichert');
+  }
+
+  async function runPreflight() {
+    await run(async () => { preflight = await ctx.api.get(ctx.url('/preflight')); });
+    render();
   }
 
   /** @param {string[]} slots */
@@ -159,6 +165,16 @@ export function mountPlanning(root, ctx) {
       h('p', { class: 'muted', style: 'margin:0 0 8px' }, 'Wiederkehrender Kategorien-Takt, den Auto-Fill immer wieder von vorn durchläuft (z. B. Station-ID, Musik, Musik, Jingle, …). Ziehen zum Umsortieren.'),
       clockChips,
       h('div', { class: 'row', style: 'margin-top:8px' }, addSlotSel, h('button', { class: 'btn small', onclick: () => saveClockSlots([...slots, addSlotSel.value]) }, '＋ Takt hinzufügen'))));
+    // --- Preflight/Simulation ---
+    const PF_LABEL = /** @type {Record<string,string>} */ ({ ok: '✓ OK', warning: '⚠ Warnung', empty: '○ Leer', missing: '✕ Fehlt' });
+    const preflightBody = !preflight
+      ? h('div', { class: 'empty' }, 'Noch nicht geprüft. „Jetzt prüfen“ schaut den ganzen Sendeplan (Zeitplan, Uhr-Events, Sendungen) und die Uhr-Vorlage auf fehlende Dateien/Streams, leere Ordner/Playlists und zu kleine Pools durch.')
+      : h('div', {},
+          h('p', { class: 'muted', style: 'margin:0 0 8px' }, `${preflight.summary.ok} in Ordnung · ${preflight.summary.warnings} Warnung(en) · ${preflight.summary.problems} Problem(e)`),
+          table(['Status', 'Was', 'Hinweis'], preflight.items.map((/** @type {any} */ i) => h('tr', {},
+            h('td', {}, h('span', { class: `pf-status pf-${i.status}` }, PF_LABEL[i.status] ?? i.status)),
+            h('td', {}, i.label), h('td', {}, i.message))), 'Keine Einträge im Sendeplan.'));
+    const preflightPanel = panel('Preflight-Prüfung', [h('button', { class: 'btn small primary', onclick: runPreflight }, 'Jetzt prüfen')], preflightBody);
     // --- Sendeplan ---
     const sched = panel('Sendeplan', [h('button', { class: 'btn small primary', onclick: () => editPlan() }, '＋ Sendung')],
       h('div', {},
@@ -201,7 +217,7 @@ export function mountPlanning(root, ctx) {
       table(['Zeit', 'Titel', 'Art'], history.slice(0, 200).map((x) => h('tr', {},
         h('td', { class: 'num' }, clockTime(x.at)), h('td', {}, x.artist ? `${x.artist} – ${x.title}` : x.title), h('td', {}, h('span', { class: 'tag' }, x.category)))),
       'Noch nichts gespielt.'));
-    root.replaceChildren(h('div', { class: 'view-grid' }, jobs, clock, rotation, clockTpl, sched, pls, hist));
+    root.replaceChildren(h('div', { class: 'view-grid' }, jobs, clock, rotation, clockTpl, preflightPanel, sched, pls, hist));
   }
 
   /** Sendeplan als Wochengitter: Sendungen ziehen (Zeit/Tag), unteren Rand ziehen (Dauer), Playlist hineinziehen (neu). */

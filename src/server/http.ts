@@ -342,6 +342,7 @@ export function createHttpServer(app: AirDeckApp, studioDir: string): Server {
 
   // --- Planung: Zeitplan, Stunden-Uhr, Sendeplan ---
   add('GET', '/api/v1/stations/:sid/planning', 'schedule:read', (c) => app.svc.planning.planning(sid(c)));
+  add('GET', '/api/v1/stations/:sid/preflight', 'schedule:read', (c) => app.svc.planning.preflight(sid(c)));
   add('POST', '/api/v1/stations/:sid/jobs', 'automation:write', async (c) => app.svc.planning.saveJob(sid(c), await c.body()));
   add('DELETE', '/api/v1/stations/:sid/jobs/:id', 'automation:write', (c) => app.svc.planning.deleteJob(sid(c), c.params.id!));
   add('POST', '/api/v1/stations/:sid/clock-events', 'automation:write', async (c) => app.svc.planning.saveClockEvent(sid(c), null, await c.body()));
