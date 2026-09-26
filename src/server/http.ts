@@ -338,6 +338,7 @@ export function createHttpServer(app: AirDeckApp, studioDir: string): Server {
   add('PATCH', '/api/v1/stations/:sid/playlists/:id', 'queue:write', async (c) => app.svc.planning.savePlaylist(sid(c), c.params.id!, await c.body()));
   add('DELETE', '/api/v1/stations/:sid/playlists/:id', 'queue:write', (c) => app.svc.planning.deletePlaylist(sid(c), c.params.id!));
   add('POST', '/api/v1/stations/:sid/playlists/:id/play', 'automation:write', (c) => app.svc.planning.playPlaylist(sid(c), c.params.id!));
+  add('POST', '/api/v1/stations/:sid/playlists/:id/shuffle', 'queue:write', (c) => app.svc.planning.reshufflePlaylist(sid(c), c.params.id!));
 
   // --- Planung: Zeitplan, Stunden-Uhr, Sendeplan ---
   add('GET', '/api/v1/stations/:sid/planning', 'schedule:read', (c) => app.svc.planning.planning(sid(c)));

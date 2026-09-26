@@ -98,6 +98,10 @@ export interface Playlist {
   name: string;
   color: string;
   items: string[];
+  /** Manuell: feste Reihenfolge (items). Shuffle: gemischte Reihenfolge (shuffleOrder), Interpreten getrennt. */
+  mode?: 'manual' | 'shuffle';
+  /** Zuletzt gemischte Reihenfolge (Item-IDs), damit "Abspielen" nicht bei jedem Aufruf neu mischt. */
+  shuffleOrder?: string[];
 }
 
 export interface Recording {

@@ -55,7 +55,7 @@ function targetBody(v) {
 }
 
 /** @param {string} title @param {HTMLElement[]} actions @param {HTMLElement} body */
-const panel = (title, actions, body) => h('section', { class: 'panel' }, h('div', { class: 'panel-head' }, h('h2', {}, title), ...actions), body);
+export const panel = (title, actions, body) => h('section', { class: 'panel' }, h('div', { class: 'panel-head' }, h('h2', {}, title), ...actions), body);
 /** @param {string[]} heads @param {HTMLElement[]} rows @param {string} empty */
 const table = (heads, rows, empty) =>
   rows.length
@@ -64,7 +64,7 @@ const table = (heads, rows, empty) =>
 /** @param {...(HTMLElement|null)} btns */
 const act = (...btns) => h('td', { class: 'act' }, ...btns);
 /** @param {string} title @param {string} label @param {() => void} fn */
-const iconBtn = (title, label, fn) => h('button', { title, onclick: fn }, label);
+export const iconBtn = (title, label, fn) => h('button', { title, onclick: fn }, label);
 
 /** @param {HTMLElement} root @param {Ctx} ctx */
 export function mountPlanning(root, ctx) {

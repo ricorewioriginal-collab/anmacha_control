@@ -23,7 +23,7 @@ export class PlanningService {
     return this.app.rt(stationId).data.playlists ?? [];
   }
 
-  savePlaylist(stationId: string, id: string | null, input: { name?: string; color?: string; items?: unknown }): Playlist {
+  savePlaylist(stationId: string, id: string | null, input: { name?: string; color?: string; items?: unknown; mode?: unknown }): Playlist {
     const rt = this.app.rt(stationId);
     const list = (rt.data.playlists ??= []);
     let pl = id ? list.find((p) => p.id === id) : undefined;
@@ -37,8 +37,23 @@ export class PlanningService {
     if (Array.isArray(input.items)) {
       const valid = new Set(rt.data.library.map((m) => m.id));
       pl.items = input.items.map(String).filter((x) => valid.has(x)).slice(0, 5000);
+      delete pl.shuffleOrder; // Reihenfolge ist ungültig geworden, wird bei Bedarf neu gemischt
     }
+    if (input.mode === 'manual' || input.mode === 'shuffle') pl.mode = input.mode;
     this.app.publish('playlists.changed', stationId, list);
+    this.app.changed();
+    return pl;
+  }
+
+  /** Playlist im Shuffle-Modus neu mischen: Fisher-Yates, danach direkt aufeinanderfolgende Titel desselben Interpreten möglichst auflösen. */
+  reshufflePlaylist(stationId: string, id: string): Playlist {
+    const rt = this.app.rt(stationId);
+    const pl = rt.data.playlists?.find((p) => p.id === id);
+    if (!pl) throw new AppError(404, 'not_found', 'Playlist nicht gefunden');
+    const byId = new Map(rt.data.library.map((m) => [m.id, m]));
+    const order = shuffleSeparated(pl.items, (mid) => byId.get(mid)?.artist ?? '');
+    pl.shuffleOrder = order;
+    this.app.publish('playlists.changed', stationId, rt.data.playlists);
     this.app.changed();
     return pl;
   }
@@ -55,13 +70,18 @@ export class PlanningService {
     return this.savePlaylist(stationId, null, { name, items: this.app.rt(stationId).queue.list().map((q) => q.mediaId) });
   }
 
-  /** Playlist abspielen: ersetzt die Queue und schaltet per Crossfade weiter. */
+  /** Playlist abspielen: ersetzt die Queue und schaltet per Crossfade weiter. Im Shuffle-Modus mit gemischter Reihenfolge. */
   playPlaylist(stationId: string, id: string): void {
     const rt = this.app.rt(stationId);
     const pl = rt.data.playlists?.find((p) => p.id === id);
     if (!pl || !pl.items.length) throw new AppError(404, 'empty', 'Playlist ist leer oder existiert nicht');
+    let order = pl.items;
+    if (pl.mode === 'shuffle') {
+      if (!pl.shuffleOrder || pl.shuffleOrder.length !== pl.items.length || pl.shuffleOrder.some((mid) => !pl.items.includes(mid))) this.reshufflePlaylist(stationId, id);
+      order = pl.shuffleOrder ?? pl.items;
+    }
     rt.queue.clear();
-    for (const mid of pl.items) rt.queue.add(mid, 'manual');
+    for (const mid of order) rt.queue.add(mid, 'manual');
     this.app.publishQueue(stationId);
     this.app.advance(stationId);
   }
@@ -255,4 +275,23 @@ export class PlanningService {
       if (!recPlan && active?.rec.planId) this.app.svc.recorder.stopRecording(stationId);
     }
   }
+}
+
+/**
+ * Fisher-Yates-Shuffle, danach ein Durchgang, der direkt aufeinanderfolgende Titel desselben
+ * Interpreten so weit möglich auflöst (Tausch mit dem nächsten passenden Titel) - kein naiver
+ * Zufall, aber auch keine vollständige Rotations-Engine (die ist ein eigener, größerer Punkt).
+ */
+export function shuffleSeparated(items: string[], artistOf: (id: string) => string): string[] {
+  const order = [...items];
+  for (let i = order.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [order[i], order[j]] = [order[j]!, order[i]!];
+  }
+  for (let i = 1; i < order.length; i++) {
+    if (artistOf(order[i]!) !== artistOf(order[i - 1]!) || !artistOf(order[i]!)) continue;
+    const j = order.findIndex((id, k) => k > i && artistOf(id) !== artistOf(order[i - 1]!));
+    if (j !== -1) [order[i], order[j]] = [order[j]!, order[i]!];
+  }
+  return order;
 }
