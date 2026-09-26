@@ -29,7 +29,7 @@ test('Studio-HTML: IDs sind eindeutig und Nextcloud ist nur in Medien integriert
 });
 
 test('Referenzlayout: zentrale Studio-Bereiche bleiben im DOM vorhanden', () => {
-  for (const id of ['decks', 'carts-panel', 'carts', 'work-panel', 'queue-body', 'live-panel', 'outputs', 'studio-schedule', 'studio-schedule-track']) {
+  for (const id of ['decks', 'carts-panel', 'carts', 'work-panel', 'queue-body', 'live-panel', 'outputs', 'studio-schedule', 'studio-schedule-track', 'top-cover', 'top-title', 'top-time']) {
     assert.match(html, new RegExp(`id="${id}"`), `#${id} fehlt`);
   }
 });
@@ -39,4 +39,11 @@ test('Sendeplan bleibt doppelt erreichbar: kompakt im Studio und vollständig ü
   assert.match(html, /id="studio-schedule"/, 'kompakte Studio-Timeline fehlt');
   assert.match(html, /data-view="planning"/, 'Navigation zur vollständigen Planung fehlt');
   assert.match(html, /id="view-planning"/, 'vollständige Planungsansicht fehlt');
+});
+
+
+test('Referenz-Topbar besitzt echte Now-Playing-Ziele', () => {
+  for (const id of ['top-cover', 'top-title', 'top-artist', 'top-time']) {
+    assert.match(html, new RegExp(`id="${id}"`), `#${id} fehlt in der Topbar`);
+  }
 });
