@@ -1154,8 +1154,7 @@ dialog h3 { font-size:17px; color:#f2fbff; }
       "np np"
       "decks decks"
       "lib carts"
-      "queue carts"
-      "quick quick";
+      "queue carts";
     gap: 9px;
     min-width: 0;
   }
@@ -1168,7 +1167,7 @@ dialog h3 { font-size:17px; color:#f2fbff; }
   #view-studio .lib-panel { grid-area: lib; }
   #view-studio .queue-panel { grid-area: queue; }
   #view-studio .carts-panel { grid-area: carts; }
-  #view-studio #live-panel { grid-area: quick; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 9px; }
+  #view-studio #live-panel { display: grid; grid-template-columns: minmax(0, 1fr); gap: 9px; }
 
   #view-studio .np-panel {
     display: grid;
@@ -1210,11 +1209,12 @@ dialog h3 { font-size:17px; color:#f2fbff; }
   }
 
   #view-studio > .side [data-win="stream"] { order: 1; }
-  #view-studio > .side [data-win="playout"] { order: 2; }
-  #view-studio > .side [data-win="meters"] { order: 3; }
-  #view-studio > .side [data-win="processing"] { order: 4; }
-  #view-studio > .side [data-win="sources"] { order: 5; }
-  #view-studio > .side [data-win="system"] { order: 6; }
+  #view-studio > .side #live-panel { order: 2; }
+  #view-studio > .side [data-win="playout"] { order: 3; }
+  #view-studio > .side [data-win="meters"] { order: 4; }
+  #view-studio > .side [data-win="processing"] { order: 5; }
+  #view-studio > .side [data-win="sources"] { order: 6; }
+  #view-studio > .side [data-win="system"] { order: 7; }
 }
 
 .studio-titlebar {
