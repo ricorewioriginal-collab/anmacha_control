@@ -1,7 +1,7 @@
 // laut.fm: Zugang (Radioadmin-Token, Origin), Radioadmin-Anfragen, Live-Zugang als Ausgang übernehmen.
 
 import type { AirDeckApp } from '../app.ts';
-import { AppError, type Principal } from '../model.ts';
+import { AppError, SLUG, type Principal } from '../model.ts';
 import { DEFAULT_ORIGIN, ORIGIN_RE, RADIOADMIN, TOKEN_RE, cleanToken, detectOrigin, loginUrl, type LautfmConfig, type RaStation } from '../lautfm.ts';
 
 export class LautfmService {
@@ -64,11 +64,39 @@ export class LautfmService {
     const keep = stations.find((s) => s.id === cfg.stationId);
     const pick = keep ?? (stations.length === 1 ? stations[0] : stations.find((s) => s.role === 'owner'));
     this.app.secrets.set(`lautfm:${stationId}`, token);
-    const next: LautfmConfig = { ...cfg, origin: found.origin === DEFAULT_ORIGIN ? undefined : found.origin, stationId: pick?.id, stationName: pick?.name ?? cfg.stationName };
+    const origin = found.origin === DEFAULT_ORIGIN ? undefined : found.origin;
+    const next: LautfmConfig = { ...cfg, origin, stationId: pick?.id, stationName: pick?.name ?? cfg.stationName };
     this.app.rt(stationId).data.lautfm = next;
     this.app.audit.write({ kind: 'lautfm', event: 'connect', actor: p.id, stationId, origin: found.origin, stations: stations.length });
+    // Weitere Sender desselben laut.fm-Kontos, die noch keinem AirDeck-Sender zugeordnet sind, automatisch
+    // als eigene AirDeck-Sender anlegen ("Meine Sender" oben zeigt sie dann direkt mit an) - nur für globale
+    // Admins, sonst könnte die anlegende Person die neuen Sender hinterher gar nicht sehen/verwalten.
+    if (p.stationIds.includes('*')) this.autoCreateStations(p, stations, token, origin, pick?.id);
     this.app.changed();
     return { ...this.lautfmConfig(stationId), stations };
+  }
+
+  /** Eindeutige Sender-ID aus einem laut.fm-Namen ableiten (a-z0-9-, ggf. -2/-3 … bei Kollision). */
+  private uniqueStationId(name: string): string {
+    const base = name.toLowerCase().normalize('NFKD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 36) || 'lautfm';
+    let id = base;
+    let n = 2;
+    while (!SLUG.test(id) || this.app.stations.has(id)) id = `${base}-${n++}`.slice(0, 40);
+    return id;
+  }
+
+  /** Sender des verbundenen laut.fm-Kontos, die noch an keinem AirDeck-Sender hängen, neu anlegen und verknüpfen. */
+  private autoCreateStations(p: Principal, stations: RaStation[], token: string, origin: string | undefined, skipId: number | undefined): void {
+    const linked = new Set([...this.app.stations.values()].map((r) => r.data.lautfm?.stationId).filter((x): x is number => x !== undefined));
+    for (const s of stations) {
+      if (s.id === skipId || linked.has(s.id)) continue;
+      const id = this.uniqueStationId(s.displayName || s.name);
+      this.app.svc.stations.createStation({ id, name: s.displayName || s.name || `laut.fm ${s.id}` }, true);
+      this.app.secrets.set(`lautfm:${id}`, token);
+      this.app.rt(id).data.lautfm = { origin, stationId: s.id, stationName: s.name };
+      this.app.audit.write({ kind: 'lautfm', event: 'auto_created', actor: p.id, stationId: id, lautfmStationId: s.id });
+      linked.add(s.id);
+    }
   }
 
   /** Verbindung prüfen; stimmt der gespeicherte Origin nicht mehr, wird er neu ermittelt. */

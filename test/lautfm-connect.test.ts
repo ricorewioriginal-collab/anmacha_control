@@ -61,6 +61,22 @@ test('laut.fm verbinden: Origin wird selbst ermittelt, Station gewählt, Anfrage
     assert.equal(cfg.hasToken, true);
     assert.equal(cfg.stations.length, 2);
 
+    // Nutzerbericht: laut.fm-Sender fehlten im Dropdown "Meine Sender" - der zweite Sender des Kontos
+    // ("anderes", id 9, noch keinem AirDeck-Sender zugeordnet) muss jetzt automatisch als eigener
+    // AirDeck-Sender angelegt werden (nur weil hier mit einem globalen Admin-Token verbunden wurde).
+    const listStations = () => fetch(`${root}/api/v1/stations`, { headers: { Authorization: `Bearer ${token}` } }).then((r) => r.json()) as Promise<Array<{ id: string; name: string }>>;
+    const allStations = await listStations();
+    const auto = allStations.find((s) => s.id === 'anderes');
+    assert.ok(auto, 'zweiter laut.fm-Sender wurde automatisch als eigener AirDeck-Sender angelegt');
+    assert.equal(auto?.name, 'anderes');
+    const autoLf = await fetch(`${root}/api/v1/stations/anderes/lautfm`, { headers: { Authorization: `Bearer ${token}` } });
+    assert.equal(autoLf.status, 200);
+    assert.equal(((await autoLf.json()) as { stationId: number }).stationId, 9);
+    // Erneutes Verbinden legt den bereits vorhandenen Sender nicht doppelt an.
+    await api('POST', '/lautfm/connect', { pageOrigin: ORIGIN });
+    const again2 = await listStations();
+    assert.equal(again2.filter((s) => s.id === 'anderes').length, 1);
+
     // Weiterleitung nutzt den ermittelten Origin
     const st = await api('GET', '/lautfm/ra/stations/7');
     assert.equal(st.status, 200);
