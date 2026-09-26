@@ -160,8 +160,9 @@ export class IcecastOutput implements BroadcastOutput {
       res.resume();
       if (res.statusCode === 200) {
         this.retryDelay = 2000;
-        this.set({ status: 'connected', connectedAt: Date.now() });
-        if (wanted.init) this.write(wanted.init);
+        // Status ist meist schon "connected" (siehe unten) - hier nur der Zeitstempel, falls die
+        // Antwort doch vor dem ersten Schreiben kam.
+        if (this.state.status !== 'connected') this.set({ status: 'connected', connectedAt: Date.now() });
         return;
       }
       const code = res.statusCode ?? 0;
@@ -170,9 +171,15 @@ export class IcecastOutput implements BroadcastOutput {
     });
     req.on('error', (err) => this.fail(err.message, 'network', true));
     req.on('close', () => {
-      if (this.req === req && this.state.status === 'connected') this.fail('Verbindung getrennt', 'network', true);
+      if (this.req === req && (this.state.status === 'connected' || this.state.status === 'connecting')) this.fail('Verbindung getrennt', 'network', true);
     });
     req.flushHeaders();
+    // Nicht auf die HTTP-Antwort warten, bevor Audiodaten geschickt werden: Manche Icecast-kompatible
+    // Server (u. a. vermutlich laut.fm) antworten selbst erst, sobald Audiodaten ankommen - wer hier
+    // wartet, blockiert sich mit dem Server gegenseitig (Deadlock, siehe test/icecast.test.ts). Ein
+    // späterer Fehlerstatus (401/403/409/5xx) wirft trotzdem in den Fehlerzustand zurück.
+    this.set({ status: 'connected', connectedAt: Date.now() });
+    if (wanted.init) this.write(wanted.init);
   }
 
   private fail(message: string, category: OutputState['errorCategory'], retry: boolean): void {
