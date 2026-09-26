@@ -181,10 +181,10 @@ export class SetupService {
         break;
       case 'automation': {
         if (!station) throw new AppError(409, 'no_station', 'Kein Sender vorhanden');
-        this.app.savePlayoutConfig(station.id, { autostart: input.autostart !== false, emergencyFolder: typeof input.emergencyFolder === 'string' ? input.emergencyFolder : undefined });
+        this.app.savePlayoutConfig(station.id, { autostart: input.autostart === true, emergencyFolder: typeof input.emergencyFolder === 'string' ? input.emergencyFolder : undefined });
         if (input.start === true && !this.app.playouts.has(station.id)) {
           if (!this.app.ffmpeg) throw new AppError(501, 'unsupported', 'ffmpeg fehlt – die Automation kann nicht starten');
-          this.app.startPlayout(p, station.id, { autostart: input.autostart !== false });
+          this.app.startPlayout(p, station.id, { autostart: input.autostart === true });
         }
         this.mark(st, 'done');
         break;
