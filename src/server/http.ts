@@ -503,6 +503,14 @@ export function createHttpServer(app: AirDeckApp, studioDir: string): Server {
     setTimeout(() => app.requestRestart?.(), 300).unref();
     return { restarting: true };
   });
+  // LAN-Erkennung vom Browser aus anstoßen (der Browser selbst kann kein UDP - der Server sucht stellvertretend
+  // in seinem eigenen Netz. Nützlich z. B. auf einem Docker-/Server-Host, um weitere AirDeck-Instanzen im
+  // selben Netz zum Wechseln/Koppeln zu finden, s. "Server wechseln").
+  add('GET', '/api/v1/discover', null, async (c) => {
+    globalAdmin(c);
+    const { discover } = await import('./discovery.ts');
+    return { found: await discover() };
+  });
   // Sicherung/Wiederherstellung (nur Administration - betrifft die gesamte Installation, nicht nur einen Sender)
   add('GET', '/api/v1/backup', null, (c) => (globalAdmin(c), app.svc.backup.list()));
   add('POST', '/api/v1/backup', null, (c) => (globalAdmin(c), app.svc.backup.create()));

@@ -201,11 +201,12 @@ async function openSetup() {
 async function switchServer() {
   const profiles = loadProfiles();
   const v = await formDialog('Server wechseln', [
-    { name: 'base', label: 'Gespeicherte Server', value: serverBase(), options: [...profiles.map((p) => /** @type {[string, string]} */ ([p.base, `${p.name} · ${p.base}`])), ['__new', '+ Server hinzufügen …']] },
+    { name: 'base', label: 'Gespeicherte Server', value: serverBase(), options: [...profiles.map((p) => /** @type {[string, string]} */ ([p.base, `${p.name} · ${p.base}`])), ['__discover', '🔍 Im Netzwerk suchen …'], ['__new', '+ Server hinzufügen …']] },
     { name: 'forget', label: 'Gewählten Server aus der Liste entfernen', type: 'checkbox', value: false },
   ], 'Wechseln');
   if (!v) return;
   if (v.base === '__new') return askToken(undefined, undefined, true);
+  if (v.base === '__discover') return discoverServers();
   if (v.forget) {
     removeProfile(v.base);
     return status('Server entfernt');
@@ -215,6 +216,24 @@ async function switchServer() {
   saveServer(p.base);
   saveToken(p.token || null);
   location.reload();
+}
+
+/** Weitere AirDeck-Instanzen im selben Netz finden (der Browser fragt den bereits verbundenen Server, der
+ * stellvertretend per UDP-Broadcast sucht - der Browser selbst kann kein UDP). Findet nur Server im
+ * gleichen LAN wie DIESER Server, nicht das Netz des Browsers/Handys selbst. */
+async function discoverServers() {
+  status('Suche im Netzwerk …');
+  const r = await run(() => api.get('/discover'));
+  if (!r) return;
+  const found = /** @type {any[]} */ (r.found).filter((f) => f.url && f.url !== location.origin);
+  if (!found.length) return status('Keine weiteren AirDeck-Server im Netz dieses Servers gefunden', true);
+  const v = await formDialog('Gefundene Server', [
+    { name: 'base', label: 'Server', value: found[0].url, options: found.map((f) => /** @type {[string, string]} */ ([f.url, `${f.name} · ${f.url}${f.lan ? '' : ' (nur lokal)'}`])) },
+  ], 'Übernehmen');
+  if (!v) return;
+  const chosen = found.find((f) => f.url === v.base);
+  saveProfile({ base: v.base, name: chosen?.name ?? 'AirDeck', token: '', lastConnected: new Date().toISOString() });
+  status(`„${chosen?.name}“ gespeichert – unter „Server wechseln“ auswählbar (Anmeldung/Kopplung beim ersten Wechsel nötig)`);
 }
 
 /** Erstanmeldung/zurückgesetztes Passwort: eigenes Passwort festlegen. @param {string} [msg] */
