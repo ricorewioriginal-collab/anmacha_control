@@ -88,7 +88,7 @@ const STEPS = [
   {
     id: 'automation', title: 'Automation', intro: 'Die Automation spielt Queue, Sendeuhr und Sendeplan – rund um die Uhr, auch ohne geöffnetes Fenster.',
     fields: (s) => [
-      { name: 'autostart', label: 'Nach einem Neustart automatisch wieder senden', type: 'checkbox', value: s.current.automation?.autostart ?? true },
+      { name: 'autostart', label: 'Nach einem Neustart automatisch wieder senden', type: 'checkbox', value: s.current.automation?.autostart ?? false },
       { name: 'emergencyFolder', label: 'Notfall-Ordner (spielt, wenn nichts anderes geplant ist)', value: s.current.automation?.emergencyFolder ?? '' },
       { name: 'start', label: s.current.ffmpeg ? 'Automation jetzt starten' : 'Automation jetzt starten (ffmpeg fehlt – nicht möglich)', type: 'checkbox', value: false },
     ],
