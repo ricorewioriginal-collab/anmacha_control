@@ -51,8 +51,9 @@ test('Setup-Assistent: frische Installation, Schritte, Neustart-Hinweise, besteh
     assert.equal(app.outputs.size, 1);
     // Standardinstallation bleibt manuell: AutoDJ/Autostart nur nach expliziter Auswahl.
     await app.svc.setup.apply(admin, 'automation', {});
-    assert.equal((app.playoutView('main') as { config: { autostart: boolean }, status: { running: boolean } }).config.autostart, false);
-    assert.equal((app.playoutView('main') as { status: { running: boolean } }).status.running, false);
+    assert.equal((app.playoutView('main') as { config: { autostart: boolean } }).config.autostart, false);
+    const manual = app.playoutView('main') as { status: { running: boolean } | null };
+    assert.equal(manual.status?.running ?? false, false);
     await app.svc.setup.apply(admin, 'ai', { skip: true });
     s = (await app.svc.setup.apply(admin, 'finish', {})) as typeof s;
     assert.deepEqual(s.restart.sort(), ['mode', 'network']);
