@@ -18,6 +18,7 @@ import { mountNextcloud } from './nextcloud.js';
 import { mountBridges } from './bridges.js';
 import { mountUsers } from './users.js';
 import { mountUpdates } from './updates.js';
+import { qrDataUrl } from './qr.js';
 import { JUMP_TO_WIN, mountLayout } from './layout.js';
 import { mountOverview } from './overview.js';
 
@@ -96,8 +97,39 @@ const url = (/** @type {string} */ p) => `/stations/${sid()}${p}`;
 
 // ---------- Start ----------
 
+/**
+ * Ein gescannter Kopplungs-QR-Code öffnet diese Seite mit "#pair=<code>" - die Adresse steckt schon in
+ * der URL (der Server, auf dem diese Seite läuft), es fehlt nur noch der Kopplungscode selbst.
+ * @returns {Promise<boolean>} true = Hash wurde behandelt (weiter mit neu geladener Seite oder Fehlerdialog)
+ */
+async function tryAutoPair() {
+  const m = /[#&]pair=(\d{6})/.exec(location.hash);
+  if (!m) return false;
+  history.replaceState(null, '', location.pathname + location.search);
+  const native = isNativeApp();
+  const v = await formDialog('Gerät koppeln', [
+    { name: 'info', label: 'Kopplungscode erkannt', type: 'info', value: `Code ${m[1].slice(0, 3)} ${m[1].slice(3)} wird eingelöst.` },
+    { name: 'name', label: 'Gerätename', value: deviceName(native) },
+  ], 'Koppeln');
+  if (!v) return true;
+  status('Verbindung wird geprüft …');
+  const r = await testConnection('', { code: m[1] }, { native, deviceName: v.name || deviceName(native) });
+  if (!r.ok) {
+    const failed = r.steps.find((/** @type {any} */ x) => !x.ok);
+    await formDialog('Kopplung fehlgeschlagen', r.steps.map((/** @type {any} */ x) => ({
+      name: `s_${x.id}`, label: `${x.ok ? '✔' : '✖'} ${x.label}`, type: 'info', value: [x.detail, x.hint].filter(Boolean).join(' – '),
+    })), 'OK');
+    return true;
+  }
+  saveToken(r.token ?? null);
+  if (r.base) saveProfile({ base: r.base, name: r.serverName ?? 'AirDeck', token: r.token ?? '', lastConnected: new Date().toISOString() });
+  location.reload();
+  return true;
+}
+
 async function boot() {
   hydrateIcons();
+  if (await tryAutoPair()) return;
   const token = readToken();
   // Android-App ohne Server: Handy-Sender oder mit AirDeck verbinden
   if (isNativeApp() && !serverBase()) return chooseAppMode();
@@ -1966,11 +1998,24 @@ async function androidApp() {
     const p = await run(() => api.post('/pairing', { role: v.role, stationIds: [S.station.id] }));
     if (!p) return;
     const until = new Date(p.expiresAt).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
-    await formDialog('Gerät koppeln', [
-      { name: 'code', label: 'Kopplungscode', type: 'info', value: `${p.code.slice(0, 3)} ${p.code.slice(3)}` },
-      { name: 'addr', label: 'Server-Adresse in der App', type: 'info', value: p.listening ? (p.addresses.join(' · ') || base) : 'Erst „Im Netzwerk erreichbar“ einschalten und AirDeck neu starten' },
-      { name: 'info', label: 'Gültig', type: 'info', value: `einmalig, bis ${until} Uhr · Sender „${S.station.name}“` },
-    ], 'Fertig');
+    const addr = p.listening ? (p.addresses[0] ?? base) : null;
+    const dlg = /** @type {HTMLDialogElement} */ ($('dialog'));
+    const form = /** @type {HTMLFormElement} */ ($('dialog-form'));
+    form.onsubmit = null;
+    form.replaceChildren(
+      h('h3', {}, 'Gerät koppeln'),
+      ...(addr ? [
+        h('img', { src: qrDataUrl(`${addr}/#pair=${p.code}`), alt: 'QR-Code zum Koppeln', style: 'display:block;margin:0 auto 10px;image-rendering:pixelated;width:200px;height:200px' }),
+        h('p', { class: 'muted', style: 'text-align:center;margin:0 0 12px' }, 'Mit der Handy-Kamera scannen – öffnet AirDeck und koppelt automatisch.'),
+      ] : []),
+      h('div', { class: 'field' }, h('label', {}, 'Kopplungscode'), h('output', {}, `${p.code.slice(0, 3)} ${p.code.slice(3)}`)),
+      h('div', { class: 'field' }, h('label', {}, 'Server-Adresse in der App'), h('output', {}, p.listening ? (p.addresses.join(' · ') || base) : 'Erst „Im Netzwerk erreichbar“ einschalten und AirDeck neu starten')),
+      h('div', { class: 'field' }, h('label', {}, 'Gültig'), h('output', {}, `einmalig, bis ${until} Uhr · Sender „${S.station.name}“`)),
+      h('div', { class: 'dialog-actions' }, h('button', { class: 'btn primary', value: 'ok', formnovalidate: true }, 'Fertig')),
+    );
+    dlg.returnValue = '';
+    dlg.showModal();
+    await new Promise((resolve) => { dlg.onclose = () => resolve(null); });
   }
   if (v.devices) await manageDevices();
 }
