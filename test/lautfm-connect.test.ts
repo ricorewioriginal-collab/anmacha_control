@@ -19,6 +19,7 @@ const mock = createServer((req, res) => {
   res.writeHead(200, { 'Content-Type': 'application/json' });
   if (req.url === '/stations') return res.end(JSON.stringify({ stations: [{ id: 7, name: 'Mein-Radio', display_name: 'Mein Radio', role: 'owner' }, { id: 9, name: 'anderes', role: 'dj' }] }));
   if (req.url === '/stations/7') return res.end(JSON.stringify({ id: 7, name: 'mein-radio' }));
+  if (req.url === '/stations/9/live') return res.end(JSON.stringify({ protocol: 'http', server: 'stream.laut.fm', port: 8000, mountpoint: '/anderes', user: 'source', password: 'geheim9' }));
   res.end('{}');
 });
 await new Promise<void>((r) => mock.listen(0, '127.0.0.1', r));
@@ -90,6 +91,25 @@ test('laut.fm verbinden: Origin wird selbst ermittelt, Station gewählt, Anfrage
     assert.equal(again.status, 200, 'erneut verbinden mit gespeichertem Token');
     assert.equal(((await (await api('POST', '/lautfm/check')).json()) as { ok: boolean }).ok, true);
     assert.equal(((await app.svc.lautfm.radioadmin('main', 'GET', '/stations/7')).status), 200);
+
+    // Nutzerbericht: eigener Sender (keine laut.fm-Identität) soll zusätzlich live auf laut.fm zu hören
+    // sein, ohne dass dieser Sender selbst unter "laut.fm" verbunden werden muss - eigenes Token je Ausgang.
+    const globalApi = (m: string, p: string, body?: unknown) => fetch(`${root}/api/v1${p}`, { method: m, headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
+    assert.equal((await globalApi('POST', '/stations', { id: 'eigener-sender', name: 'Eigener Sender' })).status, 200);
+    const eigenerApi = (m: string, p: string, body?: unknown) => fetch(`${root}/api/v1/stations/eigener-sender${p}`, { method: m, headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
+    // Ohne Angabe der Station: zwei Sender im Konto -> Liste zur Auswahl statt Raten
+    const ambiguous = (await (await eigenerApi('POST', '/lautfm/relay-output', { token: TOKEN, pageOrigin: ORIGIN })).json()) as { stations?: unknown[] };
+    assert.equal(ambiguous.stations?.length, 2);
+    // Mit gewählter Station: Ausgang wird mit den echten Live-Zugangsdaten angelegt
+    const created = await eigenerApi('POST', '/lautfm/relay-output', { token: TOKEN, pageOrigin: ORIGIN, lautfmStationId: 9 });
+    assert.equal(created.status, 200);
+    const out = (await created.json()) as { host: string; mount: string; port: number };
+    assert.equal(out.host, 'stream.laut.fm');
+    assert.equal(out.mount, '/anderes');
+    assert.equal(out.port, 8000);
+    // "eigener-sender" bekam dabei KEINE eigene laut.fm-Identität zugewiesen (bleibt ein eigener Sender)
+    const eigenerLf = (await (await eigenerApi('GET', '/lautfm')).json()) as { stationId?: number };
+    assert.equal(eigenerLf.stationId, undefined);
   } finally {
     app.shutdown();
     server.closeAllConnections();

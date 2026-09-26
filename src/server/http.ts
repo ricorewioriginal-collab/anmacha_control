@@ -569,6 +569,9 @@ export function createHttpServer(app: AirDeckApp, studioDir: string): Server {
     const prio = b.priority === undefined || b.priority === null || b.priority === '' ? undefined : Number(b.priority);
     return app.svc.lautfm.lautfmCreateOutput(c.p, sid(c), prio);
   });
+  // Eigener Sender (keine laut.fm-Identität) zusätzlich live auf laut.fm senden: eigenes Token je Aufruf,
+  // unabhängig von einer eventuellen „laut.fm“-Verbindung dieses Senders (siehe Ausgänge im Studio).
+  add('POST', '/api/v1/stations/:sid/lautfm/relay-output', 'outputs:write', async (c) => app.svc.lautfm.connectRelayOutput(c.p, sid(c), await c.body()));
 
   // --- Cardwall ---
   add('GET', '/api/v1/stations/:sid/cardwall', 'cardwall:read', (c) => app.cardwall(sid(c)));

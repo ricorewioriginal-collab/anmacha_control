@@ -1351,7 +1351,7 @@ async function editOutput(o) {
   const isNew = !o;
   const v = await formDialog(isNew ? 'Ausgang anlegen' : `Ausgang: ${o.name}`, [
     { name: 'name', label: 'Name', value: o?.name ?? 'Hauptstream', required: true },
-    { name: 'type', label: 'Typ', value: o?.type ?? 'icecast', options: [['icecast', 'Icecast (HTTP PUT)'], ['shoutcast', 'SHOUTcast v1/v2 (nur MP3/AAC)'], ...(isNew ? /** @type {[string,string][]} */ ([['lautfm', 'laut.fm (Zugang automatisch aus dem Radioadmin)']]) : [])], hint: isNew ? 'laut.fm: nur Name und Priority nötig – Server, Mount und Passwort holt AirDeck über die laut.fm-Verbindung.' : '' },
+    { name: 'type', label: 'Typ', value: o?.type ?? 'icecast', options: [['icecast', 'Icecast (HTTP PUT)'], ['shoutcast', 'SHOUTcast v1/v2 (nur MP3/AAC)'], ...(isNew ? /** @type {[string,string][]} */ ([['lautfm', 'laut.fm (Live-Zugang per Token übernehmen)']]) : [])], hint: isNew ? 'laut.fm: nur Name und Priority nötig – im nächsten Schritt einmal das laut.fm-Token eingeben, Server/Mount/Passwort holt AirDeck automatisch.' : '' },
     { name: 'host', label: 'Host', value: o?.host ?? '' },
     { name: 'port', label: 'Port', type: 'number', value: o?.port ?? 8000 },
     { name: 'mount', label: 'Mountpoint', value: o?.mount ?? '/stream' },
@@ -1368,9 +1368,7 @@ async function editOutput(o) {
   if (v.remove) {
     await run(() => api.del(url(`/outputs/${encodeURIComponent(o.id)}`)));
   } else if (v.type === 'lautfm') {
-    const r = await run(() => api.post(url('/lautfm/live-output'), { priority: v.priority }));
-    if (r) status('laut.fm-Ausgang angelegt – sendet, sobald eine Quelle auf Sendung ist');
-    else status('laut.fm-Ausgang: zuerst unter „laut.fm“ verbinden (Token + Station)', true);
+    await addLautfmRelayOutput(v.priority);
   } else {
     /** @type {Record<string, any>} */
     const body = { ...v, priority: v.priority ?? null };
@@ -1380,6 +1378,33 @@ async function editOutput(o) {
   }
   S.outputs = (await run(() => api.get(url('/outputs')))) ?? S.outputs;
   renderOutputs();
+}
+
+/**
+ * Eigener Sender soll zusätzlich live auf laut.fm zu hören sein: eigenes Token für diesen einen Ausgang,
+ * unabhängig davon, ob dieser Sender selbst schon unter „laut.fm“ verbunden ist. Bei mehreren Sendern im
+ * Konto erst wählen lassen, statt zu raten.
+ * @param {number|null} [priority]
+ */
+async function addLautfmRelayOutput(priority) {
+  const v = await formDialog('laut.fm-Zugang', [
+    { name: 'info', label: 'Hinweis', type: 'info', value: 'Das Token findest du unter radioadmin.laut.fm/tokens. Es wird nur einmalig genutzt, um die Live-Zugangsdaten zu holen – danach reicht der angelegte Ausgang für sich.' },
+    { name: 'token', label: 'laut.fm-Token', type: 'password', value: '', required: true },
+  ], 'Weiter');
+  if (!v) return;
+  const r = /** @type {any} */ (await run(() => api.post(url('/lautfm/relay-output'), { token: v.token, priority, pageOrigin: location.origin })));
+  if (!r) return;
+  if (Array.isArray(r.stations)) {
+    const list = /** @type {any[]} */ (r.stations);
+    const pick = await formDialog('laut.fm-Station wählen', [
+      { name: 'lautfmStationId', label: 'Station', value: String(list[0].id), options: list.map((s) => /** @type {[string,string]} */ ([String(s.id), `${s.displayName || s.name} (${s.role})`])) },
+    ], 'Übernehmen');
+    if (!pick) return;
+    const r2 = await run(() => api.post(url('/lautfm/relay-output'), { token: v.token, priority, pageOrigin: location.origin, lautfmStationId: Number(pick.lautfmStationId) }));
+    if (r2) status('laut.fm-Ausgang angelegt – sendet, sobald eine Quelle auf Sendung ist');
+    return;
+  }
+  status('laut.fm-Ausgang angelegt – sendet, sobald eine Quelle auf Sendung ist');
 }
 
 function renderNowPlaying() {

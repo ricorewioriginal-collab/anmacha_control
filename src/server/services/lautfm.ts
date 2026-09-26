@@ -144,25 +144,75 @@ export class LautfmService {
     return res;
   }
 
-  /**
-   * Live-Zugang der laut.fm-Station als AirDeck-Ausgang übernehmen (Icecast-Source mit optionalem ?prio=).
-   * Nutzt GET /stations/{id}/live und ggf. /live/password aus der Radioadmin-API.
-   */
-  async lautfmCreateOutput(p: Principal, stationId: string, priority?: number): Promise<unknown> {
-    const cfg = this.lautfmConfig(stationId);
-    if (!cfg.stationId) throw new AppError(409, 'no_station', 'Zuerst die laut.fm-Station wählen');
-    const live = await this.radioadmin(stationId, 'GET', `/stations/${cfg.stationId}/live`);
+  /** GET /stations/{id}/live (+ ggf. /live/password) mit einem beliebigen Token/Origin abfragen. */
+  private async fetchLive(token: string, origin: string, lautfmStationId: number): Promise<{ server: string; port?: number; mountpoint: string; user?: string; password: string; protocol?: string }> {
+    const send = async (path: string) => {
+      const r = await fetch(RADIOADMIN + path, {
+        headers: { Authorization: `Bearer ${token}`, Origin: origin, Accept: 'application/json', 'User-Agent': 'AirDeck' },
+        signal: AbortSignal.timeout(20_000),
+      }).catch(() => {
+        throw new AppError(502, 'upstream_unreachable', 'laut.fm nicht erreichbar');
+      });
+      const text = await r.text();
+      let data: unknown = text;
+      try {
+        data = JSON.parse(text);
+      } catch {
+        // Text-Antwort (z. B. Passwort)
+      }
+      return { status: r.status, data };
+    };
+    const live = await send(`/stations/${lautfmStationId}/live`);
     if (live.status !== 200 || typeof live.data !== 'object' || !live.data) throw new AppError(live.status === 403 ? 403 : 502, 'lautfm_error', `laut.fm antwortete ${live.status}`);
-    const d = live.data as { protocol?: string; server?: string; port?: number; mountpoint?: string; user?: string; password?: string; bitrate?: number };
+    const d = live.data as { protocol?: string; server?: string; port?: number; mountpoint?: string; user?: string; password?: string };
     let password = d.password;
     if (!password) {
-      const pw = await this.radioadmin(stationId, 'GET', `/stations/${cfg.stationId}/live/password`);
+      const pw = await send(`/stations/${lautfmStationId}/live/password`);
       if (pw.status === 200 && typeof pw.data === 'string') password = pw.data;
     }
     if (!d.server || !d.mountpoint || !password) throw new AppError(502, 'lautfm_incomplete', 'laut.fm lieferte keine vollständigen Live-Zugangsdaten');
+    return { server: d.server, port: d.port, mountpoint: d.mountpoint, user: d.user, password, protocol: d.protocol };
+  }
+
+  /**
+   * Live-Zugang der laut.fm-Station als AirDeck-Ausgang übernehmen (Icecast-Source mit optionalem ?prio=).
+   * Nur wenn dieser AirDeck-Sender selbst die laut.fm-Station ist (unter „laut.fm“ verbunden).
+   */
+  async lautfmCreateOutput(p: Principal, stationId: string, priority?: number): Promise<unknown> {
+    const cfg = this.lautfmConfig(stationId);
+    const token = this.lautfmToken(stationId);
+    if (!cfg.stationId || !token) throw new AppError(409, 'no_station', 'Zuerst die laut.fm-Station wählen');
+    const d = await this.fetchLive(token, cfg.origin, cfg.stationId);
     return this.app.saveOutput(p, stationId, null, {
       name: `laut.fm ${cfg.stationName ?? cfg.stationId}`, type: 'icecast', host: d.server, port: d.port ?? (d.protocol === 'https' ? 443 : 80),
-      tls: d.protocol === 'https', mount: d.mountpoint, username: d.user ?? 'source', password, priority, sourceTarget: '/live',
+      tls: d.protocol === 'https', mount: d.mountpoint, username: d.user ?? 'source', password: d.password, priority, sourceTarget: '/live',
     });
+  }
+
+  /**
+   * Eigener Sender (keine laut.fm-Identität) soll zusätzlich live auf laut.fm zu hören sein: eigenes
+   * Token, unabhängig von einer eventuellen „laut.fm“-Verbindung dieses Senders. Ohne lautfmStationId
+   * und bei mehreren Sendern im Konto liefert das die Liste zur Auswahl zurück, statt zu raten.
+   */
+  async connectRelayOutput(p: Principal, stationId: string, input: { token?: unknown; origin?: unknown; pageOrigin?: unknown; lautfmStationId?: unknown; priority?: unknown }): Promise<unknown> {
+    const token = cleanToken(input.token);
+    if (!token) throw new AppError(400, 'no_token', 'Bitte ein laut.fm-Token eingeben');
+    if (!TOKEN_RE.test(token)) throw new AppError(400, 'invalid_token', 'Das sieht nicht wie ein laut.fm-Token aus (lange Zeichenfolge ohne Leerzeichen)');
+    const found = await detectOrigin(token, [input.origin, input.pageOrigin, DEFAULT_ORIGIN, 'anmacha_dashboard']);
+    if (!found.stations) {
+      const why = found.unreachable ? 'laut.fm ist gerade nicht erreichbar – bitte später erneut versuchen.' : 'laut.fm hat das Token abgelehnt. Prüfe es unter radioadmin.laut.fm/tokens.';
+      throw new AppError(found.unreachable ? 502 : 400, found.unreachable ? 'upstream_unreachable' : 'token_rejected', why);
+    }
+    const lautfmStationId = input.lautfmStationId === undefined || input.lautfmStationId === '' ? undefined : Number(input.lautfmStationId);
+    const pick = lautfmStationId !== undefined ? found.stations.find((s) => s.id === lautfmStationId) : found.stations.length === 1 ? found.stations[0] : undefined;
+    if (!pick) return { stations: found.stations }; // Client soll eine Station wählen lassen
+    const priority = input.priority === null || input.priority === '' || input.priority === undefined ? undefined : Number(input.priority);
+    const d = await this.fetchLive(token, found.origin, pick.id);
+    const out = this.app.saveOutput(p, stationId, null, {
+      name: `laut.fm ${pick.displayName || pick.name}`, type: 'icecast', host: d.server, port: d.port ?? (d.protocol === 'https' ? 443 : 80),
+      tls: d.protocol === 'https', mount: d.mountpoint, username: d.user ?? 'source', password: d.password, priority, sourceTarget: '/live',
+    });
+    this.app.audit.write({ kind: 'lautfm', event: 'relay_output_created', actor: p.id, stationId, lautfmStationId: pick.id });
+    return out;
   }
 }
