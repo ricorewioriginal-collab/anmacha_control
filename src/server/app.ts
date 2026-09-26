@@ -25,6 +25,7 @@ import { ShoutcastOutput } from './shoutcast.ts';
 import { fetchListeners } from './stats.ts';
 import { RelayTarget } from './relay.ts';
 import { detectFfmpeg, detectFfmpegAsync, inputDeviceArgs, listInputDevices, type FfmpegInfo } from './ffmpeg.ts';
+import { IcyMetadataReader } from './icy.ts';
 import { DEFAULT_PLAYOUT, DSP_PRESETS, DeckError, EQ_BANDS, Playout } from './playout.ts';
 import { SyncManager } from './sync.ts';
 import { appVersion, type AirDeckConfig, type Mode } from './config.ts';
@@ -259,6 +260,8 @@ export class AirDeckApp {
     this.users.flush();
     for (const r of this.svc.bridges.pulls.values()) r.stop();
     this.svc.bridges.pulls.clear();
+    for (const r of this.icyReaders.values()) r.stop();
+    this.icyReaders.clear();
     if (this.tickTimer) clearInterval(this.tickTimer);
     if (this.levelTimer) clearInterval(this.levelTimer);
     for (const { playout } of this.playouts.values()) playout.stop();
@@ -818,6 +821,10 @@ export class AirDeckApp {
     return { autoFill: d.autoFill, minQueue: d.minQueue, clock: d.clock, rotation: d.rotation };
   }
 
+  /** Live aus dem ICY-Metadatenstrom eines externen Streams gelesener Titel, je Sender (nicht persistiert). */
+  private readonly icyNow = new Map<string, { artist: string; title: string } | null>();
+  private readonly icyReaders = new Map<string, IcyMetadataReader>();
+
   setNowPlaying(stationId: string, mediaId: string, deck: DeckId): NowPlaying {
     const rt = this.rt(stationId);
     const m = this.svc.media.media(stationId, mediaId);
@@ -829,21 +836,50 @@ export class AirDeckApp {
     const log = (rt.data.playLog ??= []);
     log.unshift({ at: Date.now(), mediaId, title: m.title, artist: m.artist, category: m.category });
     if (log.length > 1000) log.length = 1000;
-    const song = m.artist ? `${m.artist} - ${m.title}` : m.title;
-    for (const o of this.outputs.values()) if (o.cfg.stationId === stationId) o.updateMetadata(song);
-    this.publish('now_playing.changed', stationId, { ...rt.nowPlaying, media: m });
     this.changed();
     this.director.onTrack(stationId, m);
+    // Externer Stream: ICY-Metadaten (StreamTitle) live mitlesen, statt nur den einmalig eingetragenen
+    // Titel zu zeigen. Eigene, leichte Verbindung nur für Metadaten - die Audiodaten laufen unabhängig
+    // über ffmpeg im Sendebus weiter.
+    this.icyReaders.get(stationId)?.stop();
+    this.icyReaders.delete(stationId);
+    this.icyNow.delete(stationId);
+    if (m.url) {
+      const reader = new IcyMetadataReader(m.url, {
+        onTitle: (t) => {
+          if (rt.nowPlaying.mediaId !== mediaId) return; // inzwischen weitergeschaltet
+          this.icyNow.set(stationId, t);
+          this.publishNowPlaying(stationId, t ?? undefined);
+        },
+        log: (event, data) => this.audit.write({ kind: 'icy', event, stationId, ...data }),
+      });
+      this.icyReaders.set(stationId, reader);
+      reader.start();
+    }
+    this.publishNowPlaying(stationId);
     return rt.nowPlaying;
+  }
+
+  /** Sendet das kanonische "Jetzt läuft" (Icecast/SHOUTcast-Metadaten + now_playing.changed) - optional mit ICY-Override. */
+  private publishNowPlaying(stationId: string, icy?: { artist: string; title: string }): void {
+    const rt = this.rt(stationId);
+    const m = rt.nowPlaying.mediaId ? this.svc.media.media(stationId, rt.nowPlaying.mediaId) : null;
+    if (!m) return;
+    const shown = icy ? { ...m, artist: icy.artist, title: icy.title } : m;
+    const song = shown.artist ? `${shown.artist} - ${shown.title}` : shown.title;
+    for (const o of this.outputs.values()) if (o.cfg.stationId === stationId) o.updateMetadata(song);
+    this.publish('now_playing.changed', stationId, { ...rt.nowPlaying, media: shown });
   }
 
   nowPlaying(stationId: string): unknown {
     const rt = this.rt(stationId);
     const lib = rt.data.library;
     const next = rt.queue.list()[0];
+    const media = rt.nowPlaying.mediaId ? lib.find((m) => m.id === rt.nowPlaying.mediaId) ?? null : null;
+    const icy = this.icyNow.get(stationId);
     return {
       ...rt.nowPlaying,
-      media: rt.nowPlaying.mediaId ? lib.find((m) => m.id === rt.nowPlaying.mediaId) ?? null : null,
+      media: media && icy ? { ...media, artist: icy.artist, title: icy.title } : media,
       next: next ? lib.find((m) => m.id === next.mediaId) ?? null : null,
     };
   }
