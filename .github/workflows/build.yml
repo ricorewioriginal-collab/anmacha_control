@@ -305,8 +305,11 @@ jobs:
           set -e
           VER=$(node -p "require('./package.json').version")
           sudo apt-get update -q
-          sudo apt-get install -y -q ffmpeg
-          sudo dpkg -i "dist/airdeck_${VER}_amd64.deb"
+          # Abhängigkeiten müssen aus dem .deb selbst kommen. --no-install-recommends verhindert,
+          # dass ein versehentliches Recommends den fehlenden Encoder kaschiert.
+          sudo apt-get install -y -q --no-install-recommends "./dist/airdeck_${VER}_amd64.deb"
+          command -v ffmpeg >/dev/null || (echo "ffmpeg wurde nicht als Paket-Abhängigkeit installiert" && exit 1)
+          ffmpeg -version | head -1
           sudo systemctl is-active airdeck-server.service
           for i in $(seq 1 30); do curl -fs http://127.0.0.1:8750/api/v1/health > /dev/null && break; sleep 1; done
           curl -fs http://127.0.0.1:8750/api/v1/health | tee health.json
