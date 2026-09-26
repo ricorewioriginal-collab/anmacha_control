@@ -1398,3 +1398,88 @@ dialog h3 { font-size:17px; color:#f2fbff; }
   .studio-schedule-hours span:nth-child(even) { display:none; }
   .studio-schedule .panel-head { flex-wrap: wrap; }
 }
+
+
+/* Topbar nach Referenz: Sender · On Air · Now Playing · Uhr/System */
+.top-now {
+  flex: 1 1 420px;
+  min-width: 280px;
+  max-width: 560px;
+  height: 50px;
+  display: grid;
+  grid-template-columns: 40px minmax(0,1fr) 110px auto;
+  align-items: center;
+  gap: 9px;
+  padding: 5px 9px;
+  border: 1px solid rgba(0, 185, 255, .28);
+  border-radius: 9px;
+  background: linear-gradient(135deg, rgba(7,28,56,.9), rgba(14,16,51,.88));
+  overflow: hidden;
+}
+.top-now-cover {
+  width: 40px;
+  height: 40px;
+  border-radius: 7px;
+  background: linear-gradient(135deg, rgba(0,149,255,.24), rgba(140,50,255,.24));
+  background-size: cover;
+  background-position: center;
+  box-shadow: 0 0 12px rgba(0,168,255,.12);
+}
+.top-now-copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.top-now-copy > span {
+  color: #4ddfff;
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+}
+.top-now-copy strong,
+.top-now-copy small {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.top-now-copy strong { font-size: 13px; color: #f2f8ff; }
+.top-now-copy small { color: #9eb2ce; font-size: 10px; }
+.top-now-wave {
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+}
+.top-now-wave i {
+  width: 3px;
+  border-radius: 999px;
+  background: linear-gradient(180deg,#00e5ff,#2478ff 52%,#a63dff);
+  box-shadow: 0 0 6px rgba(0,206,255,.32);
+  animation: topwave 1.2s ease-in-out infinite alternate;
+}
+.top-now-wave i:nth-child(1), .top-now-wave i:nth-child(10) { height: 8px; }
+.top-now-wave i:nth-child(2), .top-now-wave i:nth-child(9) { height: 15px; animation-delay:.1s; }
+.top-now-wave i:nth-child(3), .top-now-wave i:nth-child(8) { height: 23px; animation-delay:.2s; }
+.top-now-wave i:nth-child(4), .top-now-wave i:nth-child(7) { height: 13px; animation-delay:.3s; }
+.top-now-wave i:nth-child(5), .top-now-wave i:nth-child(6) { height: 26px; animation-delay:.4s; }
+@keyframes topwave { from { transform:scaleY(.62); opacity:.65 } to { transform:scaleY(1); opacity:1 } }
+.top-now-time {
+  min-width: 82px;
+  color: #9eb4d2;
+  font-size: 10px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+@media (max-width: 1320px) {
+  .top-now { grid-template-columns: 38px minmax(0,1fr) 70px auto; }
+  .top-now-wave { gap:2px; }
+  .top-now-wave i { width:2px; }
+}
+@media (max-width: 1080px) {
+  .top-now { order: 8; flex-basis: 100%; max-width:none; width:100%; }
+}
+@media (max-width: 620px) {
+  .top-now { display:none; }
+}
