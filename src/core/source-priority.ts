@@ -446,16 +446,35 @@ export class SourcePriorityEngine {
     this.emit('TAKEOVER_COMPLETED', next, actor, { from: prev?.id, mode, priority: next.priority });
   }
 
+  /**
+   * Läuft die konfigurierte Fallback-Kette (fallbackSourceId -> fallbackSourceId -> ...) ab und
+   * liefert die erste erreichbare (verbundene, gesunde, nicht gesperrte) Quelle darin - unabhängig
+   * von takeoverPolicy 'auto' vs. 'manual' (eine explizit verkettete Quelle wurde bewusst als
+   * Fallback vorgesehen). Ein besuchtes-Set verhindert Endlosschleifen bei Ringkonfigurationen
+   * (A -> B -> A); ein zusätzliches Hop-Limit schützt selbst dann, wenn diese Logik künftig anders
+   * implementiert würde.
+   */
+  private walkFallbackChain(stationId: string, target: string, startId: string): Source | undefined {
+    const pool = this.candidates(stationId, target);
+    const visited = new Set<string>([startId]);
+    let current = this.sources.get(startId);
+    let hops = 0;
+    while (current?.fallbackSourceId && hops++ < 32) {
+      if (visited.has(current.fallbackSourceId)) break; // Ringkette entdeckt - abbrechen statt endlos zu kreisen
+      const next = this.sources.get(current.fallbackSourceId);
+      if (!next) break;
+      visited.add(next.id);
+      if (next.takeoverPolicy !== 'never' && pool.some((c) => c.id === next.id)) return next;
+      current = next;
+    }
+    return undefined;
+  }
+
   private fallback(stationId: string, target: string, from: SourceConfig, actor: Actor): void {
     this.emit('FALLBACK_STARTED', from, actor);
-    // Zuerst die explizit konfigurierte Fallback-Quelle, sonst beste verfügbare Priorität.
-    const preferred = from.fallbackSourceId ? this.sources.get(from.fallbackSourceId) : undefined;
-    const pool = this.candidates(stationId, target);
-    // Manuelle Quellen nur, wenn sie ausdrücklich als Fallback eingetragen sind.
-    const next =
-      preferred && pool.some((c) => c.id === preferred.id) && preferred.takeoverPolicy !== 'never'
-        ? preferred
-        : pool.find((c) => c.takeoverPolicy === 'auto');
+    // Zuerst die konfigurierte Fallback-Kette (mehrstufig), sonst beste verfügbare Priorität.
+    const chained = this.walkFallbackChain(stationId, target, from.id);
+    const next = chained ?? this.candidates(stationId, target).find((c) => c.takeoverPolicy === 'auto');
     if (!next) {
       this.emit('OFF_AIR', from, actor, { reason: 'no_fallback_source' });
       return;

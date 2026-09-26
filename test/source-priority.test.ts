@@ -141,6 +141,42 @@ test('konfigurierte Fallback-Quelle hat Vorrang', () => {
   assert.equal(e.activeFor('st1', '/live')?.id, 'emergency');
 });
 
+test('Fallback-Kette läuft über mehrere Stufen, wenn die erste Stufe nicht erreichbar ist', () => {
+  const { e } = setup();
+  // "manualStudio" ist die vom Betreiber gewünschte 2. Stufe, aber (noch) nicht verbunden.
+  // "auto"-Quellen mit schlechterer Priorität dürfen die explizit verkettete, gesunde
+  // "emergency"-Quelle (takeoverPolicy 'manual') nicht verdrängen - vorher wurde bei nicht
+  // erreichbarer 1. Stufe komplett auf reine Prioritäts-Reihenfolge unter 'auto'-Quellen
+  // zurückgefallen, wodurch eine verkettete 'manual'-Quelle nie gefunden wurde.
+  e.addSource(cfg('live', 1, { type: 'live_studio', fallbackSourceId: 'manualStudio' }));
+  e.addSource(cfg('manualStudio', 50, { takeoverPolicy: 'manual', fallbackSourceId: 'emergency' }));
+  e.addSource(cfg('emergency', 100, { takeoverPolicy: 'manual' }));
+  e.connect('live');
+  e.connect('emergency');
+  // manualStudio bewusst NICHT verbunden - Betreiber ist (noch) nicht am Reserve-Studio.
+  e.fail('live', 'encoder lost');
+  assert.equal(e.activeFor('st1', '/live')?.id, 'emergency', 'Kette wird bis zur erreichbaren Stufe durchlaufen');
+});
+
+test('Ringkette in der Fallback-Konfiguration führt nicht zur Endlosschleife', () => {
+  const { e, events } = setup();
+  // Fehlkonfiguration: a -> b -> a. Beide sind nicht erreichbar (nicht verbunden), eine echte
+  // 'auto'-Quelle mit niedrigerer Priorität muss trotzdem gefunden werden statt dass die Engine
+  // in der Ringkette hängen bleibt.
+  e.addSource(cfg('live', 1, { fallbackSourceId: 'a' }));
+  e.addSource(cfg('a', 20, { takeoverPolicy: 'manual', fallbackSourceId: 'b' }));
+  e.addSource(cfg('b', 21, { takeoverPolicy: 'manual', fallbackSourceId: 'a' }));
+  e.addSource(cfg('auto', 90));
+  e.connect('live');
+  e.connect('auto');
+  // a und b bewusst nicht verbunden.
+  const start = Date.now();
+  e.fail('live', 'encoder lost');
+  assert.ok(Date.now() - start < 1000, 'kein Hängenbleiben in der Ringkette');
+  assert.equal(e.activeFor('st1', '/live')?.id, 'auto');
+  assert.ok(events.some((x) => x.type === 'FALLBACK_COMPLETED' && x.sourceId === 'auto'));
+});
+
 test('ohne Fallback-Quelle wird OFF_AIR gemeldet', () => {
   const { e, events } = setup();
   e.addSource(cfg('live', 1));
