@@ -130,6 +130,9 @@ button:disabled { opacity: .45; cursor: not-allowed; box-shadow: none !important
 .panel-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
 .panel-head h2 { margin-right: auto; }
 .panel-head input[type=search], .panel-head select { background: var(--panel-2); border: 1px solid var(--line); border-radius: 7px; padding: 3px 7px; min-width: 0; max-width: 150px; }
+.drop-hint { border: 1px dashed var(--line); color: var(--muted); font-size: 13px; padding: 10px 12px; text-align: center; }
+.drop-hint.drop { outline: 2px dashed var(--primary); border-style: solid; }
+.plain-list { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
 .row-btns { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
 .pill { font-size: 10px; font-weight: 750; letter-spacing: .05em; text-transform: uppercase; padding: 2px 7px; border-radius: 999px; background: #1e2c49; color: var(--muted); white-space: nowrap; }
 .pill.active, .pill.connected, .pill.running { background: rgba(34, 197, 94, .18); color: #86efac; }
