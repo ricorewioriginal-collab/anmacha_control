@@ -107,6 +107,26 @@ export function dspFilter(d: DspOptions): string | null {
 
 const RAW_IN = ['-f', 's16le', '-ar', String(SAMPLE_RATE), '-ch_layout', 'stereo'];
 
+/** AirDeckCast-Zusatzprofil: eigenes Format/Bitrate, derselbe Programmbus wie der Hauptencoder. */
+export interface StreamProfileOpts {
+  format: StreamFormat;
+  bitrateKbps: number;
+  mp3Mode?: 'cbr' | 'vbr';
+  mp3Quality?: number;
+}
+
+export interface StreamProfileHooks {
+  onStreamStart(contentType: string): void;
+  onStreamData(chunk: Buffer): void;
+  onStreamStop(): void;
+}
+
+interface StreamProfileRuntime {
+  opts: StreamProfileOpts;
+  hooks: StreamProfileHooks;
+  proc: ChildProcess | null;
+}
+
 export interface PlayoutHooks {
   nextTrack(): MediaItem | null;
   mediaPath(m: MediaItem): string;
@@ -310,6 +330,9 @@ export class Playout {
   private readonly live = new Map<string, LiveChannel>();
   private program: string | null = null;
   private automationOn = true;
+  /** AirDeckCast: zusätzliche Encoder-Profile (z. B. "Mobile AAC 64k"), alle aus demselben PCM-Programmbus
+   *  gespeist wie der Hauptencoder - ein Programmbus, mehrere Ausgänge, keine zweite Playout-Engine. */
+  private readonly profiles = new Map<string, StreamProfileRuntime>();
 
   constructor(ffmpeg: string, hooks: PlayoutHooks, opts: Partial<PlayoutOptions> = {}, extras: PlayoutExtras = {}) {
     this.ffmpeg = ffmpeg;
@@ -329,6 +352,7 @@ export class Playout {
     this.startedAt = Date.now();
     this.silence = new SilenceDetector({ thresholdDb: this.opts.silenceThresholdDb, durationMs: this.opts.silenceMs });
     this.startEncoder();
+    for (const [id, rt] of this.profiles) this.startProfileEncoder(id, rt);
     if (this.opts.monitor) this.startMonitor();
     if (this.opts.inputDevice) this.startInput();
     this.t0 = performance.now();
@@ -355,6 +379,12 @@ export class Playout {
     this.encoderState = 'stopped';
     enc?.stdin?.end();
     setTimeout(() => enc?.kill('SIGKILL'), 1000).unref();
+    for (const rt of this.profiles.values()) {
+      const p = rt.proc;
+      rt.proc = null;
+      p?.stdin?.end();
+      setTimeout(() => p?.kill('SIGKILL'), 1000).unref();
+    }
     this.monitorProc?.kill('SIGKILL');
     this.monitorProc = null;
     this.stopInput();
@@ -689,14 +719,18 @@ export class Playout {
     return undefined;
   }
 
+  /** Codec-Argumente für ein Encoder-Profil (Hauptencoder oder AirDeckCast-Zusatzprofil) - eine Umsetzung. */
+  private codecArgs(opts: StreamProfileOpts): string[] {
+    const br = `${opts.bitrateKbps}k`;
+    return opts.format === 'opus' ? ['-c:a', 'libopus', '-b:a', br, '-f', 'ogg', '-page_duration', '200000']
+      : opts.format === 'aac' ? ['-c:a', 'aac', '-b:a', br, '-f', 'adts']
+      : opts.mp3Mode === 'vbr'
+        ? ['-c:a', 'libmp3lame', '-q:a', String(Math.max(0, Math.min(9, opts.mp3Quality ?? 2))), '-f', 'mp3']
+        : ['-c:a', 'libmp3lame', '-b:a', br, '-compression_level', String(Math.max(0, Math.min(9, opts.mp3Quality ?? 2))), '-f', 'mp3'];
+  }
+
   private startEncoder(): void {
-    const br = `${this.opts.bitrateKbps}k`;
-    const codec =
-      this.opts.format === 'opus' ? ['-c:a', 'libopus', '-b:a', br, '-f', 'ogg', '-page_duration', '200000']
-      : this.opts.format === 'aac' ? ['-c:a', 'aac', '-b:a', br, '-f', 'adts']
-      : this.opts.mp3Mode === 'vbr'
-        ? ['-c:a', 'libmp3lame', '-q:a', String(Math.max(0, Math.min(9, this.opts.mp3Quality ?? 2))), '-f', 'mp3']
-        : ['-c:a', 'libmp3lame', '-b:a', br, '-compression_level', String(Math.max(0, Math.min(9, this.opts.mp3Quality ?? 2))), '-f', 'mp3'];
+    const codec = this.codecArgs(this.opts);
     const af = dspFilter(this.opts.dsp);
     const enc = spawn(
       this.ffmpeg,
@@ -720,6 +754,51 @@ export class Playout {
       this.hooks.log('encoder_crashed', { code, stderr: err.trim() });
       this.hooks.onStreamStop();
       setTimeout(() => this.running && !this.encoder && this.startEncoder(), 1000).unref();
+    });
+  }
+
+  /**
+   * AirDeckCast: ein zusätzliches Encoder-Profil starten (z. B. "Mobile AAC 64k"), gespeist aus
+   * demselben Programmbus wie der Hauptencoder - ein Mix, mehrere Ausgänge. Läuft neben dem
+   * Hauptencoder, unabhängig davon, ob dieser gerade neu startet.
+   */
+  addProfile(id: string, opts: StreamProfileOpts, hooks: StreamProfileHooks): void {
+    this.removeProfile(id);
+    const rt: StreamProfileRuntime = { opts, hooks, proc: null };
+    this.profiles.set(id, rt);
+    if (this.running) this.startProfileEncoder(id, rt);
+  }
+
+  removeProfile(id: string): void {
+    const rt = this.profiles.get(id);
+    if (!rt) return;
+    this.profiles.delete(id);
+    rt.proc?.kill('SIGKILL');
+  }
+
+  listProfiles(): string[] {
+    return [...this.profiles.keys()];
+  }
+
+  private startProfileEncoder(id: string, rt: StreamProfileRuntime): void {
+    const codec = this.codecArgs(rt.opts);
+    const proc = spawn(
+      this.ffmpeg,
+      ['-hide_banner', '-loglevel', 'error', '-nostdin', ...RAW_IN, '-i', 'pipe:0', ...codec, '-flush_packets', '1', 'pipe:1'],
+      { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true },
+    );
+    rt.proc = proc;
+    rt.hooks.onStreamStart(CONTENT_TYPE[rt.opts.format]);
+    proc.stdout!.on('data', (d: Buffer) => rt.hooks.onStreamData(d));
+    proc.stderr!.on('data', () => {});
+    proc.stdin!.on('error', () => {});
+    proc.on('error', (e) => this.hooks.log('profile_encoder_error', { profile: id, message: e.message }));
+    proc.on('close', () => {
+      if (rt.proc !== proc) return;
+      rt.proc = null;
+      if (!this.running || !this.profiles.has(id)) return;
+      rt.hooks.onStreamStop();
+      setTimeout(() => this.running && this.profiles.has(id) && !rt.proc && this.startProfileEncoder(id, rt), 1000).unref();
     });
   }
 
@@ -889,6 +968,10 @@ export class Playout {
     const enc = this.encoder;
     const pcm = busToS16(bus);
     if (enc?.stdin && enc.stdin.writableLength < 2 * 1024 * 1024) enc.stdin.write(pcm);
+    for (const rt of this.profiles.values()) {
+      const p = rt.proc;
+      if (p?.stdin && p.stdin.writableLength < 2 * 1024 * 1024) p.stdin.write(pcm);
+    }
     const mon = this.monitorProc;
     if (mon?.stdin && mon.stdin.writableLength < 512 * 1024) mon.stdin.write(pcm);
 
