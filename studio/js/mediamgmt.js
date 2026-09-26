@@ -5,8 +5,15 @@
 // bleibt unverändert bestehen; diese Ansicht ergänzt Suche/Filter/Sortierung über die ganze Bibliothek,
 // Mehrfach-Upload/Ordner-Import, Metadaten-Bearbeitung, Integritätsprüfung (fehlende Dateien, Duplikate,
 // Relink) sowie Aktionen zum Senden an Deck/Queue/Playlist/Cardwall.
+//
+// Abschnitt 10 (Nextcloud): Nextcloud soll NICHT als isoliertes Halb-Feature danebenstehen, sondern
+// als weitere Quelle direkt hier auswählbar sein ("AirDeck-Bibliothek" und "Nextcloud" nebeneinander,
+// über Reiter). Die eigenständige Nextcloud-Ansicht (Verbindung einrichten, eigener Nav-Punkt) bleibt
+// zusätzlich bestehen; hier wird ihre bereits vorhandene Browse-/Import-Logik nur eingebettet
+// (mountNextcloud direkt wiederverwendet, keine zweite Nextcloud-Anbindung).
 
 import { $, CATEGORY_STYLE, clockTime, fmt, formDialog, h, mediaTitle, run, status } from './ui.js';
+import { mountNextcloud } from './nextcloud.js';
 
 const CATEGORY_LABEL = /** @type {Record<string,string>} */ ({
   music: 'Musik', jingle: 'Jingle', sweeper: 'Sweeper', station_id: 'Station-ID', drop: 'Drop', news: 'Nachrichten',
@@ -32,6 +39,15 @@ export function mountMediaManagement(root, ctx) {
   let folder = '';
   let sort = 'added';
   const selected = new Set();
+  // Eigener Zwischenspeicher statt direkt ctx.library() (= S.library in app.js): S.library wird bei
+  // 'library.changed' erst asynchron nachgeladen, NACHDEM alle Views (also auch dieser hier) informiert
+  // wurden - ein sofortiges refresh() aus onEvent() würde sonst mit veralteten Daten rendern.
+  let items = ctx.library();
+
+  async function reload() {
+    items = (await run(() => ctx.api.get(ctx.url('/media')))) ?? items;
+    refresh();
+  }
 
   async function pickCart(media) {
     const carts = await run(() => ctx.api.get(ctx.url('/cardwall')));
@@ -68,7 +84,7 @@ export function mountMediaManagement(root, ctx) {
       h('button', { title: 'An Cardwall', onclick: () => pickCart(m) }, '＋C'),
       h('button', { title: 'Metadaten bearbeiten', onclick: () => editMeta(m) }, '✎'),
       h('button', { title: 'Vorhören', onclick: () => preview(m) }, '▶'),
-      h('button', { title: 'Löschen', onclick: () => confirm(`„${m.title}“ endgültig löschen?`) && run(() => ctx.api.del(ctx.url(`/media/${encodeURIComponent(m.id)}`)).then(refresh)) }, '✕'));
+      h('button', { title: 'Löschen', onclick: () => confirm(`„${m.title}“ endgültig löschen?`) && run(() => ctx.api.del(ctx.url(`/media/${encodeURIComponent(m.id)}`)).then(reload)) }, '✕'));
   }
 
   /** @type {HTMLAudioElement|null} */ let previewEl = null;
@@ -92,7 +108,7 @@ export function mountMediaManagement(root, ctx) {
       { name: 'cueOutMs', label: 'Cue-Out (ms)', type: 'number', value: m.cueOutMs ?? '' },
       { name: 'gainDb', label: 'Gain (dB)', type: 'number', value: m.gainDb ?? '' },
     ]);
-    if (v) await run(() => ctx.api.patch(ctx.url(`/media/${encodeURIComponent(m.id)}`), v).then(refresh));
+    if (v) await run(() => ctx.api.patch(ctx.url(`/media/${encodeURIComponent(m.id)}`), v).then(reload));
   }
 
   function row(m) {
@@ -135,7 +151,7 @@ export function mountMediaManagement(root, ctx) {
     await run(() => ctx.api.post(ctx.url(`/media/${encodeURIComponent(id)}/relink`), { file }));
     status('Titel neu verknüpft');
     await refreshIntegrity();
-    refresh();
+    await reload();
   }
 
   const integrityBox = h('div', { class: 'panel', style: 'margin-top:12px' },
@@ -156,8 +172,8 @@ export function mountMediaManagement(root, ctx) {
   const sortSel = h('select', {}, h('option', { value: 'added' }, 'Neueste zuerst'), h('option', { value: 'title' }, 'Titel A–Z'), h('option', { value: 'artist' }, 'Interpret A–Z'), h('option', { value: 'duration' }, 'Länge'));
   sortSel.addEventListener('change', () => { sort = /** @type {HTMLSelectElement} */ (sortSel).value; refresh(); });
 
-  const fileInput = /** @type {HTMLInputElement} */ (h('input', { type: 'file', multiple: true, accept: 'audio/*', hidden: true, onchange: (/** @type {Event} */ e) => { const inp = /** @type {HTMLInputElement} */ (e.target); if (inp.files?.length) ctx.upload([...inp.files]).then(refresh).finally(() => (inp.value = '')); } }));
-  const folderInput = /** @type {HTMLInputElement} */ (h('input', { type: 'file', multiple: true, webkitdirectory: true, hidden: true, onchange: (/** @type {Event} */ e) => { const inp = /** @type {HTMLInputElement} */ (e.target); if (inp.files?.length) ctx.upload([...inp.files]).then(refresh).finally(() => (inp.value = '')); } }));
+  const fileInput = /** @type {HTMLInputElement} */ (h('input', { type: 'file', multiple: true, accept: 'audio/*', hidden: true, onchange: (/** @type {Event} */ e) => { const inp = /** @type {HTMLInputElement} */ (e.target); if (inp.files?.length) ctx.upload([...inp.files]).then(reload).finally(() => (inp.value = '')); } }));
+  const folderInput = /** @type {HTMLInputElement} */ (h('input', { type: 'file', multiple: true, webkitdirectory: true, hidden: true, onchange: (/** @type {Event} */ e) => { const inp = /** @type {HTMLInputElement} */ (e.target); if (inp.files?.length) ctx.upload([...inp.files]).then(reload).finally(() => (inp.value = '')); } }));
 
   const dropZone = h('div', { class: 'panel drop-hint', id: 'mm-drop' }, 'Dateien oder Ordner per Ziehen & Ablegen hierher, oder: ',
     h('button', { class: 'btn small', onclick: () => fileInput.click() }, 'Dateien wählen …'),
@@ -167,7 +183,7 @@ export function mountMediaManagement(root, ctx) {
   dropZone.addEventListener('drop', (e) => {
     e.preventDefault();
     dropZone.classList.remove('drop');
-    if (e.dataTransfer?.files.length) ctx.upload([...e.dataTransfer.files]).then(refresh);
+    if (e.dataTransfer?.files.length) ctx.upload([...e.dataTransfer.files]).then(reload);
   });
 
   const bulkBar = h('div', { class: 'row', id: 'mm-bulk' },
@@ -175,38 +191,71 @@ export function mountMediaManagement(root, ctx) {
       if (!selected.size || !confirm(`${selected.size} Titel endgültig löschen?`)) return;
       for (const id of [...selected]) await run(() => ctx.api.del(ctx.url(`/media/${encodeURIComponent(id)}`)));
       selected.clear();
-      refresh();
+      await reload();
     } }, 'Auswahl löschen'));
 
   function refresh() {
-    const list = ctx.library()
+    const list = items
       .filter((m) => (!cat || m.category === cat) && (!folder || (m.folder ?? '') === folder) && (!q || `${m.title} ${m.artist} ${m.folder ?? ''} ${m.album ?? ''}`.toLowerCase().includes(q.toLowerCase())))
       .sort(SORTS[sort])
       .slice(0, 1000);
     tbody.replaceChildren(...list.map(row));
-    const total = ctx.library().length;
-    $('mm-count') && ($('mm-count').textContent = `${list.length} von ${total} Titel${selected.size ? ` · ${selected.size} ausgewählt` : ''}`);
+    $('mm-count') && ($('mm-count').textContent = `${list.length} von ${items.length} Titel${selected.size ? ` · ${selected.size} ausgewählt` : ''}`);
+  }
+
+  // ---------- Quellen-Reiter: AirDeck-Bibliothek / Nextcloud (Abschnitt 10, nebeneinander statt isoliert) ----------
+
+  let source = 'library';
+  const nextcloudPane = h('div', { hidden: true });
+  let nextcloudView = null;
+
+  const libraryPane = h('div', {},
+    dropZone,
+    h('div', { class: 'row', style: 'margin:8px 0' }, searchInput, catSel, folderSel, sortSel),
+    bulkBar,
+    h('div', { class: 'table-wrap', id: 'mm-drop-table' },
+      h('table', { class: 'list' },
+        h('thead', {}, h('tr', {}, h('th', {}), h('th', {}, 'Titel'), h('th', {}, 'Interpret'), h('th', {}, 'Kategorie'), h('th', {}, 'Ordner'), h('th', {}, 'Länge'), h('th', {}, 'Format'), h('th', {}, 'Lautheit'), h('th', {}, 'Aktionen'))),
+        tbody)),
+    integrityBox);
+
+  function tabBtn(id, label) {
+    return h('button', { class: `btn small${source === id ? ' primary' : ''}`, onclick: () => selectSource(id) }, label);
+  }
+  const tabBar = h('div', { class: 'row' });
+  function renderTabs() {
+    tabBar.replaceChildren(tabBtn('library', 'AirDeck-Bibliothek'), tabBtn('nextcloud', 'Nextcloud'));
+  }
+
+  async function selectSource(id) {
+    source = id;
+    renderTabs();
+    libraryPane.hidden = id !== 'library';
+    nextcloudPane.hidden = id !== 'nextcloud';
+    if (id === 'nextcloud') {
+      if (!nextcloudView) nextcloudView = mountNextcloud(nextcloudPane, ctx);
+      await nextcloudView.show();
+    }
   }
 
   async function show() {
     const folders = await ctx.folders();
     const cur = /** @type {HTMLSelectElement} */ (folderSel).value;
     folderSel.replaceChildren(h('option', { value: '' }, 'Alle Ordner'), ...folders.map((f) => h('option', { value: f, selected: f === cur }, f)));
+    renderTabs();
     root.replaceChildren(
       h('section', { class: 'panel' },
         h('div', { class: 'panel-head' }, h('h2', {}, 'Medienverwaltung'), h('span', { class: 'muted', id: 'mm-count' }, '')),
-        dropZone,
-        h('div', { class: 'row', style: 'margin:8px 0' }, searchInput, catSel, folderSel, sortSel),
-        bulkBar,
-        h('div', { class: 'table-wrap', id: 'mm-drop-table' },
-          h('table', { class: 'list' },
-            h('thead', {}, h('tr', {}, h('th', {}), h('th', {}, 'Titel'), h('th', {}, 'Interpret'), h('th', {}, 'Kategorie'), h('th', {}, 'Ordner'), h('th', {}, 'Länge'), h('th', {}, 'Format'), h('th', {}, 'Lautheit'), h('th', {}, 'Aktionen'))),
-            tbody)),
-      ),
-      integrityBox);
+        tabBar,
+        libraryPane,
+        nextcloudPane));
+    libraryPane.hidden = source !== 'library';
+    nextcloudPane.hidden = source !== 'nextcloud';
+    items = ctx.library();
     refresh();
     void refreshIntegrity();
+    if (source === 'nextcloud' && nextcloudView) await nextcloudView.show();
   }
 
-  return { show, onEvent: (/** @type {string} */ kind) => { if (kind === 'library.changed') refresh(); } };
+  return { show, onEvent: (/** @type {string} */ kind) => { if (kind === 'library.changed') void reload(); } };
 }
