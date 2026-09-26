@@ -7,7 +7,7 @@
 //   … --new-admin-token                   neues Admin-Token ausgeben
 
 import { spawn } from 'node:child_process';
-import { createWriteStream, existsSync, mkdirSync, renameSync, statSync } from 'node:fs';
+import { createWriteStream, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync } from 'node:fs';
 import { format } from 'node:util';
 import { randomBytes } from 'node:crypto';
 import { createServer } from 'node:net';
@@ -210,6 +210,36 @@ async function main(): Promise<void> {
     console.log(`\n  Neues Admin-Token: ${token}\n`);
     process.exit(0);
   }
+
+  // Windows-Installer kann bei einer frischen Installation einen eigenen Admin-Zugang vorbereiten.
+  // Die Datei enthält das Passwort nur bis zum ersten Start: sofort einlesen, als scrypt-Hash im
+  // UserStore speichern und anschließend sicher aus dem Datenordner entfernen.
+  const installerBootstrap = join(dataDir, 'installer-bootstrap.json');
+  if (app.users.count === 0 && existsSync(installerBootstrap)) {
+    try {
+      const b = JSON.parse(readFileSync(installerBootstrap, 'utf8').replace(/^\uFEFF/, '')) as {
+        username?: string; name?: string; password?: string;
+      };
+      if (b.username && b.password) {
+        await app.users.create({
+          username: String(b.username),
+          name: String(b.name || 'Administrator'),
+          password: String(b.password),
+          roles: ['admin'],
+          stationIds: ['*'],
+          mustChangePassword: false,
+        });
+        console.log(`Administrator „${String(b.username)}“ aus der Installer-Konfiguration angelegt.`);
+      }
+    } catch (err) {
+      console.warn('Installer-Admin konnte nicht angelegt werden:', (err as Error).message);
+    } finally {
+      // Klartext-Zugangsdaten niemals liegen lassen – bei einem Fehler kann der Setup-Assistent
+      // stattdessen ein Konto erzeugen.
+      rmSync(installerBootstrap, { force: true });
+    }
+  }
+
   // Eigenbetrieb (Server/Docker): erstes Administrator-Konto mit Einmal-Passwort anlegen
   if (config.mode !== 'local' && app.users.count === 0) {
     const pw = randomBytes(9).toString('base64url');
