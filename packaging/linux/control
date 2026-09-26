@@ -3,8 +3,7 @@ Version: __VERSION__
 Section: sound
 Priority: optional
 Architecture: amd64
-Depends: adduser
-Recommends: ffmpeg
+Depends: adduser, ffmpeg
 Maintainer: AnMaCha Radioproduktion & RicoReWi <231153075+ricorewioriginal-collab@users.noreply.github.com>
 Homepage: https://github.com/ricorewioriginal-collab/anmacha_control
 Description: AirDeck - Radio-Automation & Live-Broadcast (Server)
@@ -12,7 +11,8 @@ Description: AirDeck - Radio-Automation & Live-Broadcast (Server)
  Live-Sendungen, laut.fm und Icecast/AzuraCast-Bruecken. Dieses Paket installiert die
  Engine als systemd-Dienst "airdeck-server" (Studio per Browser, Standard-Port 8750).
  .
- Ohne installiertes ffmpeg laeuft der Dienst weiter, nur ohne 24/7-Automation/Encoder;
- "apt install ffmpeg" reicht danach, ein Neustart erkennt es automatisch.
+ ffmpeg ist eine Pflichtabhaengigkeit des Serverpakets und wird durch die
+ Paketverwaltung automatisch installiert. Dadurch stehen Automation, Encoder und
+ Audioverarbeitung auch bei Installation mit --no-install-recommends zur Verfuegung.
  .
  Hobbyprojekt, powered by AnMaCha Radioproduktion & RicoReWi, ohne Gewaehr.
