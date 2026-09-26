@@ -304,10 +304,10 @@ jobs:
         run: |
           docker compose -f packaging/demo/docker-compose.demo.yml build
           sh packaging/demo/reset-demo.sh
-          LOGIN=$(curl -fs -X POST -H 'Content-Type: application/json' \
-            -d '{"username":"demo","password":"airdeck-demo"}' \
-            http://127.0.0.1:8751/api/v1/auth/login)
-          TOKEN=$(printf '%s' "$LOGIN" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>process.stdout.write(JSON.parse(s).token||''))")
+          # Fuer die Dokumentationsbilder wird nur innerhalb des isolierten CI-Containers der
+          # globale Bootstrap-Token benutzt, damit auch Admin-Ansichten fotografiert werden koennen.
+          # Der oeffentliche Demo-Login bleibt unveraendert demo / airdeck-demo und senderbeschraenkt.
+          TOKEN=$(docker compose -f packaging/demo/docker-compose.demo.yml logs airdeck-demo 2>/dev/null | grep -o 'ad_[A-Za-z0-9_-]*' | head -1)
           test -n "$TOKEN"
           echo "AIRDECK_SCREENSHOT_TOKEN=$TOKEN" >> "$GITHUB_ENV"
       - name: README-Screenshots neu erzeugen
@@ -330,12 +330,18 @@ jobs:
         run: |
           git config user.name "AirDeck CI"
           git config user.email "actions@users.noreply.github.com"
-          git add docs/screenshots
-          if git diff --cached --quiet; then
-            echo "Screenshots bereits aktuell."
+          git fetch origin "$GITHUB_REF_NAME"
+          REMOTE=$(git rev-parse "origin/$GITHUB_REF_NAME")
+          if [ "$REMOTE" != "$GITHUB_SHA" ]; then
+            echo "Neuerer Commit $REMOTE vorhanden – dieser alte Lauf darf keine Screenshots zurueckschreiben."
           else
-            git commit -m "README: aktuelle UI-Screenshots [screenshots]"
-            git push
+            git add docs/screenshots
+            if git diff --cached --quiet; then
+              echo "Screenshots bereits aktuell."
+            else
+              git commit -m "README: aktuelle UI-Screenshots [screenshots]"
+              git push
+            fi
           fi
           docker compose -f packaging/demo/docker-compose.demo.yml down -v
 
