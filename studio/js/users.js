@@ -14,8 +14,11 @@ export function mountUsers(root, ctx) {
     const label = (/** @type {string} */ r) => roles.find((x) => x.id === r)?.label ?? r;
     const stationName = (/** @type {string} */ id) => (id === '*' ? 'alle Sender' : ctx.stations().find((s) => s.id === id)?.name ?? id);
     root.replaceChildren(
-      h('div', { class: 'lf-head' }, h('div', { class: 'lf-title' }, h('strong', {}, 'Benutzer & Rollen'), h('span', { class: 'muted' }, ` · ${d.users.length} Konten`)),
-        h('button', { class: 'btn small primary', onclick: () => edit(null) }, '＋ Benutzer')),
+      h('div', { class: 'admin-hero' },
+        h('div', {}, h('span', { class: 'ov-kicker' }, 'VERWALTUNG'), h('h1', {}, 'Benutzer & Rollen'), h('p', {}, 'Zugänge, Rollen und Senderrechte zentral verwalten.')),
+        h('div', { class: 'admin-hero-actions' },
+          h('span', { class: 'admin-count' }, `${d.users.length} Konten`),
+          h('button', { class: 'btn small primary', onclick: () => edit(null) }, '＋ Benutzer'))),
       h('section', { class: 'panel' }, h('div', { class: 'panel-head' }, h('h2', {}, 'Rollen')),
         ...roles.map((r) => h('div', { class: 'kv' }, h('span', {}, h('b', {}, r.label)), h('span', { class: 'muted small' }, r.scopes.includes('*') ? 'alle Rechte, Benutzer, Einstellungen' : r.scopes.filter((/** @type {string} */ s) => s.endsWith(':write') || s.endsWith(':trigger')).map((/** @type {string} */ s) => s.split(':')[0]).join(', ') || 'nur lesen'))),
         h('p', { class: 'muted' }, 'laut.fm-Sender melden sich automatisch über das Radioadmin-Token an. Für die App und Integrationen gibt es zusätzlich Verbindungslinks bzw. API-Tokens.')),
