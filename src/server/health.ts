@@ -147,8 +147,8 @@ export class HealthManager {
     ];
   }
 
-  streamState(): 'connected' | 'connecting' | 'error' | 'idle' {
-    const outs = this.src.outputs();
+  streamState(stationIds: (id: string) => boolean = () => true): 'connected' | 'connecting' | 'error' | 'idle' {
+    const outs = this.src.outputs().filter((o) => stationIds(o.stationId));
     if (outs.some((o) => o.status === 'connected')) return 'connected';
     if (outs.some((o) => o.status === 'error' || o.status === 'unsupported')) return 'error';
     if (outs.some((o) => o.status === 'connecting')) return 'connecting';
@@ -196,7 +196,7 @@ export class HealthManager {
   }
 
   stream(stationIds: (id: string) => boolean): unknown {
-    return { state: this.streamState(), outputs: this.src.outputs().filter((o) => stationIds(o.stationId)) };
+    return { state: this.streamState(stationIds), outputs: this.src.outputs().filter((o) => stationIds(o.stationId)) };
   }
 
   ai(): unknown {
