@@ -176,9 +176,13 @@ export function mountPlanning(root, ctx) {
             h('td', {}, i.label), h('td', {}, i.message))), 'Keine Einträge im Sendeplan.'));
     const preflightPanel = panel('Preflight-Prüfung', [h('button', { class: 'btn small primary', onclick: runPreflight }, 'Jetzt prüfen')], preflightBody);
     // --- Sendeplan ---
-    const sched = panel('Sendeplan', [h('button', { class: 'btn small primary', onclick: () => editPlan() }, '＋ Sendung')],
+    const sched = panel('Sendeplan', [
+      h('span', { class: 'planning-now-pill' }, plan.activePlanId ? '● Sendung aktiv' : '○ Kein aktiver Block'),
+      h('button', { class: 'btn small primary', onclick: () => editPlan() }, '＋ Sendung')
+    ],
       h('div', {},
-        h('p', { class: 'muted', style: 'margin:0 0 8px' }, 'Sendung ziehen zum Verschieben (Zeit/Tag), unteren Rand ziehen für die Dauer, Playlist auf ein freies Feld ziehen für eine neue Sendung.'),
+        h('div', { class: 'planning-schedule-help' },
+          h('span', {}, 'Drag & Drop: Sendungen verschieben · unteren Rand ziehen: Dauer · Playlist auf freie Zeit ziehen: neue Sendung')),
         schedGrid(),
         h('div', { style: 'margin-top:12px' }, table(['Sendung', 'Tage', 'Zeit', 'Playlist', ''], plan.plans.map((/** @type {any} */ p) => h('tr', { class: p.id === plan.activePlanId ? 'active-row' : '' },
           h('td', {}, p.label, p.id === plan.activePlanId ? h('span', { class: 'pill active', style: 'margin-left:6px' }, 'läuft') : null),
@@ -217,7 +221,13 @@ export function mountPlanning(root, ctx) {
       table(['Zeit', 'Titel', 'Art'], history.slice(0, 200).map((x) => h('tr', {},
         h('td', { class: 'num' }, clockTime(x.at)), h('td', {}, x.artist ? `${x.artist} – ${x.title}` : x.title), h('td', {}, h('span', { class: 'tag' }, x.category)))),
       'Noch nichts gespielt.'));
-    root.replaceChildren(h('div', { class: 'view-grid' }, jobs, clock, rotation, clockTpl, preflightPanel, sched, pls, hist));
+    sched.classList.add('planning-schedule');
+    root.replaceChildren(
+      h('div', { class: 'planning-hero' },
+        h('div', {}, h('strong', {}, 'Sendeplanung'), h('span', {}, 'Sendungen, Sendeuhr, Rotation und Preflight in einer Arbeitsfläche')),
+        h('button', { class: 'btn small primary', onclick: runPreflight }, 'Preflight prüfen')),
+      h('div', { class: 'view-grid planning-workspace' }, sched, jobs, clock, rotation, clockTpl, preflightPanel, pls, hist)
+    );
   }
 
   /** Sendeplan als Wochengitter: Sendungen ziehen (Zeit/Tag), unteren Rand ziehen (Dauer), Playlist hineinziehen (neu). */
