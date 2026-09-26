@@ -52,6 +52,10 @@ button, select, input, textarea { font: inherit; color: inherit; }
 .nav { display: flex; flex-direction: column; gap: 2px; }
 .nav button, .nav a.nav-link { text-decoration: none; }
 .nav button, .nav a.nav-link { display: flex; align-items: center; gap: 10px; width: 100%; background: none; border: 1px solid transparent; border-radius: 9px; padding: 8px 10px; color: #b6c4de; cursor: pointer; text-align: left; }
+/* Label als eigenes Flex-Kind: ohne min-width:0 kann Text in einer Flex-Reihe nicht schrumpfen und
+   überläuft statt sauber abzuschneiden - bei längeren Bezeichnungen wirkte das neben dem Tastenkürzel
+   (<kbd>) wie zusammenhangloses Zeichengewirr. */
+.nav button span, .nav a.nav-link span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .nav a.nav-link:hover, .nav button:hover { background: rgba(47, 140, 255, .08); color: #fff; }
 .nav button[aria-pressed="true"] { background: linear-gradient(90deg, rgba(47, 140, 255, .35), rgba(47, 140, 255, .12)); border-color: rgba(47, 140, 255, .45); color: #fff; box-shadow: 0 0 18px rgba(47, 140, 255, .18) inset; }
 .nav-badge { margin-left: auto; background: #ff3b5c; color: #fff; font-size: 10px; font-weight: 700; border-radius: 8px; padding: 1px 6px; text-transform: uppercase; }
@@ -329,6 +333,9 @@ dialog h3 { margin: 0 0 12px; font-size: 15px; }
 @media (max-width: 900px) {
   .sidebar { position: fixed; z-index: 20; inset: 0 auto 0 0; transform: translateX(-100%); transition: transform .2s; }
   .sidebar.open { transform: none; box-shadow: 20px 0 60px rgba(0, 0, 0, .6); }
+  /* Tastenkürzel (Alt+1 …) sind ohne Tastatur nutzlos und kosten hier nur Platz neben ohnehin schon
+     schmalen Bezeichnungen. */
+  .nav kbd { display: none; }
   .top .mobile-only { display: inline-flex; }
   .top-actions { margin-left: 0; width: 100%; order: 5; overflow-x: auto; }
   .clock { margin-left: auto; }
