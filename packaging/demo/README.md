@@ -1,16 +1,12 @@
 # AirDeck-Demo (öffentliche Testinstanz)
 
-Eine bewusst abgetrennte, harmlose Instanz von AirDeck zum Ausprobieren - **keine echte Sendung**,
-**keine Dauerautomation**, **setzt sich automatisch alle 10 Minuten zurück**. Läuft auf demselben
-Server wie die Windows/Linux/Docker-Pakete, aber komplett getrennt von einer echten AirDeck-Installation
-(eigene Container, eigenes Docker-Volume, eigener Port).
+Eine bewusst abgetrennte AirDeck-Testinstanz zum Ausprobieren. Sie **setzt sich automatisch alle 10 Minuten zurück** und ist vollständig von produktiven AirDeck-Installationen getrennt (eigener Container, eigenes Volume, eigener Port).
 
-## Warum sie keine echte Dauersendung kann
+## Vollfunktions-Demo
 
-[`Dockerfile.demo`](Dockerfile.demo) baut das Image bewusst **ohne ffmpeg**. Ohne ffmpeg gibt es kein
-Server-seitiges 24/7-Playout und kein echtes Streaming zu Icecast/laut.fm - das Studio lässt sich trotzdem
-komplett ansehen und bedienen (Decks, Cardwall, Queue, Sendeplan, Einstellungen, Hörerbereich), nur eben
-ohne dass daraus eine echte, dauerhafte Radiosendung wird.
+Das Demo-Image enthält jetzt **ffmpeg und einen nur containerintern erreichbaren Icecast**. Nach jedem Reset werden automatisch ein AirDeckCast-Ausgang (MP3 128 kbit/s), HLS, synthetische Testmedien und Server-Automation eingerichtet. Dadurch lassen sich Encoder, Decks, Queue, Medienverwaltung, Automation, HLS und Stream-Status real ausprobieren, ohne produktive Streaming-Zugangsdaten zu verwenden.
+
+Externe Integrationen wie laut.fm, Nextcloud oder Cloud-KI bleiben naturgemäß von eigenen Zugangsdaten bzw. externen Diensten abhängig. Die öffentliche Demo erhält bewusst keine produktiven Secrets.
 
 ## Einrichtung (einmalig)
 
@@ -33,9 +29,7 @@ ohne dass daraus eine echte, dauerhafte Radiosendung wird.
    ```
    */10 * * * * /opt/airdeck-demo/packaging/demo/reset-demo.sh >> /var/log/airdeck-demo-reset.log 2>&1
    ```
-   [`reset-demo.sh`](reset-demo.sh) löscht dabei **alle** Daten (Container + Volume weg, komplett neu
-   erzeugt) und legt danach automatisch wieder einen Beispielsender „AirDeck-FM" mit Hörerbereich an,
-   damit die Demo nicht als leerer Einrichtungsassistent dasteht.
+   [`reset-demo.sh`](reset-demo.sh) löscht dabei **alle** Daten (Container + Volume weg, komplett neu erzeugt) und legt danach automatisch wieder „AirDeck-FM“, Testmedien, HLS, den internen AirDeckCast/Icecast-Ausgang und den Demo-Zugang an.
 
 ## Zugang für Besucher
 
