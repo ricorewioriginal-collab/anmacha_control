@@ -1,7 +1,7 @@
 // Planung: Playlists, Zeitplan-Jobs, Stunden-Uhr, Sendeplan und deren Ausführung im Takt des Kerns.
 
 import type { AirDeckApp } from '../app.ts';
-import { pickNext as pickFromPool, type MediaItem } from '../../core/automation.ts';
+import { pickNext as pickFromPool, shuffleSeparated, type MediaItem } from '../../core/automation.ts';
 import {
   activeWindow, clockDue, dueJobs, nextOccurrence, validateClock, validateWindow,
   type ClockEvent, type JobTarget, type ProgramPlan, type Repeat, type ScheduledJob,
@@ -275,23 +275,4 @@ export class PlanningService {
       if (!recPlan && active?.rec.planId) this.app.svc.recorder.stopRecording(stationId);
     }
   }
-}
-
-/**
- * Fisher-Yates-Shuffle, danach ein Durchgang, der direkt aufeinanderfolgende Titel desselben
- * Interpreten so weit möglich auflöst (Tausch mit dem nächsten passenden Titel) - kein naiver
- * Zufall, aber auch keine vollständige Rotations-Engine (die ist ein eigener, größerer Punkt).
- */
-export function shuffleSeparated(items: string[], artistOf: (id: string) => string): string[] {
-  const order = [...items];
-  for (let i = order.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [order[i], order[j]] = [order[j]!, order[i]!];
-  }
-  for (let i = 1; i < order.length; i++) {
-    if (artistOf(order[i]!) !== artistOf(order[i - 1]!) || !artistOf(order[i]!)) continue;
-    const j = order.findIndex((id, k) => k > i && artistOf(id) !== artistOf(order[i - 1]!));
-    if (j !== -1) [order[i], order[j]] = [order[j]!, order[i]!];
-  }
-  return order;
 }

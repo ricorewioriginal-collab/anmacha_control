@@ -1031,8 +1031,11 @@ export class AirDeckApp {
     return m;
   }
 
+  /** Queue mischen - nicht naiv: Interpreten werden so weit möglich getrennt (siehe PlayQueue.shuffleSeparated). */
   shuffleQueue(stationId: string): void {
-    this.rt(stationId).queue.shuffle();
+    const rt = this.rt(stationId);
+    const byId = new Map(rt.data.library.map((m) => [m.id, m]));
+    rt.queue.shuffleSeparated((mediaId) => byId.get(mediaId)?.artist ?? '');
     this.publishQueue(stationId);
   }
 

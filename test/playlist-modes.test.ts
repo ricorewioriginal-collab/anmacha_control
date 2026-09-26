@@ -8,7 +8,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { AirDeckApp } from '../src/server/app.ts';
-import { shuffleSeparated } from '../src/server/services/planning.ts';
+import { shuffleSeparated } from '../src/core/automation.ts';
 
 function setup() {
   const dir = mkdtempSync(join(tmpdir(), 'airdeck-plmode-'));

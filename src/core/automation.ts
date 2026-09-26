@@ -119,6 +119,26 @@ export function parseFileName(file: string): { artist: string; title: string } {
  * history: zuletzt gespielte Media-IDs, neueste zuerst.
  * Regeln werden schrittweise gelockert, damit die Automation nie stehen bleibt.
  */
+/**
+ * Fisher-Yates-Shuffle, danach ein Durchgang, der direkt aufeinanderfolgende Einträge desselben
+ * Interpreten so weit möglich auflöst (Tausch mit dem nächsten passenden Eintrag) - kein naiver
+ * Zufall, aber auch keine vollständige Rotations-Engine (die ist ein eigener, größerer Punkt).
+ * Wird sowohl für Playlist-Shuffle als auch für "Queue mischen" verwendet (eine Umsetzung).
+ */
+export function shuffleSeparated(items: string[], artistOf: (id: string) => string, random: () => number = Math.random): string[] {
+  const order = [...items];
+  for (let i = order.length - 1; i > 0; i--) {
+    const j = Math.floor(random() * (i + 1));
+    [order[i], order[j]] = [order[j]!, order[i]!];
+  }
+  for (let i = 1; i < order.length; i++) {
+    if (artistOf(order[i]!) !== artistOf(order[i - 1]!) || !artistOf(order[i]!)) continue;
+    const j = order.findIndex((id, k) => k > i && artistOf(id) !== artistOf(order[i - 1]!));
+    if (j !== -1) [order[i], order[j]] = [order[j]!, order[i]!];
+  }
+  return order;
+}
+
 export function pickNext(
   library: readonly MediaItem[],
   category: MediaCategory,
@@ -232,7 +252,18 @@ export class PlayQueue {
     this.items = [];
   }
 
-  /** Reihenfolge zufällig mischen (Fisher-Yates). */
+  /**
+   * Reihenfolge mischen, aber nicht naiv: direkt aufeinanderfolgende Titel desselben Interpreten
+   * werden so weit möglich aufgelöst (siehe shuffleSeparated). @param artistOf liefert den
+   * Interpreten zu einer Medien-ID (aus der Bibliothek des Senders).
+   */
+  shuffleSeparated(artistOf: (mediaId: string) => string): void {
+    const byUid = new Map(this.items.map((e) => [e.uid, e]));
+    const order = shuffleSeparated(this.items.map((e) => e.uid), (uid) => artistOf(byUid.get(uid)!.mediaId));
+    this.items = order.map((uidVal) => byUid.get(uidVal)!);
+  }
+
+  /** Reihenfolge zufällig mischen (Fisher-Yates, naiv - für Sonderfälle, siehe shuffleSeparated für die Queue-Aktion). */
   shuffle(random: () => number = Math.random): void {
     for (let i = this.items.length - 1; i > 0; i--) {
       const j = Math.floor(random() * (i + 1));
