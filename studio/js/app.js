@@ -1073,6 +1073,32 @@ async function togglePfl(id) {
 
 // ---------- Render: Cardwall ----------
 
+/** Lokales Cardwall-Vorhören: läuft ausschließlich im Browser/CUE-Ausgang und niemals auf Sendung. */
+let cartPfl = /** @type {{ mediaId: string, el: HTMLAudioElement, btn: HTMLElement } | null} */ (null);
+
+function stopCartPfl() {
+  if (!cartPfl) return;
+  cartPfl.el.pause();
+  cartPfl.el.src = '';
+  cartPfl.btn.setAttribute('aria-pressed', 'false');
+  cartPfl = null;
+}
+
+/** @param {any} media @param {HTMLElement} btn */
+async function toggleCartPfl(media, btn) {
+  if (!media) return;
+  if (cartPfl?.mediaId === media.id) return stopCartPfl();
+  stopCartPfl();
+  const el = new Audio(api.mediaUrl(S.station.id, media.id));
+  el.volume = Number(/** @type {HTMLInputElement} */ ($('fx-pfl')).value);
+  await applySink(el, pref(AUDIO_PREF.cue));
+  el.addEventListener('ended', stopCartPfl, { once: true });
+  el.addEventListener('error', () => { stopCartPfl(); status('Cardwall-Vorhören nicht möglich', true); }, { once: true });
+  cartPfl = { mediaId: media.id, el, btn };
+  btn.setAttribute('aria-pressed', 'true');
+  await el.play().catch(() => { stopCartPfl(); status('Cardwall-Vorhören nicht möglich', true); });
+}
+
 const GROUP_ICON = /** @type {Record<string, string>} */ ({ Jingles: 'jingle', Sweeper: 'sweeper', 'Station IDs': 'id', Drops: 'drop', News: 'news', Werbung: 'ad', TTS: 'tts', Voice: 'voice', Humor: 'humor', Events: 'event' });
 
 function renderCarts() {
@@ -1095,6 +1121,16 @@ function renderCarts() {
       h('div', { class: 'cart-top' }, h('span', { class: 'cart-ico' }, icon(ico, 16)), h('span', { class: 'cart-label' }, c.label)),
       h('span', { class: 'cart-sub' }, m ? m.title : 'leer'),
       m ? h('span', { class: 'cart-dur' }, fmt(m.durationMs)) : null,
+      m ? h('div', { class: 'cart-actions' },
+        h('button', {
+          class: 'cart-play', title: 'Auf Sendung abspielen', 'aria-label': 'Cart auf Sendung abspielen',
+          onclick: (/** @type {Event} */ e) => { e.stopPropagation(); fireCart(c); },
+        }, icon('play', 14)),
+        h('button', {
+          class: 'cart-cue', title: 'Lokal vorhören (CUE, nicht auf Sendung)', 'aria-label': 'Cart lokal vorhören',
+          'aria-pressed': 'false',
+          onclick: (/** @type {Event} */ e) => { e.stopPropagation(); void toggleCartPfl(m, /** @type {HTMLElement} */ (e.currentTarget)); },
+        }, icon('headphones', 14))) : null,
       h('button', { class: 'cart-edit', title: 'Cart bearbeiten', onclick: (/** @type {Event} */ e) => { e.stopPropagation(); editCart(c); } }, '⋯'),
     );
     dropTarget(el, async (dt) => {
