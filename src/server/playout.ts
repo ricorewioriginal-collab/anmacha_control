@@ -800,7 +800,9 @@ export class Playout {
   }
 
   private mixFrames(m: MediaItem, total: number | null): number {
-    const base = m.segueMs ?? (m.category === 'music' ? this.opts.crossfadeMs : 0);
+    // Externe Stream-URLs (category 'stream') sollen genau wie Musik sauber ein-/ausgeblendet werden,
+    // nicht hart geschnitten - ein Sender kann eine Stream-Übernahme jederzeit als Programminhalt einplanen.
+    const base = m.segueMs ?? (m.category === 'music' || m.category === 'stream' ? this.opts.crossfadeMs : 0);
     return msToFrames(total ? Math.min(base, framesToMs(total) / 2) : base);
   }
 
