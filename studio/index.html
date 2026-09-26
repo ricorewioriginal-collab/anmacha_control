@@ -141,6 +141,18 @@
     <!-- Studio-Arbeitsbereich (Decks, Cardwall, Queue, Live) - nicht das Dashboard -->
     <main class="dash" id="view-studio" hidden>
       <div class="dash-main">
+        <div class="studio-titlebar" aria-label="Live Studio">
+          <div class="studio-title">
+            <i data-icon="stream" data-size="18"></i>
+            <strong>Live Studio</strong>
+            <span class="studio-live-chip"><span class="dot"></span> Studio</span>
+          </div>
+          <div class="studio-title-actions">
+            <button class="btn small" data-jump="work-panel"><i data-icon="list" data-size="14"></i> Queue</button>
+            <button class="btn small" data-jump="carts-panel"><i data-icon="grid" data-size="14"></i> Cardwall</button>
+            <button class="btn small" data-view="planning"><i data-icon="calendar" data-size="14"></i> Sendeplan</button>
+          </div>
+        </div>
         <section class="m-home" aria-label="Mobil-Übersicht">
           <div class="m-np">
             <div class="cover big" id="m-cover"></div>
